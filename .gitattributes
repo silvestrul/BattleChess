@@ -1,0 +1,25 @@
+# Normalise line endings in the repository to LF, check out native.
+#
+# Without this, a file written on Windows and touched on Linux shows up as
+# entirely rewritten, which makes every review useless. Content files matter
+# most here: terrain.cfg and the map files are parsed line by line, and are
+# meant to be edited by hand by people who are not running Windows.
+* text=auto
+
+# Unity's own formats are YAML text and merge better when treated as such.
+*.meta   text
+*.asset  text
+*.unity  text
+*.prefab text
+
+# Anything that is not text, said explicitly so it is never mangled.
+*.png  binary
+*.jpg  binary
+*.psd  binary
+*.wav  binary
+*.ogg  binary
+*.mp3  binary
+*.fbx  binary
+*.blend binary
+*.dll  binary
+*.unitypackage binary

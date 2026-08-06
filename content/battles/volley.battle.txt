@@ -1,0 +1,75 @@
+# Volley — a test scenario for shooting.
+#
+# Every pair starts at the edge of archer range, so the whole approach happens
+# under fire. The question each time is how much of the attacker is left when it
+# finally arrives.
+#
+#   0 Swordsmen (line)   vs  1 Archers    infantry crossing 180 m: about ten volleys
+#   2 Cavalry            vs  3 Archers    the same ground in three
+#   4 Swordsmen (loose)  vs  5 Archers    spread out, and much harder to hit
+#   6 Swordsmen (square) vs  7 Artillery  packed tight in front of the guns
+#
+# Pairs 0 and 4 are the point: identical regiments, identical approach, and the
+# only difference is how they are standing.
+#
+# Try:  fight volley 0 1 --pursue     fight volley 4 5 --pursue
+
+name = Volley Tests
+map  = valley
+seed = 99
+
+[army 0]
+name = Attackers
+
+[army 1]
+name = Shooters
+
+# ---- Infantry in line, the long walk -------------------------------------
+
+[deploy 0]
+type   = swordsmen
+at     = 10,3
+facing = east
+
+[deploy 1]
+type   = archers
+at     = 18,3
+facing = west
+
+# ---- Cavalry, the short one ----------------------------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 10,8
+facing = east
+
+[deploy 1]
+type   = archers
+at     = 18,8
+facing = west
+
+# ---- Same infantry, spread out -------------------------------------------
+
+[deploy 0]
+type      = swordsmen
+at        = 10,13
+facing    = east
+formation = loose
+
+[deploy 1]
+type   = archers
+at     = 18,13
+facing = west
+
+# ---- Square in front of guns: the worst place to be ----------------------
+
+[deploy 0]
+type      = swordsmen
+at        = 10,18
+facing    = east
+formation = square
+
+[deploy 1]
+type   = artillery
+at     = 18,18
+facing = west

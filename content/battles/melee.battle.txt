@@ -1,0 +1,75 @@
+# Melee — a test scenario for the damage rule.
+#
+# Pairs deployed 30 m apart, already touching, so combat begins immediately and
+# nothing has to be manoeuvred first.
+#
+#   0 Spearmen  vs  1 Swordsmen   the even line fight the rate is calibrated on
+#   2 Cavalry   vs  3 Archers     what cavalry is for
+#   4 Cavalry   vs  5 Spearmen    what cavalry must never do
+#   6 Spearmen  vs  7 Spearmen    600 against 200: three to one, and even
+#
+# The last pair is the one worth watching. Both present 30 m of contact, so both
+# fight with the same number of men, and the extra 400 stand idle. That is why
+# envelopment exists.
+#
+# Try:  fight melee 0 1     fight melee 2 3     fight melee 6 7
+
+name = Melee Tests
+map  = valley
+seed = 4242
+
+[army 0]
+name = Blue
+
+[army 1]
+name = Red
+
+# ---- The calibration fight -----------------------------------------------
+
+[deploy 0]
+type   = spearmen
+at     = 17,3
+facing = east
+
+[deploy 1]
+type   = swordsmen
+at     = 18,3
+facing = west
+
+# ---- Cavalry against something that cannot answer ------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 17,8
+facing = east
+
+[deploy 1]
+type   = archers
+at     = 18,8
+facing = west
+
+# ---- Cavalry against the thing that eats cavalry -------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 17,13
+facing = east
+
+[deploy 1]
+type   = spearmen
+at     = 18,13
+facing = west
+
+# ---- Three to one, and it makes no difference ----------------------------
+
+[deploy 0]
+type     = spearmen
+strength = 600
+at       = 17,18
+facing   = east
+
+[deploy 1]
+type     = spearmen
+strength = 200
+at       = 18,18
+facing   = west

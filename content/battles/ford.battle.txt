@@ -1,0 +1,100 @@
+# The Fight for the Ford
+#
+# Both sides want the only crossing artillery can use. Everything else can wade
+# the river, slowly and at a defensive penalty, so the ford is worth more to the
+# guns than to anyone else — and both armies know it.
+#
+# Positions are authored map cells (column,row), matching what `map valley`
+# draws. Facing accepts compass points or degrees.
+#
+# The seed is what makes this verifiable: publish this file and the seed, and
+# anyone can re-run the battle and get an identical result.
+
+name = The Fight for the Ford
+map  = valley
+seed = 20260804
+
+[army 0]
+name = Northern Alliance
+
+[army 1]
+name = Southern League
+
+# ---- Northern Alliance, west bank, advancing east ------------------------
+
+# Cavalry out on the northern flank, on open ground where it is worth having.
+[deploy 0]
+type   = cavalry
+at     = 12,3
+facing = east
+
+[deploy 0]
+type   = spearmen
+at     = 10,7
+facing = east
+
+[deploy 0]
+type   = swordsmen
+at     = 10,11
+facing = east
+
+# Archers behind the swordsmen, shooting over the line.
+[deploy 0]
+type   = archers
+at     = 8,11
+facing = east
+
+# On the road, because wheels have nowhere else to be.
+[deploy 0]
+type   = artillery
+at     = 5,11
+facing = east
+
+# Scouts wide to the south, watching the flank rather than fighting.
+[deploy 0]
+type   = scouts
+at     = 14,16
+facing = east
+
+# ---- Southern League, east bank, advancing west --------------------------
+
+[deploy 1]
+type   = cavalry
+at     = 27,3
+facing = west
+
+[deploy 1]
+type   = spearmen
+at     = 27,7
+facing = west
+
+[deploy 1]
+type   = swordsmen
+at     = 30,11
+facing = west
+
+[deploy 1]
+type   = archers
+at     = 32,11
+facing = west
+
+[deploy 1]
+type   = artillery
+at     = 36,11
+facing = west
+
+# A weaker scout screen, raised under strength to show sizes are free.
+[deploy 1]
+type     = scouts
+strength = 60
+at       = 25,16
+facing   = west
+
+# Raised in column rather than line: narrow enough to thread the gap between
+# the forest and the river, at the cost of presenting almost no frontage if
+# something catches it there.
+[deploy 1]
+type      = swordsmen
+at        = 24,14
+facing    = west
+formation = column

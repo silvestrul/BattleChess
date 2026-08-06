@@ -1,0 +1,76 @@
+# The Charge — a test scenario for the cavalry counter.
+#
+# Four identical spearmen regiments, differing only in the order they stand in,
+# each with a cavalry regiment lined up 400 m away to charge it. Same men, same
+# stats, every time — the only variable is how they are standing.
+#
+#   unit 0 cavalry -> unit 1 spearmen in LINE     stopping 2.00  ->  STOPPED
+#   unit 2 cavalry -> unit 3 spearmen in SQUARE   stopping 3.20  ->  STOPPED
+#   unit 4 cavalry -> unit 5 spearmen in LOOSE    stopping 1.00  ->  THROUGH
+#   unit 6 cavalry -> unit 7 spearmen in COLUMN   stopping 1.20  ->  THROUGH
+#
+# Run them with:
+#   march charge 0 24,3     march charge 2 24,8
+#   march charge 4 24,13    march charge 6 24,18
+
+name = The Charge
+map  = valley
+seed = 1
+
+[army 0]
+name = Attackers
+
+[army 1]
+name = Defenders
+
+# ---- Line: the wall holds ------------------------------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 8,3
+facing = east
+
+[deploy 1]
+type      = spearmen
+at        = 24,3
+facing    = west
+formation = line
+
+# ---- Square: braced even harder ------------------------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 8,8
+facing = east
+
+[deploy 1]
+type      = spearmen
+at        = 24,8
+facing    = west
+formation = square
+
+# ---- Loose: no wall to present, and ridden down --------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 8,13
+facing = east
+
+[deploy 1]
+type      = spearmen
+at        = 24,13
+facing    = west
+formation = loose
+
+# ---- Column: deep, narrow, and no better off -----------------------------
+
+[deploy 0]
+type   = cavalry
+at     = 8,18
+facing = east
+
+[deploy 1]
+type      = spearmen
+at        = 24,18
+facing    = west
+formation = column

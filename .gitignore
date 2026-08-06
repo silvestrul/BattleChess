@@ -1,0 +1,30 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Unity
+unity/**/Library/
+unity/**/Temp/
+unity/**/Obj/
+unity/**/Build/
+unity/**/Builds/
+unity/**/Logs/
+unity/**/UserSettings/
+unity/**/MemoryCaptures/
+unity/**/Recordings/
+*.csproj.user
+
+# Unity regenerates these whenever the project is opened in an IDE. Scoped to
+# unity/ so the hand-written projects under core/ are still tracked.
+unity/**/*.csproj
+unity/**/*.sln
+unity/**/sysinfo.txt
+unity/**/crashlytics-build.properties
+
+# Test / tooling output
+TestResults/
+*.trx
+artifacts/

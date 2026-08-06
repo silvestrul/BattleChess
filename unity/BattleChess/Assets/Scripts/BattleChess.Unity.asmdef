@@ -1,0 +1,17 @@
+{
+  "name": "BattleChess.Unity",
+  "rootNamespace": "BattleChess.Unity",
+  "references": [
+    "BattleChess.Contracts",
+    "BattleChess.Rules"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

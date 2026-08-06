@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/core/">
+    <Project Path="core/BattleChess.Cli/BattleChess.Cli.csproj" />
+    <Project Path="core/BattleChess.Contracts/BattleChess.Contracts.csproj" />
+    <Project Path="core/BattleChess.Core.Tests/BattleChess.Core.Tests.csproj" />
+    <Project Path="core/BattleChess.Rules/BattleChess.Rules.csproj" />
+  </Folder>
+</Solution>

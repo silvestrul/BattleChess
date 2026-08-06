@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compiles the exact same source files Unity compiles via the local UPM
+    package. One source of truth, two toolchains, no DLL copying and no
+    Windows junctions for git to mangle.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>BattleChess.Contracts</AssemblyName>
+    <RootNamespace>BattleChess.Contracts</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(PackageRootPath)\Contracts\**\*.cs" />
+  </ItemGroup>
+
+</Project>

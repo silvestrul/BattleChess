@@ -1,0 +1,20 @@
+{
+  "name": "BattleChess.Unity.Editor",
+  "rootNamespace": "BattleChess.Unity.Editor",
+  "references": [
+    "BattleChess.Unity",
+    "BattleChess.Contracts",
+    "BattleChess.Rules"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Shared settings for every .NET project in the solution.
+
+    The gameplay assemblies (Contracts, Rules) target netstandard2.1 and pin
+    LangVersion to 9.0 because that is what Unity 6 supports. Anything newer
+    would compile here and fail inside the editor, which is exactly the class
+    of bug the shared-source layout exists to prevent.
+  -->
+
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors>CS8600;CS8602;CS8603;CS8618</WarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PackageRootPath>$(MSBuildThisFileDirectory)packages\com.battlechess.core\Runtime</PackageRootPath>
+  </PropertyGroup>
+
+</Project>

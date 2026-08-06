@@ -1,0 +1,82 @@
+# The Standoff — a test scenario for stances.
+#
+# Pairs deployed 75 m apart: close enough that each side is already aware of the
+# other, so a standing unit's stance decides what happens without anyone giving
+# an order. That is the point of a stance — it governs the contact you did not
+# plan for.
+#
+#   0 Scouts    vs  1 Cavalry     light troops with something dangerous nearby
+#   2 Spearmen  vs  3 Swordsmen   line infantry facing off
+#   4 Artillery vs  5 Scouts      guns with a raider in reach
+#   6 Swordsmen vs  7 Spearmen    already locked together at 25 m
+#
+# Rows are 125 m apart so that no two friendly regiments overlap — frontages run
+# to 100 m, and units sharing ground disorder each other once they start moving.
+#
+# Try:
+#   stance standoff 0 evade              scouts back away from the cavalry
+#   stance standoff 0 aggressive         scouts close with it instead, unwisely
+#   stance standoff 4 evade              guns withdraw, and are too slow
+#   stance standoff 6 defend --to 10,18  locked unit withdraws west, allowed
+#   stance standoff 6 defend --to 30,18  same unit blocked from marching through
+
+name = The Standoff
+map  = valley
+seed = 7
+
+[army 0]
+name = Blue
+
+[army 1]
+name = Red
+
+# ---- Light troops within reach of cavalry --------------------------------
+
+[deploy 0]
+type   = scouts
+at     = 18,3
+facing = east
+
+[deploy 1]
+type   = cavalry
+at     = 21,3
+facing = west
+
+# ---- Line infantry facing off --------------------------------------------
+
+[deploy 0]
+type   = spearmen
+at     = 18,8
+facing = east
+
+[deploy 1]
+type   = swordsmen
+at     = 21,8
+facing = west
+
+# ---- Guns with a raider in reach -----------------------------------------
+
+[deploy 0]
+type   = artillery
+at     = 18,13
+facing = east
+
+[deploy 1]
+type   = scouts
+at     = 21,13
+facing = west
+
+# ---- Already locked together, 25 m apart ---------------------------------
+#
+# Both start inside the other's zone of control, which is the awkward case: a
+# unit here must still be able to back out, or it is trapped for good.
+
+[deploy 0]
+type   = swordsmen
+at     = 18,18
+facing = east
+
+[deploy 1]
+type   = spearmen
+at     = 19,18
+facing = west
