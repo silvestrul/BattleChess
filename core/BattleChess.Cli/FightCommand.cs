@@ -89,6 +89,7 @@ namespace BattleChess.Cli
             }
 
             var clock = new BattleClock()
+                .Add(new VisionSystem())
                 .Add(new OrderSystem(new DirectPathfinder(map.Terrain, movement, terrain)))
                 .Add(new ContactSystem())
                 .Add(new MovementSystem())

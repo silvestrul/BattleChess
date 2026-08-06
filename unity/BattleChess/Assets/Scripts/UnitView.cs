@@ -116,7 +116,14 @@ namespace BattleChess.Unity
             // Z rotation.
             transform.rotation = Quaternion.Euler(0f, 0f, facing.Degrees);
 
-            _body.transform.localScale = new Vector3(footprint.Depth, footprint.Width, 1f);
+            // Drawn no thinner than a shape you can actually see and click. A
+            // regiment in line is a hundred metres wide and four deep, which at
+            // any sensible zoom is a hairline. Cosmetic only — every rule still
+            // uses the true footprint, so nothing fights or collides differently
+            // for being drawn thicker.
+            float drawnDepth = Mathf.Max(footprint.Depth, BattlefieldController.ClickableDepthMetres);
+
+            _body.transform.localScale = new Vector3(drawnDepth, footprint.Width, 1f);
 
             // Fade with losses, so a mauled regiment reads as mauled even before
             // you notice it has narrowed.
@@ -145,8 +152,10 @@ namespace BattleChess.Unity
             bool wheeling = offByDegrees > 8f;
             float edgeThickness = wheeling ? 7f : 3f;
 
+            // Sits on the front of the drawn body, not the true one, or it floats
+            // inside a regiment that is being drawn thicker than it is.
             _frontEdge.transform.localScale = new Vector3(edgeThickness, footprint.Width, 1f);
-            _frontEdge.transform.localPosition = new Vector3((footprint.Depth - edgeThickness) * 0.5f, 0f, 0f);
+            _frontEdge.transform.localPosition = new Vector3((drawnDepth - edgeThickness) * 0.5f, 0f, 0f);
 
             _frontEdge.color = wheeling
                 ? Color.Lerp(new Color(1f, 0.75f, 0.2f), new Color(1f, 0.35f, 0.1f), Mathf.InverseLerp(8f, 120f, offByDegrees))

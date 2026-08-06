@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using BattleChess.Contracts;
 using UnityEngine;
 
@@ -19,11 +21,33 @@ namespace BattleChess.Unity
         private Vector2 _scroll;
         private bool _stickToBottom = true;
 
+        private StreamWriter _file;
+        private int _written;
+
         public bool ShowInfo = true;
         public bool ShowDecisions = true;
 
+        /// <summary>Where the current recording is being written, if any.</summary>
+        public string RecordingPath { get; private set; }
+
+        public bool IsRecording => _file != null;
+
+        /// <summary>Turns the clock number into the log, so entries can be placed in time.</summary>
+        public int Tick { get; set; }
+
         public void Record(in BattleLogEntry entry)
         {
+            // Written through as it happens rather than dumped at the end. The
+            // on-screen console is a trimmed ring — it drops the oldest quarter
+            // once it fills — and the interesting part of a movement problem is
+            // usually what happened before anybody noticed.
+            if (_file != null)
+            {
+                string unit = entry.Unit.IsValid ? entry.Unit.ToString() : "-";
+                _file.WriteLine($"{Tick,6} {Prefix(entry.Level)} {entry.Category,-9} {unit,-5} {entry.Message}");
+                _written++;
+            }
+
             // A ring by trimming: a long session should not grow without bound,
             // and the recent past is what matters when testing by hand.
             if (_entries.Count >= Capacity)
@@ -35,6 +59,54 @@ namespace BattleChess.Unity
 
         public void Clear() => _entries.Clear();
 
+        /// <summary>
+        /// Starts writing everything the simulation says to a file next to the
+        /// project.
+        /// </summary>
+        /// <remarks>
+        /// The console explains itself perfectly well on screen and not at all
+        /// anywhere else, which makes "here is what happened, what went wrong?"
+        /// impossible to answer without sitting at the same machine. A file can
+        /// be read by anyone.
+        /// </remarks>
+        public void StartRecording(string directory)
+        {
+            StopRecording();
+
+            try
+            {
+                Directory.CreateDirectory(directory);
+
+                RecordingPath = Path.Combine(directory, $"battle-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+
+                _file = new StreamWriter(RecordingPath, append: false) { AutoFlush = true };
+                _written = 0;
+
+                _file.WriteLine($"# Battle Chess log, started {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                _file.WriteLine("#  tick  level  category  unit  message");
+                _file.WriteLine();
+
+                Record(new BattleLogEntry(LogLevel.Info, "Log", $"Recording to {RecordingPath}", UnitId.None));
+            }
+            catch (Exception failure)
+            {
+                _file = null;
+                RecordingPath = null;
+
+                Record(new BattleLogEntry(LogLevel.Warning, "Log", $"Could not record: {failure.Message}", UnitId.None));
+            }
+        }
+
+        public void StopRecording()
+        {
+            if (_file == null) return;
+
+            _file.WriteLine($"# {_written} entries.");
+            _file.Flush();
+            _file.Dispose();
+            _file = null;
+        }
+
         public void Draw(Rect area)
         {
             GUILayout.BeginArea(area, GUI.skin.box);
@@ -44,8 +116,18 @@ namespace BattleChess.Unity
             ShowInfo = GUILayout.Toggle(ShowInfo, "info", GUILayout.Width(50));
             ShowDecisions = GUILayout.Toggle(ShowDecisions, "decisions", GUILayout.Width(80));
             GUILayout.FlexibleSpace();
+
+            if (GUILayout.Button(IsRecording ? "stop recording" : "record to file", GUILayout.Width(120)))
+            {
+                if (IsRecording) StopRecording();
+                else StartRecording(DefaultLogDirectory());
+            }
+
             if (GUILayout.Button("clear", GUILayout.Width(50))) Clear();
             GUILayout.EndHorizontal();
+
+            if (IsRecording)
+                GUILayout.Label($"writing {_written} entries to {RecordingPath}");
 
             _scroll = GUILayout.BeginScrollView(_scroll);
 
@@ -77,6 +159,28 @@ namespace BattleChess.Unity
             }
 
             GUILayout.EndArea();
+        }
+
+        /// <summary>
+        /// A <c>logs</c> folder beside the repository, next to <c>content</c>.
+        /// </summary>
+        /// <remarks>
+        /// Not inside <c>Assets</c>, or Unity imports every log as an asset and
+        /// reimports the project each time one is written.
+        /// </remarks>
+        public static string DefaultLogDirectory()
+        {
+            var directory = new DirectoryInfo(Application.dataPath);
+
+            while (directory != null)
+            {
+                if (Directory.Exists(Path.Combine(directory.FullName, "content")))
+                    return Path.Combine(directory.FullName, "logs");
+
+                directory = directory.Parent;
+            }
+
+            return Path.Combine(Application.persistentDataPath, "logs");
         }
 
         private static string Prefix(LogLevel level) => level switch

@@ -95,7 +95,15 @@ namespace BattleChess.Rules
         /// This unit's standing instruction for meeting the enemy. Persists
         /// until changed, so a reserve set to hold back stays that way.
         /// </summary>
-        public Stance Stance { get; set; } = Stance.Defend;
+        /// <remarks>
+        /// Advance by default, because that is what a player means by "go
+        /// there". Defending by default read as the game ignoring orders: a
+        /// regiment told to march would stop at the edge of an enemy's zone of
+        /// control — too far to fight, too close to be safe — and stand there
+        /// until it was shelled to pieces. Holding back is a decision, so it
+        /// should be one somebody made.
+        /// </remarks>
+        public Stance Stance { get; set; } = Stance.Advance;
 
         /// <summary>What this unit has been told to do.</summary>
         public UnitOrder Order { get; private set; } = UnitOrder.Stand();

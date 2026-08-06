@@ -25,10 +25,29 @@ namespace BattleChess.Rules
         private bool[] _seen = Array.Empty<bool>();
         private int _units;
 
+        /// <summary>
+        /// Whether anything has ever computed sightings for this battle.
+        /// </summary>
+        /// <remarks>
+        /// A battle run without a <see cref="VisionSystem"/> on its clock has no
+        /// fog at all, and everything that consults vision must behave as though
+        /// every regiment were plainly in view. The alternative — treating an
+        /// uncomputed state as "nobody can see anything" — silently stops every
+        /// shooter on the field and looks like a broken combat rule rather than
+        /// a missing system.
+        ///
+        /// This is not the thing that keeps a client honest. That is the
+        /// per-player projection, which is built from the fogged view and cannot
+        /// be short-circuited by a system being absent.
+        /// </remarks>
+        public bool InPlay { get; private set; }
+
         /// <summary>Recomputes every sighting from scratch.</summary>
         public void Recompute(BattleState battle)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
+
+            InPlay = true;
 
             int armies = battle.Armies.Count;
             int units = battle.AllUnits.Count;
@@ -72,6 +91,7 @@ namespace BattleChess.Rules
         {
             if (target.Owner == viewer) return true;
             if (!target.IsOnField) return false;
+            if (!InPlay) return true;
 
             int army = IndexOfArmy(battle, viewer);
             if (army < 0 || _units == 0) return false;

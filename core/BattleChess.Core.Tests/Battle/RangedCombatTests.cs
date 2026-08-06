@@ -1,3 +1,4 @@
+using System;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -186,7 +187,7 @@ namespace BattleChess.Tests.Battle
         // ---- Artillery -------------------------------------------------------
 
         [Fact]
-        public void ArtilleryOutrangesEverythingAndCannotBeAnswered()
+        public void ArtilleryCannotShootWhatNobodyHasSeen()
         {
             var field = new Battlefield("plains", 5200);
 
@@ -198,10 +199,46 @@ namespace BattleChess.Tests.Battle
 
             field.RunTurns(4);
 
+            Assert.Equal(0, archers.Casualties);
+        }
+
+        [Fact]
+        public void ArtilleryReachesAnythingItsArmyCanFind()
+        {
+            var field = new Battlefield("plains", 5200);
+
+            UnitInstance guns = field.Add(0, "artillery", field.Centre, Facing.East);
+            UnitInstance archers = field.Add(1, "archers", field.Centre + new Vec2(400f, 0f), Facing.West);
+
+            // The same guns, the same range — and a scout pushed forward far
+            // enough to lay eyes on the target. That is the whole difference,
+            // and it is what turns reach into something you have to work for.
+            UnitInstance scouts = field.Add(0, "scouts", field.Centre + new Vec2(200f, 0f), Facing.East);
+
+            Battlefield.Hold(guns);
+            Battlefield.Hold(archers);
+            Battlefield.Hold(scouts);
+
+            field.RunTurns(4);
+
             Assert.True(Battlefield.LostPercent(archers) > 0f,
-                "Guns at 400 m should be able to work on archers who cannot reach back.");
+                "With a spotter forward, guns should be able to work on archers who cannot reach back.");
 
             Assert.Equal(0, guns.Casualties);
+        }
+
+        [Fact]
+        public void GunsReachFurtherThanAnyPairOfEyesOnTheField()
+        {
+            float gunRange = TestContent.Unit("artillery").Get(UnitAttributes.Range);
+            float bestSight = 0f;
+
+            foreach (UnitDef unit in TestContent.Units.All)
+                bestSight = MathF.Max(bestSight, unit.Get(UnitAttributes.Vision));
+
+            Assert.True(gunRange > bestSight,
+                $"Artillery must outrange sight, or spotting for it is pointless: guns reach {gunRange:0} m, " +
+                $"the sharpest eyes on the field see {bestSight:0} m.");
         }
 
         [Fact]

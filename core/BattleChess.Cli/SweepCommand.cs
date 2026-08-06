@@ -292,6 +292,7 @@ namespace BattleChess.Cli
             b.GiveOrder(UnitOrder.Attack(a.Id), b.Position);
 
             var clock = new BattleClock()
+                .Add(new VisionSystem())
                 .Add(new OrderSystem(new DirectPathfinder(map, movement, terrain)))
                 .Add(new ContactSystem())
                 .Add(new MovementSystem())

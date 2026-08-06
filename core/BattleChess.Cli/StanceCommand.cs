@@ -61,6 +61,7 @@ namespace BattleChess.Cli
             // Orders decide, contact interrupts, movement carries out — in that
             // order, so a decision takes effect on the tick it is made.
             var clock = new BattleClock()
+                .Add(new VisionSystem())
                 .Add(new OrderSystem(pathfinder))
                 .Add(new ContactSystem())
                 .Add(new MovementSystem());

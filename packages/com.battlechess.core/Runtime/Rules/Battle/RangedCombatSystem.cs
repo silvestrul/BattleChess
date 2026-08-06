@@ -87,12 +87,24 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// Picks what to shoot at: the nearest enemy in range.
+        /// Picks what to shoot at: the nearest enemy in range that the army can
+        /// actually see.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Deliberately simple and deterministic. Choosing targets well is a
         /// judgement the AI should make through orders, not something the
         /// shooting rule should quietly do on everyone's behalf.
+        /// </para>
+        /// <para>
+        /// Vision is what makes reach worth anything rather than everything.
+        /// Artillery outranges every pair of eyes on the field by a wide margin,
+        /// so without this a battery bombards the far side of the map from the
+        /// opening minute, hitting regiments nobody has laid eyes on. Gated on
+        /// sight, that same reach becomes a reason to push scouts forward and
+        /// hold high ground — the guns can hit anything the army can find, and
+        /// nothing it cannot.
+        /// </para>
         /// </remarks>
         private static UnitInstance? ChooseTarget(BattleState battle, UnitInstance shooter, float range)
         {
@@ -103,6 +115,7 @@ namespace BattleChess.Rules
             {
                 if (other.Owner == shooter.Owner) continue;
                 if (!other.IsOnField) continue;
+                if (!battle.Vision.CanSee(battle, shooter.Owner, other)) continue;
 
                 float squared = Vec2.DistanceSquared(shooter.Position, other.Position);
 
@@ -144,6 +157,9 @@ namespace BattleChess.Rules
                         * (1f - armour)
                         * falloff
                         * target.FormationOrder.RangedVulnerability
+                        // How spread out these men are by their own nature,
+                        // whatever order they have been told to stand in.
+                        * target.Def.Get(UnitAttributes.RangedVulnerability)
                         // Where the target is standing matters as much as how.
                         // Woods hide them; a river crossing leaves them with
                         // nowhere to go and nothing to get behind.

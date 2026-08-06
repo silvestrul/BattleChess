@@ -178,6 +178,41 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
+        /// Whether two overlapping friends are forcing a way through each
+        /// other, as against simply moving together.
+        /// </summary>
+        /// <remarks>
+        /// The distinction the overlap cost turns on, and getting it wrong was
+        /// ruinous. Two regiments ordered onto the same enemy path to the same
+        /// point, arrive overlapping, and then chase the same routers along the
+        /// same line — overlapping every tick of it. Charged as a collision
+        /// that is a quarter of their cohesion per turn, so any attack pressed
+        /// by more than one regiment arrived with nothing left and fought at a
+        /// third of its strength. Sending more troops made the attack weaker.
+        ///
+        /// Marching together is a crowd, not a collision. Crossing somebody
+        /// else's line of march, or shouldering through a formation that is
+        /// standing, is the thing that actually costs order.
+        /// </remarks>
+        private static bool IsPushingThrough(UnitInstance unit, UnitInstance other)
+        {
+            // Both standing: drawn up shoulder to shoulder, which is free.
+            if (!unit.IsMarching && !other.IsMarching) return false;
+
+            // One standing, one moving: shouldering through a formed body.
+            if (!unit.IsMarching || !other.IsMarching) return true;
+
+            Vec2 heading = (unit.Route!.Target - unit.Position).Normalised();
+            Vec2 otherHeading = (other.Route!.Target - other.Position).Normalised();
+
+            if (heading.IsNearZero || otherHeading.IsNearZero) return false;
+
+            // Roughly the same way is a column. More than about sixty degrees
+            // apart and they are genuinely cutting across one another.
+            return Vec2.Dot(heading, otherHeading) < 0.5f;
+        }
+
+        /// <summary>
         /// Drains organization from units standing on top of one another.
         /// </summary>
         /// <remarks>
@@ -197,8 +232,7 @@ namespace BattleChess.Rules
                 if (!other.IsFighting) continue;
                 if (other.Owner != unit.Owner) continue;
 
-                // Standing together is free; forcing a way through is not.
-                if (!unit.IsMarching && !other.IsMarching) continue;
+                if (!IsPushingThrough(unit, other)) continue;
 
                 if (!OrientedRect.Overlaps(shape, other.Shape)) continue;
 

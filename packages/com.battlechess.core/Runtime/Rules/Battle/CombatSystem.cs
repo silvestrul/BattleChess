@@ -74,20 +74,69 @@ namespace BattleChess.Rules
         /// <summary>One-off shock from a charge landing.</summary>
         private const float ChargeShock = 0.05f;
 
+        /// <summary>
+        /// Organization torn out of a formation by a charge landing on it,
+        /// scaled by the charger's own weight.
+        /// </summary>
+        /// <remarks>
+        /// What a charge is actually for. Casualties alone never explained why
+        /// horsemen were worth three times their number in infantry: the point
+        /// of riding into a line is not the men you kill on impact but that the
+        /// line stops being a line. Cohesion carries the condition factor, the
+        /// formation bonus and the stopping power, so a shaken regiment is
+        /// worse at everything at once — including at stopping the next charge.
+        /// </remarks>
+        private const float ChargeDisorder = 0.12f;
+
         /// <summary>Shock from losing the exchange, however narrowly.</summary>
         private const float LosingExchangeShock = 0.01f;
 
         /// <summary>Shock per enemy beyond the first in contact.</summary>
         private const float OutnumberedShock = 0.01f;
 
+        /// <summary>
+        /// Organization lost per pulse for each enemy beyond the first.
+        /// </summary>
+        /// <remarks>
+        /// The real cost of being set upon from several directions, and the
+        /// reason concentrating force is worth the trouble. Frontage alone
+        /// cannot express it: a regiment divides its line among its attackers
+        /// and the raw exchange comes out roughly even, which would make
+        /// enveloping an enemy pointless.
+        ///
+        /// What actually happens is that a body of men fighting front, flank
+        /// and rear at once stops being a formation. It loses cohesion, and
+        /// cohesion is what its condition, its formation bonus and its stopping
+        /// power all rest on — so the collapse compounds rather than adding up.
+        /// </remarks>
+        private const float SurroundedDisorderPerPulse = 0.06f;
+
         /// <summary>Units already in contact, so a charge is only spent once.</summary>
         private readonly HashSet<long> _engaged = new HashSet<long>();
+
+        /// <summary>
+        /// Pairs that have touched at any point since the last pulse.
+        /// </summary>
+        /// <remarks>
+        /// A list rather than a set, kept in the order contacts were noticed, so
+        /// the same seed resolves the same fights in the same order.
+        /// </remarks>
+        private readonly List<long> _touched = new List<long>();
 
         public string Name => "Combat";
 
         public void Step(BattleState battle, int tick, IBattleLog log)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
+
+            // Contact is noticed every tick and settled on the pulse. Sampling
+            // only on the pulse meant a fast regiment could cross the whole
+            // contact zone in the gap between two of them and come out the far
+            // side untouched — cavalry at 4.8 m/s covers 48 m in a pulse
+            // against a contact window barely 29 m wide, so charging home a
+            // second and third time cost the enemy nothing at all.
+            NoteContacts(battle);
+
             if (tick % PulseIntervalTicks != 0) return;
 
             // Gather the pairs first, then resolve. Both sides of an exchange
@@ -98,6 +147,46 @@ namespace BattleChess.Rules
             foreach (UnitInstance unit in battle.UnitsOnField())
                 unit.EnemiesInContact = 0;
 
+            for (int i = 0; i < _touched.Count; i++)
+            {
+                long pair = _touched[i];
+
+                UnitInstance unit = battle.Get(new UnitId((int)(pair >> 32)));
+                UnitInstance other = battle.Get(new UnitId((int)(pair & 0xFFFFFFFF)));
+
+                if (!unit.IsFighting || !other.IsFighting) continue;
+
+                bool fresh = _engaged.Add(pair);
+
+                unit.EnemiesInContact++;
+                other.EnemiesInContact++;
+
+                exchanges.Add((unit, other, fresh));
+            }
+
+            _touched.Clear();
+
+            // Forget contacts that have broken, so re-engaging charges again.
+            _engaged.RemoveWhere(pair => !StillTouching(battle, pair));
+
+            // Once per unit per pulse, not once per exchange. Charging it per
+            // exchange made the cost grow with the square of the attackers and
+            // stripped a surrounded regiment of all cohesion inside half a turn.
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (unit.EnemiesInContact > 1)
+                    unit.Organization -= SurroundedDisorderPerPulse * (unit.EnemiesInContact - 1);
+            }
+
+            foreach ((UnitInstance a, UnitInstance b, bool charge) in exchanges)
+                Resolve(battle, a, b, charge, log);
+        }
+
+        /// <summary>
+        /// Records every enemy pair within reach of each other this tick.
+        /// </summary>
+        private void NoteContacts(BattleState battle)
+        {
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
                 if (!unit.IsFighting) continue;
@@ -112,20 +201,11 @@ namespace BattleChess.Rules
                     if (!OrderSystem.InContactWith(unit, other)) continue;
 
                     long pair = PairKey(unit.Id, other.Id);
-                    bool fresh = _engaged.Add(pair);
 
-                    unit.EnemiesInContact++;
-                    other.EnemiesInContact++;
-
-                    exchanges.Add((unit, other, fresh));
+                    if (!_touched.Contains(pair))
+                        _touched.Add(pair);
                 }
             }
-
-            // Forget contacts that have broken, so re-engaging charges again.
-            _engaged.RemoveWhere(pair => !StillTouching(battle, pair));
-
-            foreach ((UnitInstance a, UnitInstance b, bool charge) in exchanges)
-                Resolve(battle, a, b, charge, log);
         }
 
         private void Resolve(BattleState battle, UnitInstance a, UnitInstance b, bool charge, IBattleLog log)
@@ -135,8 +215,17 @@ namespace BattleChess.Rules
 
             if (aFighting <= 0 || bFighting <= 0) return;
 
-            int lossesToB = Casualties(battle, a, b, aFighting, bFighting, charge);
-            int lossesToA = Casualties(battle, b, a, bFighting, aFighting, charge);
+            // A charge is something a regiment does, not something that happens
+            // to it. Handing the bonus to both sides of a fresh contact meant a
+            // cavalry regiment standing still collected its full charge
+            // multiplier every time somebody walked into it — and a fresh one
+            // against each attacker as they arrived, so the more regiments were
+            // sent at it the more charges it received.
+            bool aCharges = charge && IsComingOn(a, b);
+            bool bCharges = charge && IsComingOn(b, a);
+
+            int lossesToB = Casualties(battle, a, b, aFighting, bFighting, aCharges);
+            int lossesToA = Casualties(battle, b, a, bFighting, aFighting, bCharges);
 
             int strengthA = a.Strength;
             int strengthB = b.Strength;
@@ -146,8 +235,14 @@ namespace BattleChess.Rules
 
             // Report what this exchange did to each side's willingness. The
             // morale system decides what it costs them.
-            RecordShock(a, b, lossesToA, lossesToB, strengthA, charge);
-            RecordShock(b, a, lossesToB, lossesToA, strengthB, charge);
+            // Each side is shaken by the charge the *other* one landed.
+            RecordShock(a, b, lossesToA, lossesToB, strengthA, bCharges);
+            RecordShock(b, a, lossesToB, lossesToA, strengthB, aCharges);
+
+            // And a charge tears at the formation it lands on, which is worth
+            // more than the men it kills.
+            if (aCharges) b.Organization -= ChargeDisorder * a.Def.Get(UnitAttributes.ChargeBonus);
+            if (bCharges) a.Organization -= ChargeDisorder * b.Def.Get(UnitAttributes.ChargeBonus);
 
             log.Decision("Combat",
                 $"{a.Def.DisplayName} ({aFighting} fighting) and {b.Def.DisplayName} ({bFighting} fighting) " +
@@ -208,6 +303,19 @@ namespace BattleChess.Rules
             unit.PendingMoraleShock += shock;
         }
 
+        /// <summary>
+        /// Whether this unit closed on the enemy under its own steam, rather
+        /// than having them arrive.
+        /// </summary>
+        /// <remarks>
+        /// Either still under way, or under orders to attack this particular
+        /// enemy — the second because contact clears the route the moment it is
+        /// made, so a regiment that has just charged home is no longer marching
+        /// by the time the exchange is worked out.
+        /// </remarks>
+        private static bool IsComingOn(UnitInstance unit, UnitInstance enemy) =>
+            unit.IsMarching || (unit.Order.Kind == OrderKind.Attack && unit.Order.Target == enemy.Id);
+
         private static void ReportDestruction(UnitInstance unit, IBattleLog log)
         {
             if (unit.State == UnitState.Destroyed)
@@ -215,16 +323,30 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// How many of a unit's men can actually reach the enemy.
+        /// How many of a unit's men can actually reach a given enemy.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Limited by the width the two units share, not by how many are
         /// present. A regiment wider than its opponent gains nothing from the
         /// overhang — those men have nobody in front of them.
+        /// </para>
+        /// <para>
+        /// And a regiment has <b>one</b> frontage, which it must divide among
+        /// everyone it is fighting. Without that division a defender set upon
+        /// by three enemies brought its whole line to bear against each of
+        /// them in turn — fighting three full battles at once and coming out
+        /// ahead of all three, which inverted the entire point of concentrating
+        /// force. Men committed to the regiment on the left are not
+        /// simultaneously fighting the one on the right.
+        /// </para>
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
-            float contactWidth = MathF.Min(unit.Footprint.Width, enemy.Footprint.Width);
+            float share = unit.Footprint.Width / Math.Max(1, unit.EnemiesInContact);
+            float enemyShare = enemy.Footprint.Width / Math.Max(1, enemy.EnemiesInContact);
+
+            float contactWidth = MathF.Min(share, enemyShare);
             Formation formation = unit.Formation;
 
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);

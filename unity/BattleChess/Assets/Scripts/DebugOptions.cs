@@ -87,16 +87,64 @@ namespace BattleChess.Unity
         /// <summary>Ring each unit at how far it can see from where it stands.</summary>
         public bool ShowSightRange;
 
+        /// <summary>Ring each shooter at the range its weapons reach.</summary>
+        public bool ShowWeaponRange;
+
+        /// <summary>Draw a line from each unit to every enemy it can personally see.</summary>
+        /// <remarks>
+        /// The one overlay that makes vision legible. A circle says how far a
+        /// regiment <i>could</i> see; a line says what it actually has, which is
+        /// the difference between a rule you can read and a rule you can debug.
+        /// </remarks>
+        public bool ShowSightLines;
+
+        /// <summary>Print strength, morale and organization over each regiment.</summary>
+        public bool ShowUnitLabels;
+
+        // ---- Cheats -----------------------------------------------------------
+        //
+        // Applied by the harness after each tick rather than by any rule. A flag
+        // the core respects is a flag that can be wrong in a shipped build, so
+        // the core never learns these exist.
+
+        /// <summary>Undo casualties every tick, so a fight runs forever.</summary>
+        public bool NoCasualties;
+
+        /// <summary>Hold every regiment steady, so nothing ever breaks or routs.</summary>
+        public bool NoRouting;
+
+        /// <summary>Clear reload timers every tick, so shooters fire continuously.</summary>
+        public bool InstantReload;
+
+        // ---- One-shot actions on the selected regiment -------------------------
+
+        /// <summary>Set when the panel's button was pressed this frame.</summary>
+        public bool BreakSelected;
+        public bool RestoreSelected;
+        public bool DestroySelected;
+
         public bool Visible = true;
 
-        /// <summary>Draws the panel and returns true if anything changed.</summary>
+        private Vector2 _scroll;
+
+        /// <summary>
+        /// Draws the panel and returns true if anything changed.
+        /// </summary>
+        /// <remarks>
+        /// Inside a scroll view, and deliberately. The panel grows every time a
+        /// system lands, and a fixed-height area silently clips whatever is at
+        /// the bottom — which looks exactly like the feature having been
+        /// removed. Scrolling makes it impossible for adding an option to hide
+        /// an existing one.
+        /// </remarks>
         public bool Draw(Rect area)
         {
             int before = Fingerprint();
 
             GUILayout.BeginArea(area, GUI.skin.box);
             GUILayout.Label("Debug options   (F1 hides)");
-            GUILayout.Space(4);
+
+            _scroll = GUILayout.BeginScrollView(_scroll);
 
             GUILayout.Label($"Clock   x{TimeScale:0}   {(Running ? "running" : "PAUSED")}");
             GUILayout.BeginHorizontal();
@@ -113,13 +161,19 @@ namespace BattleChess.Unity
             RespectUnitWidth = GUILayout.Toggle(RespectUnitWidth, " Route by unit width");
 
             GUILayout.Space(6);
-            GUILayout.Label("Overlays");
+            GUILayout.Label("Circles and outlines");
             ShowFootprintOutline = GUILayout.Toggle(ShowFootprintOutline, " Footprint outline");
-            ShowSearchCells = GUILayout.Toggle(ShowSearchCells, " Raw route cells");
-            ShowRawPath = GUILayout.Toggle(ShowRawPath, " Raw route line");
-            ShowClearance = GUILayout.Toggle(ShowClearance, " Width used for routing");
             ShowZoneOfControl = GUILayout.Toggle(ShowZoneOfControl, " Zone of control");
-            ShowSightRange = GUILayout.Toggle(ShowSightRange, " How far each unit sees");
+            ShowSightRange = GUILayout.Toggle(ShowSightRange, " How far it can see");
+            ShowWeaponRange = GUILayout.Toggle(ShowWeaponRange, " How far it can shoot");
+            ShowClearance = GUILayout.Toggle(ShowClearance, " Width used for routing");
+
+            GUILayout.Space(6);
+            GUILayout.Label("Lines and labels");
+            ShowSightLines = GUILayout.Toggle(ShowSightLines, " Who is looking at whom");
+            ShowUnitLabels = GUILayout.Toggle(ShowUnitLabels, " Strength / morale / order");
+            ShowRawPath = GUILayout.Toggle(ShowRawPath, " Raw route line");
+            ShowSearchCells = GUILayout.Toggle(ShowSearchCells, " Raw route cells");
 
             GUILayout.Space(6);
             GUILayout.Label($"Fog   {(ViewingArmy < 0 ? "off — you see everything" : $"through army {ViewingArmy}'s eyes")}");
@@ -130,6 +184,19 @@ namespace BattleChess.Unity
             GUILayout.EndHorizontal();
             GhostHiddenUnits = GUILayout.Toggle(GhostHiddenUnits, " Ghost what is hidden");
 
+            GUILayout.Space(6);
+            GUILayout.Label("Cheats");
+            NoCasualties = GUILayout.Toggle(NoCasualties, " Nobody dies");
+            NoRouting = GUILayout.Toggle(NoRouting, " Nobody breaks");
+            InstantReload = GUILayout.Toggle(InstantReload, " Shoot every tick");
+
+            GUILayout.Space(6);
+            GUILayout.Label("Do this to the selected regiment");
+            if (GUILayout.Button("Break it")) BreakSelected = true;
+            if (GUILayout.Button("Restore it")) RestoreSelected = true;
+            if (GUILayout.Button("Wipe it out")) DestroySelected = true;
+
+            GUILayout.EndScrollView();
             GUILayout.EndArea();
 
             return Fingerprint() != before;
@@ -152,6 +219,12 @@ namespace BattleChess.Unity
             | (WheelBeforeMarching ? 1 << 8 : 0)
             | (GhostHiddenUnits ? 1 << 9 : 0)
             | (ShowSightRange ? 1 << 10 : 0)
-            | ((ViewingArmy + 2) << 11);
+            | (ShowWeaponRange ? 1 << 11 : 0)
+            | (ShowSightLines ? 1 << 12 : 0)
+            | (ShowUnitLabels ? 1 << 13 : 0)
+            | (NoCasualties ? 1 << 14 : 0)
+            | (NoRouting ? 1 << 15 : 0)
+            | (InstantReload ? 1 << 16 : 0)
+            | ((ViewingArmy + 2) << 17);
     }
 }
