@@ -154,6 +154,25 @@ namespace BattleChess.Contracts
         public static readonly AttributeKey<float> Visibility =
             Registry.Define("visibility", 1f, AttributeParsers.Float);
 
+        /// <summary>
+        /// Multiplier on casualties this unit takes from shooting. Lower is
+        /// harder to hit.
+        /// </summary>
+        /// <remarks>
+        /// The unit's own dispersion, as against the dispersion of the order it
+        /// happens to be standing in — a formation already has its own
+        /// vulnerability and the two multiply. Light horse ride spread out
+        /// whatever the formation says, which is most of how they survive doing
+        /// a job that keeps them in front of the army.
+        ///
+        /// Kept apart from <see cref="Visibility"/> because being hard to
+        /// <i>see</i> and being hard to <i>hit</i> are different problems, and a
+        /// unit can easily be one without the other: a battery is conspicuous
+        /// and hard to miss, a skirmish screen is neither.
+        /// </remarks>
+        public static readonly AttributeKey<float> RangedVulnerability =
+            Registry.Define("rangedVulnerability", 1f, AttributeParsers.Float);
+
         // ---- Raising a unit -------------------------------------------------
 
         /// <summary>Strength a unit is raised at when nothing else is specified.</summary>

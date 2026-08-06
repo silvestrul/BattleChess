@@ -92,6 +92,7 @@ namespace BattleChess.Cli
             unit.Route = new MovementRoute(path.Waypoints, wheelFirst);
 
             var clock = new BattleClock()
+                .Add(new VisionSystem())
                 .Add(new ContactSystem())
                 .Add(new MovementSystem());
             Vec2 previous = unit.Position;

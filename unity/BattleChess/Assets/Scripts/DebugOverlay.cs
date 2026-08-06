@@ -5,6 +5,31 @@ using UnityEngine;
 namespace BattleChess.Unity
 {
     /// <summary>
+    /// One regiment's worth of debug geometry.
+    /// </summary>
+    /// <remarks>
+    /// A named struct rather than a tuple because this list gains a field every
+    /// time a system lands, and a five-element tuple is unreadable at the call
+    /// site and silently reorderable at the definition.
+    /// </remarks>
+    public struct OverlayUnit
+    {
+        public OrientedRect Shape;
+
+        /// <summary>Room the router insists on to either side, or zero if not enforced.</summary>
+        public float Clearance;
+
+        /// <summary>How far out this regiment halts an enemy advance.</summary>
+        public float Zoc;
+
+        /// <summary>How far it can see from where it currently stands.</summary>
+        public float Sight;
+
+        /// <summary>How far its weapons reach, or zero for melee troops.</summary>
+        public float WeaponRange;
+    }
+
+    /// <summary>
     /// Draws debug geometry — footprint outlines, clearance and control radii,
     /// the area a route search covered.
     /// </summary>
@@ -16,16 +41,18 @@ namespace BattleChess.Unity
     public sealed class DebugOverlay : MonoBehaviour
     {
         private static readonly Color FootprintColour = new Color(1f, 1f, 1f, 0.55f);
-        private static readonly Color ClearanceColour = new Color(0.4f, 1f, 0.6f, 0.5f);
-        private static readonly Color ZocColour = new Color(1f, 0.4f, 0.4f, 0.35f);
-        private static readonly Color SightColour = new Color(0.9f, 0.9f, 0.4f, 0.22f);
+        private static readonly Color ClearanceColour = new Color(0.4f, 1f, 0.6f, 0.75f);
+        private static readonly Color ZocColour = new Color(1f, 0.35f, 0.35f, 0.65f);
+        private static readonly Color SightColour = new Color(0.95f, 0.95f, 0.35f, 0.55f);
+        private static readonly Color WeaponColour = new Color(1f, 0.5f, 0.15f, 0.70f);
+        private static readonly Color SightLineColour = new Color(0.95f, 0.95f, 0.6f, 0.35f);
         private static readonly Color SearchColour = new Color(0.5f, 0.6f, 1f, 0.20f);
         private static readonly Color RawPathColour = new Color(1f, 0.5f, 0.9f, 0.9f);
 
         private Material _material;
 
-        private readonly List<(OrientedRect Shape, float Clearance, float Zoc, float Sight)> _units =
-            new List<(OrientedRect, float, float, float)>();
+        private readonly List<OverlayUnit> _units = new List<OverlayUnit>();
+        private readonly List<(Vector3 From, Vector3 To)> _sightLines = new List<(Vector3, Vector3)>();
 
         private readonly List<Vector3> _searchCells = new List<Vector3>();
         private readonly List<Vector3> _rawPath = new List<Vector3>();
@@ -44,10 +71,16 @@ namespace BattleChess.Unity
             _material.SetInt("_ZTest", (int)UnityEngine.Rendering.CompareFunction.Always);
         }
 
-        public void SetUnits(IEnumerable<(OrientedRect Shape, float Clearance, float Zoc, float Sight)> units)
+        public void SetUnits(IEnumerable<OverlayUnit> units)
         {
             _units.Clear();
             _units.AddRange(units);
+        }
+
+        public void SetSightLines(IEnumerable<(Vector3 From, Vector3 To)> lines)
+        {
+            _sightLines.Clear();
+            _sightLines.AddRange(lines);
         }
 
         public void SetSearchCells(IReadOnlyList<Coord> cells, HexLayout layout)
@@ -91,20 +124,20 @@ namespace BattleChess.Unity
 
             if (Options.ShowFootprintOutline)
             {
-                foreach ((OrientedRect shape, _, _, _) in _units)
-                    DrawRect(shape, FootprintColour);
+                foreach (OverlayUnit unit in _units)
+                    DrawRect(unit.Shape, FootprintColour);
             }
 
             if (Options.ShowClearance)
             {
-                foreach ((OrientedRect shape, float clearance, _, _) in _units)
-                    DrawCircle(shape.Centre, clearance, ClearanceColour);
+                foreach (OverlayUnit unit in _units)
+                    DrawCircle(unit.Shape.Centre, unit.Clearance, ClearanceColour, BandFor(unit.Clearance));
             }
 
             if (Options.ShowZoneOfControl)
             {
-                foreach ((OrientedRect shape, _, float zoc, _) in _units)
-                    DrawCircle(shape.Centre, zoc, ZocColour);
+                foreach (OverlayUnit unit in _units)
+                    DrawCircle(unit.Shape.Centre, unit.Zoc, ZocColour, BandFor(unit.Zoc));
             }
 
             // Drawn from where the unit actually stands, so stepping a regiment
@@ -112,8 +145,27 @@ namespace BattleChess.Unity
             // for taking one.
             if (Options.ShowSightRange)
             {
-                foreach ((OrientedRect shape, _, _, float sight) in _units)
-                    DrawCircle(shape.Centre, sight, SightColour);
+                foreach (OverlayUnit unit in _units)
+                    DrawCircle(unit.Shape.Centre, unit.Sight, SightColour, BandFor(unit.Sight));
+            }
+
+            if (Options.ShowWeaponRange)
+            {
+                foreach (OverlayUnit unit in _units)
+                    DrawCircle(unit.Shape.Centre, unit.WeaponRange, WeaponColour, BandFor(unit.WeaponRange));
+            }
+
+            // What each regiment has actually spotted, as against what it could
+            // in principle see. A circle states the rule; these state the answer.
+            if (Options.ShowSightLines)
+            {
+                GL.Color(SightLineColour);
+
+                foreach ((Vector3 from, Vector3 to) in _sightLines)
+                {
+                    GL.Vertex(from);
+                    GL.Vertex(to);
+                }
             }
 
             if (Options.ShowRawPath && _rawPath.Count > 1)
@@ -154,13 +206,17 @@ namespace BattleChess.Unity
 
             Vec2[] corners = rect.GetCorners();
 
+            // Three passes a metre apart, for the same reason the circles are
+            // banded: one pixel is invisible at map scale.
+            for (int pass = -1; pass <= 1; pass++)
             for (int i = 0; i < corners.Length; i++)
             {
                 Vec2 a = corners[i];
                 Vec2 b = corners[(i + 1) % corners.Length];
+                var lift = new Vector3(0f, pass * 1.2f, 0f);
 
-                GL.Vertex(new Vector3(a.X, a.Y, 0f));
-                GL.Vertex(new Vector3(b.X, b.Y, 0f));
+                GL.Vertex(new Vector3(a.X, a.Y, 0f) + lift);
+                GL.Vertex(new Vector3(b.X, b.Y, 0f) + lift);
             }
 
             // A spur out of the front face, so facing is unambiguous even when
@@ -172,19 +228,57 @@ namespace BattleChess.Unity
             GL.Vertex(new Vector3(nose.X, nose.Y, 0f));
         }
 
-        private static void DrawCircle(Vec2 centre, float radius, Color colour, int segments = 40)
+        /// <summary>
+        /// How thick to draw a ring of a given radius.
+        /// </summary>
+        /// <remarks>
+        /// Proportional, with a floor and a ceiling. A fixed width that reads
+        /// well on a 450 m artillery circle is a quarter of the radius on a
+        /// 30 m zone of control, and swallows it.
+        /// </remarks>
+        private static float BandFor(float radius) => Mathf.Clamp(radius * 0.035f, 2.5f, 12f);
+
+        /// <summary>Metres between the concentric rings that make up one band.</summary>
+        private const float RingSpacing = 1.5f;
+
+        /// <summary>How wide a range band is drawn, in metres.</summary>
+        private const float BandWidth = 9f;
+
+        /// <summary>
+        /// Draws a circle as a band rather than a hairline.
+        /// </summary>
+        /// <remarks>
+        /// A GL line is one pixel however far away the camera is, and these
+        /// circles are drawn on a map two kilometres across — so a sight radius
+        /// of 260 m came out as a faint thread you had to hunt for. Thickness
+        /// is concentric rings a metre and a half apart, which reads as a band
+        /// at any zoom without needing a line shader.
+        ///
+        /// Segments went up with it: a 450 m artillery circle drawn in forty
+        /// steps is visibly a polygon.
+        /// </remarks>
+        private static void DrawCircle(Vec2 centre, float radius, Color colour, float band = BandWidth, int segments = 72)
         {
             if (radius <= 0f) return;
 
             GL.Color(colour);
 
-            for (int i = 0; i < segments; i++)
-            {
-                float a = i / (float)segments * Mathf.PI * 2f;
-                float b = (i + 1) / (float)segments * Mathf.PI * 2f;
+            int rings = Mathf.Max(1, Mathf.RoundToInt(band / RingSpacing));
+            float innermost = radius - band * 0.5f;
 
-                GL.Vertex(new Vector3(centre.X + Mathf.Cos(a) * radius, centre.Y + Mathf.Sin(a) * radius, 0f));
-                GL.Vertex(new Vector3(centre.X + Mathf.Cos(b) * radius, centre.Y + Mathf.Sin(b) * radius, 0f));
+            for (int ring = 0; ring < rings; ring++)
+            {
+                float r = innermost + ring * RingSpacing;
+                if (r <= 0f) continue;
+
+                for (int i = 0; i < segments; i++)
+                {
+                    float a = i / (float)segments * Mathf.PI * 2f;
+                    float b = (i + 1) / (float)segments * Mathf.PI * 2f;
+
+                    GL.Vertex(new Vector3(centre.X + Mathf.Cos(a) * r, centre.Y + Mathf.Sin(a) * r, 0f));
+                    GL.Vertex(new Vector3(centre.X + Mathf.Cos(b) * r, centre.Y + Mathf.Sin(b) * r, 0f));
+                }
             }
         }
     }

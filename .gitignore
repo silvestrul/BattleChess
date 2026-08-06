@@ -28,3 +28,9 @@ unity/**/crashlytics-build.properties
 TestResults/
 *.trx
 artifacts/
+
+# Batch-mode compile logs
+unity/**/compile.log
+
+# Recorded battle logs
+logs/

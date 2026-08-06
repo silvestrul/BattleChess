@@ -89,13 +89,19 @@ namespace BattleChess.Tests.Battle
         [Theory]
         [InlineData("spearmen")]
         [InlineData("swordsmen")]
-        public void ArchersAreHelplessAgainstInfantryInContact(string infantry)
+        [InlineData("cavalry")]
+        [InlineData("scouts")]
+        public void AnythingThatReachesArchersBeatsThem(string attacker)
         {
-            DuelResult fight = new Duel { Attacker = infantry, Defender = "archers" }.Fight();
+            DuelResult fight = new Duel { Attacker = attacker, Defender = "archers" }.Fight();
 
-            Assert.True(fight.AttackerWon, $"Archers must lose a melee against {infantry}. {fight}");
+            Assert.True(fight.AttackerWon,
+                $"An archer carries a knife and no shield — anything that closes with them must win. " +
+                $"Bowmen were beating light horse and gun crews hand to hand, which made reaching them " +
+                $"an optional plan rather than the answer to them. {fight}");
+
             Assert.True(fight.DefenderLost >= 2f * fight.AttackerLost,
-                $"Archers should lose at least twice what the infantry does. {fight}");
+                $"And should lose at least twice what the attacker does. {fight}");
         }
 
         [Theory]

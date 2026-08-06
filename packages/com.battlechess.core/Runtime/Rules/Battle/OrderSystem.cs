@@ -93,7 +93,12 @@ namespace BattleChess.Rules
                         if (TryEvade(battle, unit, tick, log)) continue;
                         break;
 
+                    case Stance.Advance:
+                        TryFightWhatBlocks(battle, unit, log);
+                        break;
+
                     case Stance.Aggressive:
+                        if (TryFightWhatBlocks(battle, unit, log)) break;
                         if (TryEngageNearby(battle, unit, tick, log)) continue;
                         break;
                 }
@@ -101,6 +106,46 @@ namespace BattleChess.Rules
                 if (unit.Order.Kind == OrderKind.Attack)
                     FollowTarget(battle, unit, tick, log);
             }
+        }
+
+        /// <summary>
+        /// Turns a unit that has been stopped by an enemy into one that is
+        /// attacking it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// What "fight if blocked" has to mean, and without it neither Advance
+        /// nor Aggressive meant anything. A zone of control reaches thirty to
+        /// forty metres and a melee needs thirteen, so a regiment halted by one
+        /// stopped in a place where it could neither fight nor leave — and then
+        /// stood there. Under guns that is simply a slower way of being killed:
+        /// a recorded game had spearmen and cavalry halt at 39 m and take
+        /// fifty-seven volleys of artillery without ever drawing a sword.
+        /// </para>
+        /// <para>
+        /// Only for the stances that mean to press on. A regiment on Defend is
+        /// <i>supposed</i> to stop when it meets somebody, which is the whole
+        /// difference between telling it to hold and telling it to advance.
+        /// </para>
+        /// </remarks>
+        private static bool TryFightWhatBlocks(BattleState battle, UnitInstance unit, IBattleLog log)
+        {
+            if (unit.Order.Kind == OrderKind.Attack) return false;
+            if (!unit.HeldUpBy.IsValid) return false;
+
+            UnitInstance blocker = battle.Get(unit.HeldUpBy);
+            if (!blocker.IsFighting) return false;
+
+            // Clears the hold-up as a side effect, which is what lets contact
+            // stop treating this as a march past and start treating it as an
+            // attack pressed home.
+            unit.GiveOrder(UnitOrder.Attack(blocker.Id), unit.Position);
+
+            log.Decision("Orders",
+                $"{unit.Def.DisplayName} cannot get past {blocker.Def.DisplayName} and is going through it.",
+                unit.Id);
+
+            return true;
         }
 
         /// <summary>

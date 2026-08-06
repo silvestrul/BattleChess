@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -232,29 +233,194 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void TwoRegimentsOnOneIsWorseThanTheNumbersSuggest()
         {
-            float alone = new Clash { Pulses = 4 }.Run().DefenderLost;
-            float surrounded = LossesWhenSetUpon();
+            (float alone, _) = SetUpon(attackers: 1);
+            (float surrounded, _) = SetUpon(attackers: 2);
 
             Assert.True(surrounded >= 1.8f * alone,
-                $"Being taken by two regiments at once should be more than twice as bad — the second one " +
-                $"comes in off the flank: one enemy cost {alone:0.0}%, two cost {surrounded:0.0}%.");
+                $"Being taken by two regiments at once should be far worse than by one: " +
+                $"one enemy cost {alone:0.0}%, two cost {surrounded:0.0}%.");
         }
 
-        private static float LossesWhenSetUpon()
+        [Fact]
+        public void BeingSurroundedGetsWorseTheLongerItLasts()
+        {
+            (float earlyAlone, _) = SetUpon(attackers: 1, pulses: 4);
+            (float earlySurrounded, _) = SetUpon(attackers: 2, pulses: 4);
+
+            (float lateAlone, _) = SetUpon(attackers: 1, pulses: 12);
+            (float lateSurrounded, _) = SetUpon(attackers: 2, pulses: 12);
+
+            float early = earlySurrounded / earlyAlone;
+            float late = lateSurrounded / lateAlone;
+
+            Assert.True(late > early,
+                $"A regiment fighting on two sides comes apart, and losing cohesion makes it worse at " +
+                $"everything — so the disadvantage should compound rather than hold steady: " +
+                $"x{early:0.00} after four pulses, x{late:0.00} after twelve.");
+        }
+
+        [Fact]
+        public void ConcentratingOnOneRegimentBeatsIt()
+        {
+            (float defenderLost, float attackerLost) = SetUpon(attackers: 3);
+
+            Assert.True(defenderLost > attackerLost,
+                $"Three regiments falling on one must come out ahead. A defender has one frontage and has " +
+                $"to divide it among everyone it fights — if it can bring its whole line against each of " +
+                $"them at once it wins by being outnumbered, which is nonsense. " +
+                $"Defender lost {defenderLost:0.0}%, each attacker averaged {attackerLost:0.0}%.");
+        }
+
+        [Fact]
+        public void ADefenderCannotFightEveryoneAtFullStrength()
+        {
+            (_, float againstOne) = SetUpon(attackers: 1);
+            (_, float againstThree) = SetUpon(attackers: 3);
+
+            Assert.True(againstThree < againstOne,
+                $"Splitting its frontage three ways must cost the defender its punch against any one of " +
+                $"them: a lone attacker lost {againstOne:0.0}%, each of three lost {againstThree:0.0}%.");
+        }
+
+        /// <summary>
+        /// Sets one, two or three regiments on a single defender and reports
+        /// what the defender lost and what its attackers lost on average.
+        /// </summary>
+        /// <remarks>
+        /// Reports both sides deliberately. Measuring only the defender hides
+        /// the failure this is guarding: a defender fighting everyone at full
+        /// frontage still takes heavy losses, while quietly dealing several
+        /// times what it should.
+        /// </remarks>
+        private static (float DefenderLost, float AttackerLost) SetUpon(int attackers, int pulses = 8)
         {
             var field = new Battlefield("plains", 7000, RuleSet.MeleeOnly);
 
             UnitInstance target = field.Add(1, "swordsmen", field.Centre, Facing.East);
             float reach = target.Footprint.Depth + 4f;
 
-            // One in front, one on the flank — which is what two attackers on
-            // one defender actually means, and why it is so much worse.
-            field.Add(0, "swordsmen", field.Centre + new Vec2(reach, 0f), Facing.West);
-            field.Add(0, "swordsmen", field.Centre + new Vec2(0f, reach), Facing.South);
+            // Front, flank and rear — which is what falling on one regiment with
+            // three actually means, and where its advantage is supposed to come
+            // from.
+            var placements = new[]
+            {
+                (new Vec2(reach, 0f), Facing.West),
+                (new Vec2(0f, reach), Facing.South),
+                (new Vec2(-reach, 0f), Facing.East),
+            };
 
-            field.RunPulses(4);
+            var attacking = new List<UnitInstance>();
 
-            return Battlefield.LostPercent(target);
+            for (int i = 0; i < attackers; i++)
+            {
+                (Vec2 offset, Facing facing) = placements[i];
+                attacking.Add(field.Add(0, "swordsmen", field.Centre + offset, facing));
+            }
+
+            field.RunPulses(pulses);
+
+            float attackerLost = 0f;
+            foreach (UnitInstance unit in attacking) attackerLost += Battlefield.LostPercent(unit);
+
+            return (Battlefield.LostPercent(target), attackerLost / attackers);
+        }
+
+        // ---- Sending more troops must not make an attack weaker --------------
+
+        [Fact]
+        public void RegimentsMarchingTogetherKeepTheirOrder()
+        {
+            var field = new Battlefield("plains", 7100);
+
+            UnitInstance left = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, 30f), Facing.East);
+            UnitInstance right = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, -30f), Facing.East);
+
+            // Close enough together that their footprints overlap the whole way,
+            // which is exactly what happens when two regiments are ordered onto
+            // the same enemy.
+            field.March(left, field.Centre + new Vec2(400f, 0f));
+            field.March(right, field.Centre + new Vec2(400f, 0f));
+
+            field.RunTurns(6);
+
+            Assert.True(left.Organization >= 0.8f && right.Organization >= 0.8f,
+                $"Marching together is a column, not a collision. Charging it as one drained a quarter of " +
+                $"their cohesion every turn, so any attack pressed by more than one regiment arrived with " +
+                $"nothing left — sending more troops made the attack weaker. " +
+                $"Left {left.Organization:0.00}, right {right.Organization:0.00}.");
+        }
+
+        [Fact]
+        public void SendingMoreRegimentsMakesAnAttackCheaper()
+        {
+            float alone = CostOfAttacking(regiments: 1);
+            float together = CostOfAttacking(regiments: 3);
+
+            Assert.True(together < alone * 0.6f,
+                $"Three regiments on one enemy should each pay far less than one paying alone: " +
+                $"single attacker lost {alone:0.0}%, each of three lost {together:0.0}%.");
+        }
+
+        /// <summary>
+        /// Orders a number of regiments onto one standing enemy from 250 m and
+        /// reports the average cost per attacker.
+        /// </summary>
+        private static float CostOfAttacking(int regiments)
+        {
+            var field = new Battlefield("plains", 4400);
+
+            UnitInstance foe = field.Add(1, "cavalry", field.Centre, Facing.West);
+            Battlefield.Hold(foe);
+
+            var pool = new[] { ("cavalry", 0f), ("swordsmen", 130f), ("swordsmen", -130f) };
+            var mine = new List<UnitInstance>();
+
+            for (int i = 0; i < regiments; i++)
+                mine.Add(field.Add(0, pool[i].Item1, field.Centre - new Vec2(250f, pool[i].Item2), Facing.East));
+
+            foreach (UnitInstance unit in mine) Battlefield.Press(unit, foe);
+
+            field.RunUntilDecided(15, foe);
+
+            float lost = 0f;
+            foreach (UnitInstance unit in mine) lost += Battlefield.LostPercent(unit);
+
+            return lost / regiments;
+        }
+
+        [Fact]
+        public void AStandingRegimentDoesNotGetAChargeBonus()
+        {
+            // Cavalry has the largest charge bonus on the field, so if a charge
+            // can be collected by standing still this is where it shows.
+            float whenCharged = FirstPulseAgainst(chargeHome: true);
+            float whenStanding = FirstPulseAgainst(chargeHome: false);
+
+            Assert.True(whenStanding < whenCharged,
+                $"A charge is something a regiment does, not something that happens to it. Awarding it to " +
+                $"both sides of a fresh contact meant a defender collected a full charge every time somebody " +
+                $"walked into it — and a fresh one from each attacker as they arrived. " +
+                $"Charging home dealt {whenCharged:0.0}%, standing still dealt {whenStanding:0.0}%.");
+        }
+
+        /// <summary>
+        /// One pulse of cavalry against infantry, with the horsemen either
+        /// riding in or already stood there.
+        /// </summary>
+        private static float FirstPulseAgainst(bool chargeHome)
+        {
+            var field = new Battlefield("plains", 7200, RuleSet.MeleeOnly);
+
+            UnitInstance horse = field.Add(0, "cavalry", field.Centre, Facing.East);
+            UnitInstance foot = field.Add(1, "swordsmen",
+                field.Centre + new Vec2(horse.Footprint.Depth + 4f, 0f), Facing.West);
+
+            if (chargeHome) Battlefield.Press(horse, foot); else Battlefield.Hold(horse);
+            Battlefield.Hold(foot);
+
+            field.RunPulses(1);
+
+            return Battlefield.LostPercent(foot);
         }
 
         // ---- Shared scaffolding ---------------------------------------------

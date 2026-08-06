@@ -62,6 +62,18 @@ namespace BattleChess.Tests.Battle
         public float AttackerOrganization { get; init; } = 1f;
         public float DefenderOrganization { get; init; } = 1f;
 
+        /// <summary>
+        /// Whether the attacker is treated as having ridden in, rather than
+        /// having been stood there when the enemy arrived.
+        /// </summary>
+        /// <remarks>
+        /// Decides whether a charge bonus is collected at all, since a charge is
+        /// something a regiment does. On by default because "attacker" is
+        /// exactly what the name says; turn it off to measure what a regiment
+        /// achieves without the moment of impact.
+        /// </remarks>
+        public bool AttackerCharges { get; init; } = true;
+
         public int Pulses { get; init; } = 6;
 
         public ulong Seed { get; init; } = 7000;
@@ -89,6 +101,9 @@ namespace BattleChess.Tests.Battle
 
             a.Organization = AttackerOrganization;
             b.Organization = DefenderOrganization;
+
+            if (AttackerCharges) Battlefield.Press(a, b);
+            Battlefield.Hold(b);
 
             field.RunPulses(Pulses);
 

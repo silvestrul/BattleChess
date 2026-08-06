@@ -33,6 +33,12 @@ namespace BattleChess.Unity
             new Color(0.95f, 0.82f, 0.35f)
         };
 
+        /// <summary>
+        /// Depth a regiment is drawn and hit-tested at, however thin it really
+        /// is. Cosmetic only — the rules always use the true footprint.
+        /// </summary>
+        public const float ClickableDepthMetres = 18f;
+
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
 
@@ -58,6 +64,7 @@ namespace BattleChess.Unity
         private bool _hasDestination;
         private string _status = string.Empty;
         private string _error;
+        private GUIStyle _nameplate;
 
         private void Start()
         {
@@ -201,6 +208,215 @@ namespace BattleChess.Unity
         }
 
         /// <summary>
+        /// Prints each regiment's condition over the top of it.
+        /// </summary>
+        /// <remarks>
+        /// Strength, morale and organization are the three numbers that explain
+        /// almost every outcome, and reading them off the console means matching
+        /// a line of text to a shape on screen while both are moving. Over the
+        /// unit they belong to, a line collapsing is something you watch rather
+        /// than reconstruct.
+        /// </remarks>
+        private void DrawUnitLabels()
+        {
+            if (Camera.main == null) return;
+
+            // The name is always on — a rectangle you cannot identify is just a
+            // coloured smear. The rest is detail, and lives behind the toggle.
+            bool detailed = _options.ShowUnitLabels;
+
+            if (_nameplate == null)
+            {
+                _nameplate = new GUIStyle(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontSize = 13,
+                    fontStyle = FontStyle.Bold,
+                };
+
+                // Unity's default label is thin and pale, which over a map of
+                // greens and browns is close to unreadable — and this text sits
+                // on top of terrain, not on a panel.
+                _nameplate.normal.textColor = Color.white;
+            }
+
+            Color original = GUI.color;
+
+            foreach (UnitInstance unit in _battle.UnitsOnField())
+            {
+                if (_options.ViewingArmy >= 0 &&
+                    !_battle.Vision.CanSee(_battle, new PlayerId(_options.ViewingArmy), unit))
+                    continue;
+
+                Vector3 screen = Camera.main.WorldToScreenPoint(new Vector3(unit.Position.X, unit.Position.Y, 0f));
+                if (screen.z < 0f) continue;
+
+                // Morale is the number that decides fights, so it is the one that
+                // changes colour as it approaches the thresholds that matter.
+                Color ink = unit.Morale < MoraleSystem.RoutingThreshold ? new Color(1f, 0.45f, 0.45f)
+                    : unit.Morale < MoraleSystem.WaveringThreshold ? new Color(1f, 0.87f, 0.4f)
+                    : Color.white;
+
+                string text = detailed
+                    ? $"{unit.Def.DisplayName}\n" +
+                      $"{unit.Strength}/{unit.InitialStrength}  {unit.FormationOrder.DisplayName}\n" +
+                      $"mor {unit.Morale:0.00}  org {unit.Organization:0.00}\n" +
+                      $"{unit.Stance}{(unit.State == UnitState.Steady ? string.Empty : "  " + unit.State)}"
+                    : unit.Def.DisplayName;
+
+                float height = detailed ? 72f : 20f;
+                var area = new Rect(screen.x - 80f, Screen.height - screen.y - height * 0.5f, 160f, height);
+
+                DrawOutlined(area, text, ink);
+            }
+
+            GUI.color = original;
+        }
+
+        /// <summary>
+        /// Draws a label with a dark outline behind it.
+        /// </summary>
+        /// <remarks>
+        /// Text sitting on the map has no panel behind it, and the map is a
+        /// patchwork of greens, browns and greys — so any single ink colour is
+        /// invisible somewhere. An outline costs eight extra draws and makes the
+        /// label readable over all of it, which no amount of choosing a better
+        /// colour can.
+        /// </remarks>
+        private void DrawOutlined(Rect area, string text, Color ink)
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.85f);
+
+            for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+
+                GUI.Label(new Rect(area.x + dx, area.y + dy, area.width, area.height), text, _nameplate);
+            }
+
+            GUI.color = ink;
+            GUI.Label(area, text, _nameplate);
+        }
+
+        /// <summary>
+        /// Every pair of regiments where the first can actually make out the
+        /// second, as line segments.
+        /// </summary>
+        /// <remarks>
+        /// Only drawn on request — it is O(units squared) walks along terrain,
+        /// which is fine for a dozen regiments and would not be for a hundred.
+        /// </remarks>
+        private List<(Vector3, Vector3)> BuildSightLines()
+        {
+            var lines = new List<(Vector3, Vector3)>();
+            if (!_options.ShowSightLines) return lines;
+
+            foreach (UnitInstance watcher in _battle.UnitsOnField())
+            foreach (UnitInstance target in _battle.UnitsOnField())
+            {
+                if (target.Owner == watcher.Owner) continue;
+                if (!LineOfSight.CanSee(_battle, watcher, target)) continue;
+
+                lines.Add((
+                    new Vector3(watcher.Position.X, watcher.Position.Y, 0f),
+                    new Vector3(target.Position.X, target.Position.Y, 0f)));
+            }
+
+            return lines;
+        }
+
+        /// <summary>
+        /// Applies the harness cheats after a tick has been resolved.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately here and not in the rules. "Nobody dies" is not a rule
+        /// the simulation should know about — it is the harness undoing what the
+        /// simulation correctly did, which is the only arrangement where a debug
+        /// flag cannot possibly be wrong in a shipped build.
+        /// </remarks>
+        private void ApplyCheats(IReadOnlyList<int> strengthBeforeTick)
+        {
+            if (_options.NoCasualties)
+            {
+                foreach (UnitInstance unit in _battle.AllUnits)
+                {
+                    if (unit.Id.Value >= strengthBeforeTick.Count) continue;
+                    if (unit.Strength >= strengthBeforeTick[unit.Id.Value]) continue;
+
+                    unit.Strength = strengthBeforeTick[unit.Id.Value];
+
+                    if (unit.State == UnitState.Destroyed || unit.State == UnitState.Captured)
+                        unit.State = UnitState.Steady;
+                }
+            }
+
+            if (_options.NoRouting)
+            {
+                foreach (UnitInstance unit in _battle.UnitsOnField())
+                {
+                    if (unit.State != UnitState.Routing && unit.State != UnitState.Wavering) continue;
+
+                    unit.State = UnitState.Steady;
+                    unit.Morale = 1f;
+                }
+            }
+
+            if (_options.InstantReload)
+            {
+                foreach (UnitInstance unit in _battle.UnitsOnField())
+                    unit.ReloadRemaining = 0;
+            }
+        }
+
+        /// <summary>
+        /// Carries out whichever button the panel had pressed this frame.
+        /// </summary>
+        private void ApplyUnitActions()
+        {
+            bool wanted = _options.BreakSelected || _options.RestoreSelected || _options.DestroySelected;
+            if (!wanted) return;
+
+            if (_selected == null)
+            {
+                _options.BreakSelected = _options.RestoreSelected = _options.DestroySelected = false;
+                _console.Blocked("Debug", "Nothing is selected — click a regiment first.");
+                return;
+            }
+
+            if (_options.BreakSelected)
+            {
+                _selected.Morale = 0f;
+                _selected.State = UnitState.Routing;
+                _selected.Route = null;
+
+                _console.Warning("Debug",
+                    $"{_selected.Def.DisplayName} broken by hand — watch what it does to the regiments beside it.",
+                    _selected.Id);
+            }
+
+            if (_options.RestoreSelected)
+            {
+                _selected.Strength = _selected.InitialStrength;
+                _selected.Morale = 1f;
+                _selected.Organization = 1f;
+                _selected.State = UnitState.Steady;
+
+                _console.Info("Debug", $"{_selected.Def.DisplayName} restored to full.", _selected.Id);
+            }
+
+            if (_options.DestroySelected)
+            {
+                _selected.TakeCasualties(_selected.Strength);
+
+                _console.Warning("Debug", $"{_selected.Def.DisplayName} wiped out by hand.", _selected.Id);
+                _selected = null;
+            }
+
+            _options.BreakSelected = _options.RestoreSelected = _options.DestroySelected = false;
+        }
+
+        /// <summary>
         /// Cycles whose eyes the field is shown through, and whether hidden
         /// regiments are ghosted or gone.
         /// </summary>
@@ -247,6 +463,8 @@ namespace BattleChess.Unity
                 view.Spotted = !fogged || _battle.Vision.CanSee(_battle, viewer, view.Unit);
             }
         }
+
+        private void OnDisable() => _console.StopRecording();
 
         private void HandleClockKeys()
         {
@@ -300,12 +518,36 @@ namespace BattleChess.Unity
 
         private void StepOnce()
         {
+            // Stamps every line the simulation writes, so a recorded log can be
+            // read back against the clock rather than as an undated stream.
+            _console.Tick = _clock.Tick;
+
+            // Taken before the tick so "nobody dies" has something to put back.
+            // Only gathered when the cheat is on — this runs sixty times a
+            // second at speed.
+            List<int> before = _options.NoCasualties ? StrengthSnapshot() : EmptyStrengths;
+
             _clock.Advance(_battle, _console);
+
+            ApplyCheats(before);
 
             // Snapshot after every tick so the view has two states to
             // interpolate between.
             foreach (UnitView view in _views)
                 view.CaptureTick();
+        }
+
+        /// <summary>Stands in for "not gathered", so nothing has to be nullable.</summary>
+        private static readonly List<int> EmptyStrengths = new List<int>();
+
+        private List<int> StrengthSnapshot()
+        {
+            var strengths = new List<int>(_battle.AllUnits.Count);
+
+            foreach (UnitInstance unit in _battle.AllUnits)
+                strengths.Add(unit.Strength);
+
+            return strengths;
         }
 
         /// <summary>
@@ -397,17 +639,24 @@ namespace BattleChess.Unity
 
         private void RefreshOverlayUnits()
         {
-            var shapes = new List<(OrientedRect, float, float, float)>();
+            var shapes = new List<OverlayUnit>();
 
             // Show the width actually used for routing, so the overlay never
             // implies a constraint that is not being applied.
             foreach (UnitInstance unit in _battle.UnitsOnField())
             {
-                float routingWidth = _options.RespectUnitWidth ? unit.Footprint.Width * 0.5f : 0f;
-                shapes.Add((unit.Shape, routingWidth, unit.ZoneOfControl, LineOfSight.SightRange(_battle, unit)));
+                shapes.Add(new OverlayUnit
+                {
+                    Shape = unit.Shape,
+                    Clearance = _options.RespectUnitWidth ? unit.Footprint.Width * 0.5f : 0f,
+                    Zoc = unit.ZoneOfControl,
+                    Sight = LineOfSight.SightRange(_battle, unit),
+                    WeaponRange = unit.Def.Get(UnitAttributes.Range),
+                });
             }
 
             _overlay.SetUnits(shapes);
+            _overlay.SetSightLines(BuildSightLines());
         }
 
         private void HandleClick(Vec2 world)
@@ -449,14 +698,25 @@ namespace BattleChess.Unity
         }
 
         /// <summary>
-        /// Finds a unit under a point. Iterates in id order so an overlap always
+        /// The regiment under a world point, with a generous allowance for how
+        /// thin a line actually is. Iterates in id order so an overlap always
         /// resolves the same way.
         /// </summary>
+        /// <remarks>
+        /// A regiment in line is a hundred metres wide and four deep. Hit-testing
+        /// its true rectangle means asking the player to click a hairline, so the
+        /// target is fattened to a depth you can reasonably hit. This is purely
+        /// about the mouse — every rule still uses the real footprint, so nothing
+        /// fights or collides differently because it became easier to select.
+        /// </remarks>
         private UnitInstance UnitAt(Vec2 world)
         {
             foreach (UnitInstance unit in _battle.UnitsOnField())
             {
-                if (unit.Shape.ContainsPoint(world))
+                Footprint real = unit.Footprint;
+                var clickable = new Footprint(real.Width, Mathf.Max(real.Depth, ClickableDepthMetres));
+
+                if (new OrientedRect(unit.Position, unit.Facing, clickable).ContainsPoint(world))
                     return unit;
             }
 
@@ -633,8 +893,18 @@ namespace BattleChess.Unity
 
         // ---- Interface ------------------------------------------------------
 
-        private Rect OptionsRect => new Rect(Screen.width - 230, 70, 220, 300);
-        private Rect ConsoleRect => new Rect(10, Screen.height - 230, Screen.width - 250, 220);
+        /// <summary>
+        /// The options panel, sized to whatever room is left above the console.
+        /// </summary>
+        /// <remarks>
+        /// It was a fixed 300 px, which meant every option added past that
+        /// height silently vanished off the bottom — indistinguishable from the
+        /// feature having been deleted. Between this and the scroll view inside,
+        /// adding an option can no longer hide an existing one.
+        /// </remarks>
+        private Rect OptionsRect =>
+            new Rect(Screen.width - 290, 76, 280, Mathf.Max(220f, Screen.height - 316f));
+        private Rect ConsoleRect => new Rect(10, Screen.height - 230, Screen.width - 310, 220);
 
         private bool PointerOverPanels()
         {
@@ -654,19 +924,30 @@ namespace BattleChess.Unity
                 return;
             }
 
-            GUI.Box(new Rect(10, 10, Screen.width - 20, 52), string.Empty);
+            // Every panel in the harness shares this, so the whole interface
+            // thickens at once rather than the unit labels alone.
+            GUI.skin.label.fontStyle = FontStyle.Bold;
+            GUI.skin.label.fontSize = 13;
+            GUI.skin.toggle.fontStyle = FontStyle.Bold;
+            GUI.skin.button.fontStyle = FontStyle.Bold;
+
+            GUI.Box(new Rect(10, 10, Screen.width - 20, 58), string.Empty);
 
             string clock = _clock != null
                 ? $"[turn {_clock.Turn}  tick {_clock.TickInTurn}/{BattleClock.TicksPerTurn}  " +
                   $"x{_options.TimeScale:0}{(_options.Running ? "" : "  PAUSED")}]   "
                 : string.Empty;
 
-            GUI.Label(new Rect(20, 16, Screen.width - 40, 20), clock + _status);
-            GUI.Label(new Rect(20, 36, Screen.width - 40, 20),
+            GUI.Label(new Rect(20, 16, Screen.width - 40, 22), clock + _status);
+            GUI.Label(new Rect(20, 38, Screen.width - 40, 22),
                 "Click select / march / attack    1-4 reshape    QERT stance    V fog    G ghost    " +
                 "Space pause    . step    +/- speed    Right-drag pan    F1 debug");
 
+            DrawUnitLabels();
+
             if (!_options.Visible) return;
+
+            ApplyUnitActions();
 
             if (_options.Draw(OptionsRect) && _selected != null && _hasDestination)
             {
