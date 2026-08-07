@@ -262,7 +262,7 @@ namespace BattleChess.Rules
             // aimed it into the mountains that ring the map, which failed to
             // path and left it standing where it was — pinned by geography it
             // had every right to run along.
-            Vec2 retreat = Reachable(
+            Vec2 retreat = NearestReachable(
                 battle, unit, unit.Position + away * RetreatDistanceMetres, unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, retreat, unit.Def.Movement);
@@ -386,7 +386,7 @@ namespace BattleChess.Rules
             // a fight and waiting to be told again.
             standOff -= ContactMetres * 0.5f;
 
-            Vec2 aim = Reachable(battle, unit, quarry.Position + approach * standOff, unit.Position);
+            Vec2 aim = NearestReachable(battle, unit, quarry.Position + approach * standOff, unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, aim, unit.Def.Movement);
 
@@ -439,7 +439,7 @@ namespace BattleChess.Rules
         /// which is by definition somewhere it can be.
         /// </para>
         /// </remarks>
-        private static Vec2 Reachable(BattleState battle, UnitInstance unit, Vec2 want, Vec2 from)
+        public static Vec2 NearestReachable(BattleState battle, UnitInstance unit, Vec2 want, Vec2 from)
         {
             Vec2 goal = battle.Terrain.Bounds.Clamp(want);
 

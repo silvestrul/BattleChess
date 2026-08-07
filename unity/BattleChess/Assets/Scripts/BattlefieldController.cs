@@ -823,6 +823,14 @@ namespace BattleChess.Unity
                 ? direct.SearchLayout
                 : ((HexPathfinder)pathfinder).SearchLayout;
 
+            // Aim for the nearest ground the unit could actually stand on. Every
+            // map is ringed with impassable country, so a click near the edge —
+            // or on the mountains themselves — asked for a goal no route can
+            // ever end at. The pathfinder rightly refused, and the regiment just
+            // sat there while the player clicked at it. Ordering a march to the
+            // sea should walk to the beach, not decline to move.
+            destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
+
             PathResult path = pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
 
             _overlay.SetSearchCells(path.SearchCells, searchLayout);

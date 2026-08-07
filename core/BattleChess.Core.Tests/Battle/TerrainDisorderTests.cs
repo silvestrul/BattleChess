@@ -1,3 +1,4 @@
+using System;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -60,22 +61,73 @@ namespace BattleChess.Tests.Battle
                 "Fresh, a spear wall must refuse cavalry the line.");
 
             field.March(spearmen, field.Centre + new Vec2(150f, 0f));
-            field.RunTurns(8);
 
-            Assert.True(spearmen.EffectiveStoppingPower < horse.EffectiveBreakthrough,
+            // Watched across the crossing rather than read at the end of it.
+            // The wall is at its worst wading and just after, and a regiment
+            // left alone on the far bank puts itself back together — so the
+            // moment cavalry wants is while the water is still behind them.
+            float weakest = spearmen.EffectiveStoppingPower;
+            float lowestOrganization = spearmen.Organization;
+
+            for (int turn = 0; turn < 8; turn++)
+            {
+                field.RunTurns(1);
+
+                if (spearmen.EffectiveStoppingPower < weakest)
+                {
+                    weakest = spearmen.EffectiveStoppingPower;
+                    lowestOrganization = spearmen.Organization;
+                }
+            }
+
+            Assert.True(weakest < horse.EffectiveBreakthrough,
                 $"A phalanx that has waded a river is a hedge of spears in name only, and horse should " +
                 $"ride straight through it — which is precisely why you make it cross first. " +
-                $"Stopping {spearmen.EffectiveStoppingPower:0.00} against breakthrough " +
-                $"{horse.EffectiveBreakthrough:0.00}, at organization {spearmen.Organization:0.00}.");
+                $"Stopping {weakest:0.00} against breakthrough " +
+                $"{horse.EffectiveBreakthrough:0.00}, at organization {lowestOrganization:0.00}.");
+        }
+
+        [Fact]
+        public void AFormationReformsOnTheFarBankIfItIsGivenTime()
+        {
+            var field = new Battlefield("plains", 12200, RuleSet.Full, canvas =>
+                canvas.Band(canvas.Columns / 2, canvas.Columns / 2 + 1, "river"));
+
+            UnitInstance unit = field.Add(0, "swordsmen", field.Centre - new Vec2(200f, 0f), Facing.East);
+
+            field.March(unit, field.Centre + new Vec2(150f, 0f));
+
+            float worst = 1f;
+            for (int turn = 0; turn < 8; turn++)
+            {
+                field.RunTurns(1);
+                worst = MathF.Min(worst, unit.Organization);
+            }
+
+            field.RunTurns(6);
+
+            Assert.True(unit.Organization > worst + 0.05f,
+                $"Wading a river must cost order at the time and not for the rest of the battle. It was " +
+                $"down to {worst:0.00} crossing and sat at {unit.Organization:0.00} six turns later — men " +
+                "dress their ranks once they are out of the water.");
         }
 
         /// <summary>
         /// Marches a regiment across a two-cell band of the given ground and
-        /// reports what it had left afterwards.
+        /// reports the worst state it was in along the way.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// A band, not a whole map. Real rivers are fifty metres across, and
         /// filling the field with one measured a march no army would ever make.
+        /// </para>
+        /// <para>
+        /// The low-water mark rather than the final figure, because that is what
+        /// the rule is actually about: a regiment is at its worst as it comes
+        /// out the far side, which is precisely when a waiting enemy hits it.
+        /// Reading the number at the end of the march measures how long it was
+        /// given to recover instead.
+        /// </para>
         /// </remarks>
         private static float OrganizationAfterCrossing(string ground)
         {
@@ -88,9 +140,16 @@ namespace BattleChess.Tests.Battle
             UnitInstance unit = field.Add(0, "swordsmen", field.Centre - new Vec2(200f, 0f), Facing.East);
 
             field.March(unit, field.Centre + new Vec2(150f, 0f));
-            field.RunTurns(8);
 
-            return unit.Organization;
+            float worst = unit.Organization;
+
+            for (int turn = 0; turn < 8; turn++)
+            {
+                field.RunTurns(1);
+                worst = MathF.Min(worst, unit.Organization);
+            }
+
+            return worst;
         }
     }
 }

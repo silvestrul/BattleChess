@@ -165,6 +165,40 @@ namespace BattleChess.Tests.Battle
                 $"{Vec2.Distance(cornered.Position, start):0} m.");
         }
 
+        [Theory]
+        [InlineData("onto the mountains themselves")]
+        [InlineData("past the edge of the world")]
+        public void OrderingAMarchOntoGroundNobodyCanStandOnWalksAsCloseAsPossible(string where)
+        {
+            var field = new Battlefield("plains", 15500, RuleSet.Full, canvas =>
+                canvas.Band(canvas.Columns - 3, canvas.Columns - 1, "mountain"));
+
+            UnitInstance unit = field.Add(0, "swordsmen", field.Centre, Facing.East);
+
+            // Either into the impassable band or clean off the map. Both used
+            // to produce a goal no route could end at, so the order was refused
+            // and the regiment stood still — which from the chair looks exactly
+            // like a unit that has stopped taking orders.
+            Vec2 want = where.StartsWith("onto")
+                ? new Vec2(field.Map.Bounds.Max.X - 30f, field.Centre.Y)
+                : new Vec2(field.Map.Bounds.Max.X + 400f, field.Centre.Y);
+
+            Vec2 aim = OrderSystem.NearestReachable(field.State, unit, want, unit.Position);
+
+            Assert.True(field.Map.Bounds.Contains(aim), $"Aiming {where} must land on the map.");
+
+            Assert.True(
+                field.State.Movement.SpeedMultiplier(field.Map.At(aim), unit.Def.Movement) > 0f,
+                $"Aiming {where} must land on ground this unit can cross.");
+
+            field.March(unit, aim);
+            field.RunTurns(3);
+
+            Assert.True(unit.Position.X > field.Centre.X + 50f,
+                $"And the regiment should have marched that way: it got to {unit.Position.X:0} from " +
+                $"{field.Centre.X:0}.");
+        }
+
         [Fact]
         public void ChasingAnEnemyPinnedAgainstTheEdgeStillFindsARoute()
         {

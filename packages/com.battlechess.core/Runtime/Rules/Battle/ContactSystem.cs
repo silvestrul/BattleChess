@@ -34,13 +34,24 @@ namespace BattleChess.Rules
 
         /// <summary>Organization lost per tick while pushing through a friendly formation.</summary>
         /// <remarks>
+        /// <para>
         /// Charged only while somebody is actually moving. The cost is for
         /// <i>passing through</i> a formation, not for standing near one — units
         /// drawn up shoulder to shoulder in a line overlap constantly, and
         /// draining them for it reduced a stationary regiment to nothing in two
         /// turns of doing absolutely nothing.
+        /// </para>
+        /// <para>
+        /// Cut to a third after a recorded game. At the old rate a regiment
+        /// overlapping a friend for one turn lost a quarter of its cohesion,
+        /// which put threading your own line on a par with fording a river —
+        /// and cavalry that manoeuvred behind its own army for three turns
+        /// arrived at the fight with a third of its cohesion and lost a matchup
+        /// it wins comfortably. Crowding your own troops should be a real cost
+        /// and a minor one.
+        /// </para>
         /// </remarks>
-        private const float FriendlyOverlapDisorderPerTick = 0.004f;
+        private const float FriendlyOverlapDisorderPerTick = 0.0012f;
 
         public string Name => "Contact";
 
