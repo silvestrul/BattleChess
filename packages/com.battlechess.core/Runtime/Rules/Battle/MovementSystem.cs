@@ -128,6 +128,46 @@ namespace BattleChess.Rules
                 unit.Facing, Facing.FromVector(toEnemy), turnThisTick * MathF.PI / 180f);
         }
 
+        /// <summary>
+        /// Holds a formed regiment inside the map, footprint and all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Positions are a point and regiments are rectangles, so a centre
+        /// legally inside the bounds still leaves half a frontage — fifty
+        /// metres of cavalry — hanging over the edge of the world. Inset by
+        /// however much of the shape actually points that way, which is exact
+        /// for any bearing and costs nothing.
+        /// </para>
+        /// <para>
+        /// Routers are exempt on purpose. Leaving the field is precisely what
+        /// they are doing, and holding them on it would trap broken regiments
+        /// against the border forever instead of letting them scatter.
+        /// </para>
+        /// </remarks>
+        private static Vec2 KeepOnTheField(BattleState battle, UnitInstance unit, Vec2 position)
+        {
+            if (unit.State == UnitState.Routing) return position;
+
+            MapBounds bounds = battle.Terrain.Bounds;
+            var shape = new OrientedRect(position, unit.Facing, unit.Footprint);
+
+            float halfWidth = shape.ProjectedRadius(new Vec2(1f, 0f));
+            float halfHeight = shape.ProjectedRadius(new Vec2(0f, 1f));
+
+            // A regiment wider than the field can only be centred on it.
+            return new Vec2(
+                Squeeze(position.X, bounds.Min.X, bounds.Max.X, halfWidth),
+                Squeeze(position.Y, bounds.Min.Y, bounds.Max.Y, halfHeight));
+        }
+
+        private static float Squeeze(float value, float min, float max, float halfExtent)
+        {
+            if (max - min <= 2f * halfExtent) return (min + max) * 0.5f;
+
+            return Math.Clamp(value, min + halfExtent, max - halfExtent);
+        }
+
         private static UnitInstance? NearestEnemyInContact(BattleState battle, UnitInstance unit)
         {
             UnitInstance? nearest = null;
@@ -239,7 +279,7 @@ namespace BattleChess.Rules
             if (disorder > 0f)
                 unit.Organization -= disorder * step;
 
-            unit.Position = Vec2.MoveTowards(unit.Position, route.Target, step);
+            unit.Position = KeepOnTheField(battle, unit, Vec2.MoveTowards(unit.Position, route.Target, step));
 
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
             {

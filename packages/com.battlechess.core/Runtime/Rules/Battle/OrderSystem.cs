@@ -135,6 +135,26 @@ namespace BattleChess.Rules
             // Already going for this one, so there is nothing to redirect.
             if (unit.Order.Kind == OrderKind.Attack && unit.Order.Target == unit.HeldUpBy) return false;
 
+            // Nor talked out of a fight it has already joined. Two enemies
+            // standing near each other used to hand a regiment back and forth
+            // every single tick: it was told to attack the first, contact
+            // exempted that one and found the second, and next tick the second
+            // became the order and the first became the blocker again. The
+            // logs show a body of spearmen doing this two hundred times in a
+            // row — re-planning a march, having it cancelled, and re-planning
+            // it — while the enemy it was supposedly fighting walked away. Two
+            // combat pulses landed in two full minutes.
+            //
+            // A regiment that has closed with somebody keeps fighting them.
+            // Choosing between two enemies already at sword's length is not a
+            // decision the order rule should be making every second.
+            if (unit.Order.Kind == OrderKind.Attack && unit.Order.Target.IsValid)
+            {
+                UnitInstance current = battle.Get(unit.Order.Target);
+
+                if (current.IsFighting && InContactWith(unit, current)) return false;
+            }
+
             // Never a shooter. Their answer to something in the way is to shoot
             // it, and sending them at it instead was ruinous — a regiment of
             // archers ordered to march was charging spear walls it could not
