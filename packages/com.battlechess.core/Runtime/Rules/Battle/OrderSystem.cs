@@ -169,8 +169,16 @@ namespace BattleChess.Rules
 
             UnitInstance blocker = battle.Get(unit.HeldUpBy);
 
+            // Between the formations, matching the rule that set the hold-up in
+            // the first place. Measured centre to centre this released a unit
+            // the instant it was halted — two lines a hundred metres wide stop
+            // twelve metres apart with their centres still a hundred and twelve
+            // metres away, which read as "clear" and wiped the hold-up before
+            // anything could act on it. The regiment then stood there for the
+            // rest of the battle: too close to be given a fresh march, and with
+            // nothing recorded to tell it what to fight.
             if (!blocker.IsFighting ||
-                Vec2.Distance(unit.Position, blocker.Position) > blocker.ZoneOfControl * 1.2f)
+                OrientedRect.GapBetween(unit.Shape, blocker.Shape) > blocker.ZoneOfControl * 1.2f)
                 unit.HeldUpBy = UnitId.None;
         }
 
@@ -249,7 +257,13 @@ namespace BattleChess.Rules
             Vec2 away = (unit.Position - threat.Position).Normalised();
             if (away.IsNearZero) away = unit.Facing.Opposite().ToVector();
 
-            Vec2 retreat = battle.Terrain.Bounds.Clamp(unit.Position + away * RetreatDistanceMetres);
+            // Backed against the edge of the world, a unit evading has to settle
+            // for the furthest ground it can actually reach. Clamping alone
+            // aimed it into the mountains that ring the map, which failed to
+            // path and left it standing where it was — pinned by geography it
+            // had every right to run along.
+            Vec2 retreat = Reachable(
+                battle, unit, unit.Position + away * RetreatDistanceMetres, unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, retreat, unit.Def.Movement);
 
@@ -350,14 +364,29 @@ namespace BattleChess.Rules
         /// <summary>Plans a march that stops just short of a target.</summary>
         private bool ChaseToward(BattleState battle, UnitInstance unit, UnitInstance quarry, int tick, IBattleLog log, string verb)
         {
-            // Aim for contact rather than the enemy's centre, or the route ends
-            // inside them and the unit spends the fight trying to reach a point
-            // it can never stand on.
-            float standOff = unit.Footprint.HalfDepth + quarry.Footprint.HalfDepth;
             Vec2 approach = (unit.Position - quarry.Position).Normalised();
             if (approach.IsNearZero) approach = unit.Facing.Opposite().ToVector();
 
-            Vec2 aim = battle.Terrain.Bounds.Clamp(quarry.Position + approach * standOff);
+            // How much of each formation lies between the two centres along the
+            // line of approach.
+            //
+            // Adding half-DEPTHS was right only for a head-on meeting. A
+            // regiment coming at a line from the side has to cross half its
+            // frontage — fifty-three metres for cavalry, not four — so the aim
+            // point landed deep inside the enemy formation, at a place the unit
+            // could never stand. It marched at that point, never arrived, and
+            // re-planned the same impossible route every few ticks. From the
+            // player's chair that reads as regiments refusing to engage unless
+            // aimed dead at each other's centres.
+            float standOff = quarry.Shape.ProjectedRadius(approach)
+                           + unit.Shape.ProjectedRadius(approach);
+
+            // Then aim slightly inside contact rather than exactly at its edge,
+            // so arriving means fighting rather than stopping a metre short of
+            // a fight and waiting to be told again.
+            standOff -= ContactMetres * 0.5f;
+
+            Vec2 aim = Reachable(battle, unit, quarry.Position + approach * standOff, unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, aim, unit.Def.Movement);
 
@@ -386,6 +415,57 @@ namespace BattleChess.Rules
 
         /// <summary>How close two formations must come before their men can reach each other.</summary>
         public const float ContactMetres = 8f;
+
+        /// <summary>Step size when hunting back from an unreachable goal, in metres.</summary>
+        private const float ReachableProbeStep = 12f;
+
+        /// <summary>
+        /// The furthest point along the way to <paramref name="want"/> that this
+        /// unit could actually stand on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Clamping a goal to the map bounds puts it exactly on the boundary,
+        /// and the boundary is where the impassable ground lives — the valley
+        /// map is ringed with mountains and has deep water along one side. So
+        /// any order that reached for the edge produced a goal no route could
+        /// ever end at, the pathfinder correctly refused it, and the regiment
+        /// stood still. In the corner, where two impassable edges meet, nothing
+        /// could get out again.
+        /// </para>
+        /// <para>
+        /// Walks back toward <paramref name="from"/> until the ground is
+        /// passable to this unit. Falls back to where the unit already stands,
+        /// which is by definition somewhere it can be.
+        /// </para>
+        /// </remarks>
+        private static Vec2 Reachable(BattleState battle, UnitInstance unit, Vec2 want, Vec2 from)
+        {
+            Vec2 goal = battle.Terrain.Bounds.Clamp(want);
+
+            if (CanStandAt(battle, unit, goal)) return goal;
+
+            Vec2 back = from - goal;
+            float distance = back.Length;
+
+            if (distance < 0.01f) return from;
+
+            Vec2 step = back / distance * ReachableProbeStep;
+            int probes = (int)(distance / ReachableProbeStep);
+
+            for (int i = 1; i <= probes; i++)
+            {
+                Vec2 probe = goal + step * i;
+
+                if (CanStandAt(battle, unit, probe)) return probe;
+            }
+
+            return from;
+        }
+
+        private static bool CanStandAt(BattleState battle, UnitInstance unit, Vec2 point) =>
+            battle.Terrain.Bounds.Contains(point) &&
+            battle.Movement.SpeedMultiplier(battle.Terrain.At(point), unit.Def.Movement) > 0f;
 
         /// <summary>Whether two units are close enough to be considered in contact.</summary>
         /// <remarks>
@@ -427,12 +507,17 @@ namespace BattleChess.Rules
                 float alarm = MathF.Max(unit.ZoneOfControl, other.ZoneOfControl)
                               + other.BaseSpeed * ReactionSeconds;
 
-                float squared = Vec2.DistanceSquared(unit.Position, other.Position);
-                if (squared > alarm * alarm) continue;
+                // Between the formations, because that is what a zone of
+                // control now means. Comparing a belt width against a
+                // centre-to-centre distance is comparing two different
+                // quantities: a hundred-metre line would have to be sitting on
+                // top of this unit before the numbers agreed anything was near.
+                float gap = OrientedRect.GapBetween(unit.Shape, other.Shape);
+                if (gap > alarm) continue;
 
-                if (squared < bestSquared)
+                if (gap < bestSquared)
                 {
-                    bestSquared = squared;
+                    bestSquared = gap;
                     nearest = other;
                 }
             }
@@ -451,13 +536,13 @@ namespace BattleChess.Rules
                 if (!other.IsFighting && !(includeRouting && other.State == UnitState.Routing)) continue;
 
                 float reach = MathF.Max(unit.ZoneOfControl, other.ZoneOfControl) * reachFactor;
-                float squared = Vec2.DistanceSquared(unit.Position, other.Position);
+                float gap = OrientedRect.GapBetween(unit.Shape, other.Shape);
 
-                if (squared > reach * reach) continue;
+                if (gap > reach) continue;
 
-                if (squared < bestSquared)
+                if (gap < bestSquared)
                 {
-                    bestSquared = squared;
+                    bestSquared = gap;
                     nearest = other;
                 }
             }
