@@ -83,6 +83,59 @@ namespace BattleChess.Tests.Battle
                 $"rear {rear:0.0}%.");
         }
 
+        // ---- A charge is spent, and has to be re-earned -------------------------
+        //
+        // The charge bonus was already meant to land once per engagement, and
+        // did — but a contact was forgotten the instant it broke, so a regiment
+        // that rode clean through bought a fresh one on the way out. Cavalry
+        // overshot by fifty metres, wheeled a hundred and seventy degrees, came
+        // back and charged again: four exchanges, two of them charges, and a
+        // ten-to-one result that had nothing to do with the attacker being
+        // stronger.
+
+        [Fact]
+        public void WheelingRoundAndComingStraightBackDoesNotBuyAnotherCharge()
+        {
+            int charges = ChargesLandedBouncing(overshootMetres: 60f, passes: 3);
+
+            Assert.Equal(1, charges);
+        }
+
+        [Fact]
+        public void BreakingOffProperlyAndReformingEarnsAFreshCharge()
+        {
+            Assert.True(ChargesLandedBouncing(overshootMetres: 260f, passes: 3) > 1,
+                "A charge has to be re-earnable or cavalry becomes a one-shot weapon. Riding clear, " +
+                "turning about and building to a gallop again is precisely what it should cost — the " +
+                "fault was ever getting it for a fifty-metre bounce.");
+        }
+
+        /// <summary>
+        /// Rides cavalry through a standing line and back again, overshooting
+        /// by a given distance each time, and counts the charges that landed.
+        /// </summary>
+        private static int ChargesLandedBouncing(float overshootMetres, int passes)
+        {
+            var field = new Battlefield("plains", 9900);
+
+            UnitInstance foot = field.Add(1, "swordsmen", field.Centre, Facing.West);
+            Battlefield.Hold(foot);
+
+            UnitInstance horse = field.Add(0, "cavalry", field.Centre - new Vec2(overshootMetres, 0f), Facing.East);
+
+            for (int pass = 0; pass < passes; pass++)
+            {
+                float side = pass % 2 == 0 ? 1f : -1f;
+
+                field.March(horse, field.Centre + new Vec2(overshootMetres * side, 0f));
+
+                // Long enough to get there and settle, whichever distance it is.
+                field.RunTurns(4);
+            }
+
+            return field.TimesSaid("Charge lands");
+        }
+
         /// <summary>
         /// Marches cavalry back and forth through a standing body of infantry,
         /// as a plain move order rather than an attack.

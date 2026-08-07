@@ -165,6 +165,63 @@ namespace BattleChess.Contracts
             MathF.Abs(Vec2.Dot(betweenCentres, axis)) >= a.ProjectedRadius(axis) + b.ProjectedRadius(axis);
 
         /// <summary>
+        /// The width of the gap between two placed footprints in metres, or
+        /// zero if they overlap.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The question every rule about nearness should be asking.</b>
+        /// Centre-to-centre distance is the wrong measure for regiments,
+        /// because a regiment is a wide, thin rectangle rather than a token: a
+        /// body of cavalry a hundred and six metres across and eight deep has
+        /// its centre nowhere near most of itself. Two such regiments sliding
+        /// past one another twenty metres apart have their formations
+        /// completely interpenetrated while their centres are still a hundred
+        /// metres away from each other, and any rule measuring centres calls
+        /// that "not touching".
+        /// </para>
+        /// <para>
+        /// Computed as the largest separation over the four candidate axes,
+        /// which is exact whenever the nearest features are a face and a
+        /// corner — the ordinary case for troops drawn up in lines. Two
+        /// rectangles meeting corner to corner at an angle report slightly
+        /// less than the true gap, so this errs toward calling things close.
+        /// For deciding whether men can reach each other with a sword that is
+        /// the right way to be wrong.
+        /// </para>
+        /// </remarks>
+        public static float GapBetween(in OrientedRect a, in OrientedRect b)
+        {
+            Vec2 betweenCentres = b.Centre - a.Centre;
+
+            float widest = float.MinValue;
+
+            Span<Vec2> axes = stackalloc Vec2[4];
+            axes[0] = a.Right;
+            axes[1] = a.Forward;
+            axes[2] = b.Right;
+            axes[3] = b.Forward;
+
+            for (int i = 0; i < axes.Length; i++)
+            {
+                float separation = MathF.Abs(Vec2.Dot(betweenCentres, axes[i]))
+                                 - a.ProjectedRadius(axes[i])
+                                 - b.ProjectedRadius(axes[i]);
+
+                if (separation > widest) widest = separation;
+            }
+
+            return widest > 0f ? widest : 0f;
+        }
+
+        /// <summary>
+        /// Whether two placed footprints are within <paramref name="metres"/> of
+        /// each other, edge to edge.
+        /// </summary>
+        public static bool Within(in OrientedRect a, in OrientedRect b, float metres) =>
+            GapBetween(a, b) <= metres;
+
+        /// <summary>
         /// If <paramref name="a"/> and <paramref name="b"/> overlap, yields the
         /// shortest translation that would move <paramref name="a"/> clear of
         /// <paramref name="b"/>.

@@ -134,10 +134,17 @@ namespace BattleChess.Unity
                     DrawCircle(unit.Shape.Centre, unit.Clearance, ClearanceColour, BandFor(unit.Clearance));
             }
 
+            // A belt around the formation, not a circle around its centre —
+            // because that is what the rule now measures. Drawn as a ring meant
+            // the overlay disagreed with the game in the worst possible way: a
+            // ninety-seven metre line of swordsmen showed a thirty metre bubble,
+            // so an enemy marching through the end of the line looked like it
+            // had every right to. The picture you tune by has to be the picture
+            // the rules use.
             if (Options.ShowZoneOfControl)
             {
                 foreach (OverlayUnit unit in _units)
-                    DrawCircle(unit.Shape.Centre, unit.Zoc, ZocColour, BandFor(unit.Zoc));
+                    DrawRect(Grown(unit.Shape, unit.Zoc), ZocColour);
             }
 
             // Drawn from where the unit actually stands, so stepping a regiment
@@ -199,6 +206,22 @@ namespace BattleChess.Unity
 
             GL.End();
         }
+
+        /// <summary>
+        /// The same formation with a margin of <paramref name="metres"/> added
+        /// on every side.
+        /// </summary>
+        /// <remarks>
+        /// Squared off rather than rounded at the corners, which matches how
+        /// the rules measure it: the gap between two formations is the widest
+        /// separation over the four candidate axes, so a corner counts as
+        /// slightly nearer than true straight-line distance would make it.
+        /// </remarks>
+        private static OrientedRect Grown(in OrientedRect rect, float metres) =>
+            new OrientedRect(
+                rect.Centre,
+                rect.Facing,
+                new Footprint(rect.Footprint.Width + 2f * metres, rect.Footprint.Depth + 2f * metres));
 
         private static void DrawRect(in OrientedRect rect, Color colour)
         {

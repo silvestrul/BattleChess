@@ -160,7 +160,12 @@ namespace BattleChess.Rules
             // the same mud, and a long march through open woods would end in a
             // rabble. Crossing a river costs what the river is wide, whether
             // you wade it quickly or slowly.
-            float disorder = battle.TerrainAt(unit.Position).Get(TerrainAttributes.Disorder);
+            //
+            // Read under the whole formation and charged at its worst, not
+            // sampled at the centre. A hundred-metre line with one flank in a
+            // river is in trouble across its whole front, and the man in the
+            // middle standing on dry grass does not change that.
+            float disorder = battle.WorstDisorderUnder(unit);
 
             if (disorder > 0f)
                 unit.Organization -= disorder * step;

@@ -72,13 +72,21 @@ namespace BattleChess.Rules
             // loose order, or shaken, are ridden straight through.
             float breakthrough = unit.EffectiveBreakthrough;
 
+            OrientedRect shape = unit.Shape;
+
             foreach (UnitInstance enemy in battle.UnitsOnField())
             {
                 if (enemy.Owner == unit.Owner) continue;
                 if (!enemy.IsFighting) continue;
 
-                float reach = enemy.ZoneOfControl;
-                if (Vec2.DistanceSquared(unit.Position, enemy.Position) > reach * reach) continue;
+                // A zone of control is a belt of ground around the formation,
+                // not a circle around its centre. Measured from the centre it
+                // was frequently narrower than the regiment itself: swordsmen
+                // stand ninety-seven metres across and reach thirty, so two
+                // thirds of their own front lay outside the ground they were
+                // supposed to be controlling, and an enemy could march straight
+                // through the end of the line without ever entering it.
+                if (!OrientedRect.Within(shape, enemy.Shape, enemy.ZoneOfControl)) continue;
 
                 // A unit already inside the zone may still back out of it. Zone
                 // of control stops an advance into or through controlled ground;
@@ -108,7 +116,7 @@ namespace BattleChess.Rules
                     if (unit.HeldUpBy != enemy.Id)
                         log.Blocked("Contact",
                             $"{unit.Def.DisplayName} halts on contact with {enemy.Def.DisplayName} at " +
-                            $"{Vec2.Distance(unit.Position, enemy.Position):0} m — standing on Defend. " +
+                            $"{OrientedRect.GapBetween(shape, enemy.Shape):0} m — standing on Defend. " +
                             "It can still be ordered to withdraw.",
                             unit.Id);
 
@@ -141,7 +149,7 @@ namespace BattleChess.Rules
                     log.Blocked("Contact",
                         $"{unit.Def.DisplayName} ({unit.FormationOrder.DisplayName}) halted by {enemy.Def.DisplayName} " +
                         $"({enemy.FormationOrder.DisplayName}, organization {enemy.Organization:0.00}) " +
-                        $"at {Vec2.Distance(unit.Position, enemy.Position):0} m — " +
+                        $"at {OrientedRect.GapBetween(shape, enemy.Shape):0} m — " +
                         $"breakthrough {breakthrough:0.00} against stopping power {stopping:0.00}.",
                         unit.Id);
 

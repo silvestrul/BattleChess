@@ -186,17 +186,33 @@ namespace BattleChess.Tests.Battle
             unit.GiveOrder(UnitOrder.Stand(), unit.Position);
         }
 
+        /// <summary>
+        /// Everything the rules said while this battle ran.
+        /// </summary>
+        /// <remarks>
+        /// Some behaviour is far easier to assert on through what the rules
+        /// <i>reported</i> than through the state they left behind. Whether a
+        /// charge landed is the clearest case: the effect is a multiplier
+        /// buried inside a casualty figure that a dozen other things also move,
+        /// but the combat rule says "Charge lands" in as many words, so
+        /// counting those is both exact and legible in a failure message.
+        /// </remarks>
+        public TranscriptLog Transcript { get; } = new TranscriptLog();
+
+        /// <summary>How many times a line contains a given phrase.</summary>
+        public int TimesSaid(string phrase) => Transcript.Count(phrase);
+
         public void RunTurns(int turns)
         {
             for (int i = 0; i < turns; i++)
-                Clock.AdvanceTurn(State);
+                Clock.AdvanceTurn(State, Transcript);
         }
 
         /// <summary>Runs combat pulses only — ten ticks each.</summary>
         public void RunPulses(int pulses)
         {
             for (int i = 0; i < pulses * CombatSystem.PulseIntervalTicks; i++)
-                Clock.Advance(State);
+                Clock.Advance(State, Transcript);
         }
 
         /// <summary>
@@ -212,7 +228,7 @@ namespace BattleChess.Tests.Battle
         {
             for (int turn = 1; turn <= maxTurns; turn++)
             {
-                Clock.AdvanceTurn(State);
+                Clock.AdvanceTurn(State, Transcript);
 
                 if (condition())
                     return turn;
@@ -229,7 +245,7 @@ namespace BattleChess.Tests.Battle
         {
             for (int turn = 1; turn <= maxTurns; turn++)
             {
-                Clock.AdvanceTurn(State);
+                Clock.AdvanceTurn(State, Transcript);
 
                 foreach (UnitInstance unit in watch)
                 {

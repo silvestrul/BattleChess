@@ -384,12 +384,22 @@ namespace BattleChess.Rules
 
         // ---- Helpers ---------------------------------------------------------
 
+        /// <summary>How close two formations must come before their men can reach each other.</summary>
+        public const float ContactMetres = 8f;
+
         /// <summary>Whether two units are close enough to be considered in contact.</summary>
-        public static bool InContactWith(UnitInstance unit, UnitInstance other)
-        {
-            float contact = unit.Footprint.HalfDepth + other.Footprint.HalfDepth + 8f;
-            return Vec2.DistanceSquared(unit.Position, other.Position) <= contact * contact;
-        }
+        /// <remarks>
+        /// Measured between the two formations, not between their centres.
+        /// Adding half-depths and comparing centres assumed the regiments were
+        /// standing nose to nose, which is the one arrangement where it happens
+        /// to be right. A body of cavalry is a hundred and six metres wide and
+        /// eight deep, so that sum let it count as fighting only within sixteen
+        /// metres — and two such regiments could slide past one another twenty
+        /// metres apart, formations fully interpenetrated, with the rules
+        /// insisting they had never met.
+        /// </remarks>
+        public static bool InContactWith(UnitInstance unit, UnitInstance other) =>
+            OrientedRect.Within(unit.Shape, other.Shape, ContactMetres);
 
         /// <summary>
         /// The nearest enemy close enough to be worth running from.

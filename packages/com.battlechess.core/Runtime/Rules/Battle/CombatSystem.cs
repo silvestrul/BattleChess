@@ -121,8 +121,35 @@ namespace BattleChess.Rules
         /// </remarks>
         private const float SurroundedDisorderPerPulse = 0.06f;
 
-        /// <summary>Units already in contact, so a charge is only spent once.</summary>
-        private readonly HashSet<long> _engaged = new HashSet<long>();
+        /// <summary>How far a regiment must get clear before it can charge the same enemy again, in metres.</summary>
+        /// <remarks>
+        /// A charge is a run-up, not a state of mind. Cavalry covers this in
+        /// about half a turn at the gallop, which is roughly what it takes to
+        /// come round, re-dress the ranks and build to speed again.
+        /// </remarks>
+        private const float ChargeReformMetres = 150f;
+
+        /// <summary>And how long it must spend out of contact before it counts as re-formed.</summary>
+        private const int ChargeReformTicks = 30;
+
+        /// <summary>
+        /// Pairs already in contact and the last tick they touched, so a charge
+        /// is spent once and re-earned rather than repeated.
+        /// </summary>
+        /// <remarks>
+        /// The tick matters as much as the pair. Forgetting a contact the
+        /// moment it broke meant a regiment that rode clean through an enemy
+        /// bought a fresh charge on the way out: cavalry overshot, wheeled a
+        /// hundred and seventy degrees, came back and landed a full charge
+        /// bonus again — four exchanges, two of them charges, and a ten-to-one
+        /// result that had nothing to do with the attacker being stronger. It
+        /// simply could not be stopped, and anything that cannot be stopped is
+        /// permanently charging.
+        /// </remarks>
+        private readonly Dictionary<long, int> _engaged = new Dictionary<long, int>();
+
+        /// <summary>Scratch list for pruning, so the dictionary is never modified while read.</summary>
+        private readonly List<long> _reformed = new List<long>();
 
         /// <summary>
         /// Pairs that have touched at any point since the last pulse.
@@ -166,7 +193,8 @@ namespace BattleChess.Rules
 
                 if (!unit.IsFighting || !other.IsFighting) continue;
 
-                bool fresh = _engaged.Add(pair);
+                bool fresh = !_engaged.ContainsKey(pair);
+                _engaged[pair] = tick;
 
                 unit.EnemiesInContact++;
                 other.EnemiesInContact++;
@@ -176,8 +204,7 @@ namespace BattleChess.Rules
 
             _touched.Clear();
 
-            // Forget contacts that have broken, so re-engaging charges again.
-            _engaged.RemoveWhere(pair => !StillTouching(battle, pair));
+            ForgetReformedPairs(battle, tick);
 
             // Once per unit per pulse, not once per exchange. Charging it per
             // exchange made the cost grow with the square of the attackers and
@@ -483,15 +510,46 @@ namespace BattleChess.Rules
 
         private static long PairKey(UnitId a, UnitId b) => ((long)a.Value << 32) | (uint)b.Value;
 
-        private static bool StillTouching(BattleState battle, long pair)
+        /// <summary>
+        /// Releases pairs that have genuinely broken off and re-formed, so
+        /// their next meeting counts as a fresh charge.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Both conditions are required, and requiring both is the whole point.
+        /// Distance alone lets a fast regiment buy a charge by bouncing out and
+        /// straight back in; time alone lets two lines that have been grinding
+        /// at each other for half a turn suddenly charge without either of them
+        /// going anywhere.
+        /// </para>
+        /// <para>
+        /// The dictionary is read in hash order here, which is normally
+        /// forbidden in the rules. It is safe in this one place because the
+        /// outcome does not depend on the order: every pair is tested against
+        /// the same two conditions and the same set is removed whichever
+        /// sequence they are visited in. Nothing ordered is derived from the
+        /// walk.
+        /// </para>
+        /// </remarks>
+        private void ForgetReformedPairs(BattleState battle, int tick)
         {
-            var a = new UnitId((int)(pair >> 32));
-            var b = new UnitId((int)(pair & 0xFFFFFFFF));
+            _reformed.Clear();
 
-            UnitInstance first = battle.Get(a);
-            UnitInstance second = battle.Get(b);
+            foreach (KeyValuePair<long, int> entry in _engaged)
+            {
+                if (tick - entry.Value < ChargeReformTicks) continue;
 
-            return first.IsFighting && second.IsFighting && OrderSystem.InContactWith(first, second);
+                var first = battle.Get(new UnitId((int)(entry.Key >> 32)));
+                var second = battle.Get(new UnitId((int)(entry.Key & 0xFFFFFFFF)));
+
+                // A regiment that has left the field has plainly disengaged.
+                if (!first.IsFighting || !second.IsFighting ||
+                    OrientedRect.GapBetween(first.Shape, second.Shape) > ChargeReformMetres)
+                    _reformed.Add(entry.Key);
+            }
+
+            for (int i = 0; i < _reformed.Count; i++)
+                _engaged.Remove(_reformed[i]);
         }
     }
 }
