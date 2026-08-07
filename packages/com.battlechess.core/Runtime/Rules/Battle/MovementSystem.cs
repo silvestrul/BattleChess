@@ -76,10 +76,79 @@ namespace BattleChess.Rules
                 // place to be cut down where they broke, which is not a rout,
                 // it is an execution.
                 if (!unit.IsFighting && unit.State != UnitState.Routing) continue;
-                if (unit.Route == null || unit.Route.IsComplete) continue;
+
+                if (unit.Route == null || unit.Route.IsComplete)
+                {
+                    TurnToFaceTheFight(battle, unit);
+                    continue;
+                }
 
                 StepUnit(battle, unit, tick, log);
             }
+        }
+
+        /// <summary>
+        /// Brings a halted regiment round to face whatever is fighting it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Facing used to be set only while marching, so a unit that stopped
+        /// kept whatever bearing it happened to halt on — for the rest of the
+        /// battle. A regiment that arrived at an angle then fought permanently
+        /// flanked, taking up to twice the casualties it should, and nothing
+        /// anywhere said why. Cavalry charging home, overshooting slightly and
+        /// stopping side-on was losing to swordsmen it beats comfortably.
+        /// </para>
+        /// <para>
+        /// This is also what makes flanking a manoeuvre rather than a lottery.
+        /// A flank attack should be worth something because you got round them
+        /// faster than they could come about — which is exactly what turn rate
+        /// is for, and why a pike block at two and a half degrees a second is
+        /// so much easier to catch than cavalry at seven. Without it, the bonus
+        /// went to whoever happened to stop on a lucky bearing.
+        /// </para>
+        /// <para>
+        /// At the ordinary turn rate, not the halted pivot bonus. Coming about
+        /// with an enemy already among you is the hardest way to do it.
+        /// </para>
+        /// </remarks>
+        private static void TurnToFaceTheFight(BattleState battle, UnitInstance unit)
+        {
+            if (unit.EnemiesInContact <= 0) return;
+
+            UnitInstance? enemy = NearestEnemyInContact(battle, unit);
+            if (enemy == null) return;
+
+            Vec2 toEnemy = enemy.Position - unit.Position;
+            if (toEnemy.IsNearZero) return;
+
+            float turnThisTick = unit.Def.Get(UnitAttributes.TurnRate) * BattleClock.SecondsPerTick;
+
+            unit.Facing = Facing.RotateTowards(
+                unit.Facing, Facing.FromVector(toEnemy), turnThisTick * MathF.PI / 180f);
+        }
+
+        private static UnitInstance? NearestEnemyInContact(BattleState battle, UnitInstance unit)
+        {
+            UnitInstance? nearest = null;
+            float bestSquared = float.MaxValue;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Owner == unit.Owner) continue;
+                if (!other.IsFighting) continue;
+                if (!OrderSystem.InContactWith(unit, other)) continue;
+
+                float squared = Vec2.DistanceSquared(unit.Position, other.Position);
+
+                if (squared < bestSquared)
+                {
+                    bestSquared = squared;
+                    nearest = other;
+                }
+            }
+
+            return nearest;
         }
 
         private static void StepUnit(BattleState battle, UnitInstance unit, int tick, IBattleLog log)

@@ -275,6 +275,15 @@ namespace BattleChess.Rules
                                + right * Offset(a, across, footprint.HalfWidth)
                                + forward * alongDepth;
 
+                    // A regiment standing near the edge has part of its
+                    // frontage hanging over the end of the world, and there is
+                    // no ground out there to disorder anybody. Sampling it
+                    // anyway asked the catalogue about a terrain id that does
+                    // not exist, which threw — inside the movement system, on
+                    // every tick, so the whole battle stopped advancing and the
+                    // army appeared to be stuck against the border.
+                    if (!Terrain.Bounds.Contains(point)) continue;
+
                     float disorder = TerrainAt(point).Get(TerrainAttributes.Disorder);
 
                     if (disorder > worst) worst = disorder;
