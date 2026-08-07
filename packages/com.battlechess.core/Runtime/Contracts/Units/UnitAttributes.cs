@@ -93,6 +93,24 @@ namespace BattleChess.Contracts
         public static readonly AttributeKey<float> RangedAttack =
             Registry.Define("rangedAttack", 0f, AttributeParsers.Float);
 
+        /// <summary>
+        /// Shots a unit carries into the battle. Zero means it never runs out.
+        /// </summary>
+        /// <remarks>
+        /// The thing that stops a battery being a permanent feature of the
+        /// landscape. Guns firing for thirty-two turns without pause took three
+        /// quarters of a regiment off the field a handful of men at a time, and
+        /// no amount of tuning the damage fixes that — the problem is the
+        /// number of volleys, not the size of them. With a limit, artillery
+        /// becomes something you have to spend at the right moment.
+        ///
+        /// Per man, like everything else here: a hundred archers with thirty
+        /// arrows apiece is three thousand shafts, and the regiment fires until
+        /// they are gone.
+        /// </remarks>
+        public static readonly AttributeKey<int> Ammunition =
+            Registry.Define("ammunition", 0, AttributeParsers.Int);
+
         /// <summary>Ticks between shots.</summary>
         /// <remarks>
         /// Ten is one shot per combat pulse. Guns are far slower to serve, which
@@ -139,6 +157,20 @@ namespace BattleChess.Contracts
         /// </remarks>
         public static readonly AttributeKey<float> MeleeShockResistance =
             Registry.Define("meleeShockResistance", 1f, AttributeParsers.Float);
+
+        /// <summary>
+        /// How much a regiment's own quality may differ from the book figure,
+        /// as a fraction either way.
+        /// </summary>
+        /// <remarks>
+        /// Rolled once when the unit is raised, off the battle seed, so a
+        /// published seed still replays exactly. Two spearmen regiments stop
+        /// being interchangeable: one is steadier than the other and you find
+        /// out which under pressure, which is what makes a reserve worth
+        /// holding and a veteran regiment worth remembering.
+        /// </remarks>
+        public static readonly AttributeKey<float> QualitySpread =
+            Registry.Define("qualitySpread", 0.2f, AttributeParsers.Float);
 
         /// <summary>Tie-break ordering when two units contest the same ground.</summary>
         public static readonly AttributeKey<int> Initiative =

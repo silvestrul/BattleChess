@@ -65,6 +65,7 @@ namespace BattleChess.Unity
         private string _status = string.Empty;
         private string _error;
         private GUIStyle _nameplate;
+        private GUIStyle _ghostPlate;
 
         private void Start()
         {
@@ -462,6 +463,59 @@ namespace BattleChess.Unity
 
                 view.Spotted = !fogged || _battle.Vision.CanSee(_battle, viewer, view.Unit);
             }
+        }
+
+        /// <summary>
+        /// Draws a faint marker wherever the viewing army last laid eyes on an
+        /// enemy it can no longer see.
+        /// </summary>
+        /// <remarks>
+        /// What turns fog from amnesia into intelligence. Without it a regiment
+        /// that walks out of sight simply ceases to exist and there is nothing
+        /// to plan against; with it you act on what you knew and find out
+        /// whether it was still true. Deliberately faint, and fainter as it
+        /// ages — the marker is exactly as trustworthy as it is old.
+        /// </remarks>
+        private void DrawGhosts()
+        {
+            if (_options.ViewingArmy < 0 || Camera.main == null) return;
+
+            var viewer = new PlayerId(_options.ViewingArmy);
+
+            if (_ghostPlate == null)
+                _ghostPlate = new GUIStyle(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontSize = 12,
+                    fontStyle = FontStyle.Italic,
+                };
+
+            Color original = GUI.color;
+
+            foreach (UnitInstance unit in _battle.AllUnits)
+            {
+                if (unit.Owner == viewer) continue;
+                if (_battle.Vision.CanSee(_battle, viewer, unit)) continue;
+
+                if (!_battle.Vision.TryRecall(_battle, viewer, unit, out Vec2 where, out int age)) continue;
+
+                Vector3 screen = Camera.main.WorldToScreenPoint(new Vector3(where.X, where.Y, 0f));
+                if (screen.z < 0f) continue;
+
+                // Fades out over about five turns, so a stale marker stops
+                // shouting long before it stops being shown.
+                float trust = Mathf.Clamp01(1f - age / (5f * BattleClock.TicksPerTurn));
+
+                GUI.color = new Color(1f, 1f, 1f, 0.15f + 0.35f * trust);
+
+                int turnsAgo = age / BattleClock.TicksPerTurn;
+
+                GUI.Label(new Rect(screen.x - 60f, Screen.height - screen.y - 12f, 120f, 24f),
+                    $"? {unit.Def.DisplayName}" + (turnsAgo > 0 ? $"  ({turnsAgo}t ago)" : string.Empty),
+                    _ghostPlate);
+            }
+
+            GUI.color = original;
         }
 
         private void OnDisable() => _console.StopRecording();
@@ -944,6 +998,7 @@ namespace BattleChess.Unity
                 "Space pause    . step    +/- speed    Right-drag pan    F1 debug");
 
             DrawUnitLabels();
+            DrawGhosts();
 
             if (!_options.Visible) return;
 

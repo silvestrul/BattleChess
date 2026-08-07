@@ -154,6 +154,17 @@ namespace BattleChess.Rules
             float speed = terrainSpeed * AlignmentPenalty(offByDegrees);
             float step = speed * BattleClock.SecondsPerTick;
 
+            // Bad ground pulls a formation apart as it is crossed. Charged per
+            // metre rather than per second, because rough country is already
+            // slow — billing by the second would make a regiment pay twice for
+            // the same mud, and a long march through open woods would end in a
+            // rabble. Crossing a river costs what the river is wide, whether
+            // you wade it quickly or slowly.
+            float disorder = battle.TerrainAt(unit.Position).Get(TerrainAttributes.Disorder);
+
+            if (disorder > 0f)
+                unit.Organization -= disorder * step;
+
             unit.Position = Vec2.MoveTowards(unit.Position, route.Target, step);
 
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)

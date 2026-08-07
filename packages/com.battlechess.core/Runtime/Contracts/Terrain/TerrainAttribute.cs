@@ -42,6 +42,29 @@ namespace BattleChess.Contracts
             Registry.Define("sightCost", 1f, AttributeParsers.Float);
 
         /// <summary>
+        /// Organization torn out of a formation per second of moving through
+        /// this ground.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Crossing a river or picking through rocks is not merely slow — it
+        /// pulls a body of men out of shape. Men wade at their own pace, files
+        /// break to go round obstacles, and what comes out the far side is a
+        /// crowd facing roughly the right way.
+        /// </para>
+        /// <para>
+        /// The units that live by cohesion suffer most, and that falls out
+        /// without a special case: a spear wall's stopping power is its base
+        /// figure times its formation times its condition, and both of the last
+        /// two answer to organization. A phalanx that has crossed a river is a
+        /// hedge of spears in name only — which is exactly why you make cavalry
+        /// wait for them to do it.
+        /// </para>
+        /// </remarks>
+        public static readonly AttributeKey<float> Disorder =
+            Registry.Define("disorder", 0f, AttributeParsers.Float);
+
+        /// <summary>
         /// Proportional bonus to the sight of a unit standing on this ground.
         /// </summary>
         /// <remarks>

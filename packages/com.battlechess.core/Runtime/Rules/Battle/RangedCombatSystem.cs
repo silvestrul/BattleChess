@@ -35,8 +35,19 @@ namespace BattleChess.Rules
         /// <summary>How much of its power a shot keeps at maximum range.</summary>
         private const float DamageAtMaxRange = 0.5f;
 
-        /// <summary>Spread of the random variation on each volley.</summary>
-        private const float VolleyVariance = 0.1f;
+        /// <summary>Spread of the random variation on a volley at point blank.</summary>
+        private const float VolleyVariance = 0.15f;
+
+        /// <summary>Extra spread added on a volley at the very edge of range.</summary>
+        /// <remarks>
+        /// Accuracy, expressed as uncertainty rather than as a hit roll. Close
+        /// up a volley does what the arithmetic says; at the limit of the bow
+        /// it might land beautifully or sail over entirely, and the shooter
+        /// cannot tell which until it arrives. Widening the spread with
+        /// distance gives that without a separate to-hit mechanic and without
+        /// the all-or-nothing feel of one.
+        /// </remarks>
+        private const float LongRangeVariance = 0.45f;
 
         /// <summary>Morale shock per fraction of a regiment shot away.</summary>
         /// <remarks>
@@ -69,6 +80,8 @@ namespace BattleChess.Rules
                 float range = shooter.Def.Get(UnitAttributes.Range);
                 if (range <= 0f) continue;
 
+                if (!shooter.HasAmmunition) continue;
+
                 if (shooter.ReloadRemaining > 0)
                 {
                     shooter.ReloadRemaining--;
@@ -83,6 +96,17 @@ namespace BattleChess.Rules
 
                 Fire(battle, shooter, target, range, log);
                 shooter.ReloadRemaining = Math.Max(1, shooter.Def.Get(UnitAttributes.ReloadTicks));
+
+                // A volley is one shot from every man still standing.
+                if (shooter.ShotsLeft > 0)
+                {
+                    shooter.ShotsLeft = Math.Max(0, shooter.ShotsLeft - shooter.Strength);
+
+                    if (shooter.ShotsLeft == 0)
+                        log.Warning("Shooting",
+                            $"{shooter.Def.DisplayName} has shot away the last of its ammunition.",
+                            shooter.Id);
+                }
             }
         }
 
@@ -108,6 +132,22 @@ namespace BattleChess.Rules
         /// </remarks>
         private static UnitInstance? ChooseTarget(BattleState battle, UnitInstance shooter, float range)
         {
+            // What the player actually asked for comes first. Picking the
+            // nearest enemy regardless of orders meant a battery told to
+            // silence the guns opposite quietly shelled whatever infantry
+            // happened to wander closest, and changed its mind every volley as
+            // the line shifted — which reads exactly like choosing at random.
+            if (shooter.Order.Kind == OrderKind.Attack && shooter.Order.Target.IsValid)
+            {
+                UnitInstance ordered = battle.Get(shooter.Order.Target);
+
+                if (ordered.IsOnField &&
+                    ordered.Owner != shooter.Owner &&
+                    Vec2.DistanceSquared(shooter.Position, ordered.Position) <= range * range &&
+                    battle.Vision.CanSee(battle, shooter.Owner, ordered))
+                    return ordered;
+            }
+
             UnitInstance? nearest = null;
             float bestSquared = range * range;
 
@@ -164,7 +204,10 @@ namespace BattleChess.Rules
                         // Woods hide them; a river crossing leaves them with
                         // nowhere to go and nothing to get behind.
                         * ground.Get(TerrainAttributes.RangedCover)
-                        * battle.Rng.NextVariance(VolleyVariance);
+                        // Spread widens with distance: near certainty at point
+                        // blank, a real gamble at the edge of the range.
+                        * battle.Rng.NextVariance(
+                            VolleyVariance + LongRangeVariance * Math.Clamp(distance / range, 0f, 1f));
 
             int casualties = Math.Clamp((int)MathF.Round(raw), 0, target.Strength);
             if (casualties <= 0) return;

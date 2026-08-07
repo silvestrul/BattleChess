@@ -130,8 +130,19 @@ namespace BattleChess.Rules
         /// </remarks>
         private static bool TryFightWhatBlocks(BattleState battle, UnitInstance unit, IBattleLog log)
         {
-            if (unit.Order.Kind == OrderKind.Attack) return false;
             if (!unit.HeldUpBy.IsValid) return false;
+
+            // Already going for this one, so there is nothing to redirect.
+            if (unit.Order.Kind == OrderKind.Attack && unit.Order.Target == unit.HeldUpBy) return false;
+
+            // Never a shooter. Their answer to something in the way is to shoot
+            // it, and sending them at it instead was ruinous — a regiment of
+            // archers ordered to march was charging spear walls it could not
+            // scratch, losing seven men a pulse while dealing literally none,
+            // until it broke. Judged on what the unit is armed for rather than
+            // on its name, so a new missile unit inherits it for free.
+            if (unit.Def.Get(UnitAttributes.RangedAttack) > unit.Def.Get(UnitAttributes.Attack))
+                return false;
 
             UnitInstance blocker = battle.Get(unit.HeldUpBy);
             if (!blocker.IsFighting) return false;

@@ -136,6 +136,31 @@ namespace BattleChess.Rules
         /// <summary>Ticks left before this unit can shoot again.</summary>
         public int ReloadRemaining { get; set; }
 
+        /// <summary>
+        /// Shots this regiment has left, or -1 if it never runs out.
+        /// </summary>
+        /// <remarks>
+        /// Counted for the whole body rather than per man, because that is the
+        /// number the player cares about: how many more volleys is this worth.
+        /// </remarks>
+        public int ShotsLeft { get; set; } = -1;
+
+        public bool HasAmmunition => ShotsLeft != 0;
+
+        /// <summary>
+        /// This regiment's own steadiness, rolled once when it was raised.
+        /// </summary>
+        /// <remarks>
+        /// A multiplier on the book morale figure, so two regiments of the same
+        /// troops are not interchangeable. One is steadier than the other and
+        /// you find out which under pressure — which is the whole reason to
+        /// hold a reserve and to remember which regiment held last time.
+        /// </remarks>
+        public float Quality { get; set; } = 1f;
+
+        /// <summary>Steadiness actually used by the morale rule.</summary>
+        public float MoraleRating => Def.Get(UnitAttributes.Morale) * Quality;
+
         /// <summary>Where the unit stood when it last received an order.</summary>
         /// <remarks>Anchors pursuit, so an aggressive unit cannot be lured off the field.</remarks>
         public Vec2 OrderAnchor { get; private set; }
