@@ -24,15 +24,9 @@ namespace BattleChess.Tests.Battle
     {
         // ---- M4: fog of war ---------------------------------------------------
 
-        [Fact(Skip = "M4 pass 3 — vision exists, but the shooting rule does not consult it yet.")]
-        public void ShootersCannotFireAtEnemiesTheyCannotSee()
-        {
-        }
-
-        [Fact(Skip = "M4 pass 3 — line of sight is computed but shooting does not consult it yet.")]
-        public void AHillBetweenTwoRegimentsStopsTheVolleys()
-        {
-        }
+        // ShootersCannotFireAtEnemiesTheyCannotSee and
+        // AHillBetweenTwoRegimentsStopsTheVolleys have moved to VisionTests —
+        // shooting consults sight now.
 
         [Fact(Skip = "M4 pass 4 — the battleships mechanic proper. No remembered positions to fire at yet.")]
         public void ArtilleryFiringBlindLearnsOnlyWhetherItHit()
