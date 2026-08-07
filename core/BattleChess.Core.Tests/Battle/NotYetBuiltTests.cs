@@ -39,11 +39,6 @@ namespace BattleChess.Tests.Battle
         {
         }
 
-        [Fact(Skip = "M4 pass 2 — sightings are live only; nothing is remembered once it is lost.")]
-        public void AGhostMarkerStaysWhereTheEnemyWasLastSeen()
-        {
-        }
-
         // ---- Task 16: enveloping ---------------------------------------------
 
         [Fact(Skip = "Task 16 — a large regiment cannot yet split into bodies to surround a smaller one.")]
@@ -80,11 +75,6 @@ namespace BattleChess.Tests.Battle
         {
         }
 
-        [Fact(Skip = "Not built — organization should drain from marching through broken ground.")]
-        public void BrokenGroundDisordersAFormationThatCrossesIt()
-        {
-        }
-
         // ---- Frontage control -------------------------------------------------
 
         [Fact(Skip = "TODO — the player cannot yet set file width and rank depth to concentrate a unit.")]
@@ -117,11 +107,6 @@ namespace BattleChess.Tests.Battle
         }
 
         // ---- Things the design has ruled out for now --------------------------
-
-        [Fact(Skip = "Not designed — ammunition is unlimited. Worth revisiting if archers feel oppressive.")]
-        public void ArchersRunOutOfArrows()
-        {
-        }
 
         [Fact(Skip = "Not designed — there is no fatigue. Long fights cost morale and men, never wind.")]
         public void MenTireOverALongEngagement()

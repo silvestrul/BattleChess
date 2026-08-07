@@ -57,11 +57,14 @@ namespace BattleChess.Tests.Battle
 
         // ---- Distance --------------------------------------------------------
 
+        /// <summary>How far bowmen actually reach, read from content.</summary>
+        private static float BowRange => TestContent.Unit("archers").Get(UnitAttributes.Range);
+
         [Fact]
         public void ShootingFallsAwayWithDistance()
         {
             float pointBlank = LossesShotAt(40f);
-            float longRange = LossesShotAt(175f);
+            float longRange = LossesShotAt(BowRange * 0.95f);
 
             Assert.True(pointBlank >= 1.3f * longRange,
                 $"Volleys should weaken with range: 40 m cost {pointBlank:0.0}%, 175 m cost {longRange:0.0}%.");
@@ -70,8 +73,8 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void RangeIsAnEdgeNotACliff()
         {
-            float justInside = LossesShotAt(175f);
-            float justOutside = LossesShotAt(200f);
+            float justInside = LossesShotAt(BowRange * 0.95f);
+            float justOutside = LossesShotAt(BowRange * 1.15f);
 
             Assert.True(justInside > 0f, "Archers should still do something at the edge of their range.");
             Assert.Equal(0f, justOutside);
@@ -192,7 +195,7 @@ namespace BattleChess.Tests.Battle
             var field = new Battlefield("plains", 5200);
 
             UnitInstance guns = field.Add(0, "artillery", field.Centre, Facing.East);
-            UnitInstance archers = field.Add(1, "archers", field.Centre + new Vec2(400f, 0f), Facing.West);
+            UnitInstance archers = field.Add(1, "archers", field.Centre + new Vec2(GunRange * 0.9f, 0f), Facing.West);
 
             Battlefield.Hold(guns);
             Battlefield.Hold(archers);
@@ -202,18 +205,21 @@ namespace BattleChess.Tests.Battle
             Assert.Equal(0, archers.Casualties);
         }
 
+        /// <summary>How far guns actually reach, read from content.</summary>
+        private static float GunRange => TestContent.Unit("artillery").Get(UnitAttributes.Range);
+
         [Fact]
         public void ArtilleryReachesAnythingItsArmyCanFind()
         {
             var field = new Battlefield("plains", 5200);
 
             UnitInstance guns = field.Add(0, "artillery", field.Centre, Facing.East);
-            UnitInstance archers = field.Add(1, "archers", field.Centre + new Vec2(400f, 0f), Facing.West);
+            UnitInstance archers = field.Add(1, "archers", field.Centre + new Vec2(GunRange * 0.9f, 0f), Facing.West);
 
             // The same guns, the same range — and a scout pushed forward far
             // enough to lay eyes on the target. That is the whole difference,
             // and it is what turns reach into something you have to work for.
-            UnitInstance scouts = field.Add(0, "scouts", field.Centre + new Vec2(200f, 0f), Facing.East);
+            UnitInstance scouts = field.Add(0, "scouts", field.Centre + new Vec2(GunRange * 0.45f, 0f), Facing.East);
 
             Battlefield.Hold(guns);
             Battlefield.Hold(archers);

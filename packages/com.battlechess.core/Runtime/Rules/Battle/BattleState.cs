@@ -153,6 +153,14 @@ namespace BattleChess.Rules
                 new UnitId(_units.Count), owner, def, position, facing, strength,
                 formation ?? FormationCatalogue.Default);
 
+            // Rolled off the battle seed at muster, so a published seed still
+            // replays exactly while no two regiments are quite alike.
+            float spread = def.Get(UnitAttributes.QualitySpread);
+            if (spread > 0f) unit.Quality = Rng.NextVariance(spread);
+
+            int perMan = def.Get(UnitAttributes.Ammunition);
+            unit.ShotsLeft = perMan > 0 ? perMan * strength : -1;
+
             _units.Add(unit);
             return unit;
         }

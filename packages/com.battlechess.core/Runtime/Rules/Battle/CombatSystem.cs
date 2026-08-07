@@ -55,7 +55,17 @@ namespace BattleChess.Rules
         /// variance reads as unfair rather than exciting — the player cannot
         /// tell being outplayed from being unlucky.
         /// </remarks>
-        private const float CasualtyVariance = 0.1f;
+        private const float CasualtyVariance = 0.15f;
+
+        /// <summary>Extra spread on the pulse a charge lands.</summary>
+        /// <remarks>
+        /// The one moment worth gambling on. A grind between two lines should
+        /// be predictable — that is what makes committing to it a calculation —
+        /// but the instant of impact is where battles turn, and a charge that
+        /// always does exactly what the arithmetic says is a charge nobody ever
+        /// holds their breath over. Wide here, narrow everywhere else.
+        /// </remarks>
+        private const float ChargeVariance = 0.35f;
 
         /// <summary>Extra hitting power from attacking a flank or the rear.</summary>
         private const float MaxFlankingBonus = 1.0f;
@@ -343,6 +353,17 @@ namespace BattleChess.Rules
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
+            // Deliberately the narrower of the two fronts, not their geometric
+            // overlap. Measuring the true overlap is more honest about where
+            // men are standing and it destroys the flanking rule: a regiment
+            // taken in the side presents its depth — five metres against a
+            // hundred — so the shared front collapses and *neither* side can
+            // fight. Flank attacks did nothing at all, and a second attacker
+            // coming round the side made a fight easier for the defender.
+            //
+            // The asymmetry a flank attack needs — many engaging few who cannot
+            // answer — lives in FlankingMultiplier instead, which is an
+            // abstraction rather than a geometry, and works.
             float share = unit.Footprint.Width / Math.Max(1, unit.EnemiesInContact);
             float enemyShare = enemy.Footprint.Width / Math.Max(1, enemy.EnemiesInContact);
 
@@ -358,6 +379,48 @@ namespace BattleChess.Rules
             int canSupport = Math.Min(behind, frontRank * SupportingRanks);
 
             return frontRank + (int)MathF.Round(canSupport * SupportingRankContribution);
+        }
+
+        /// <summary>
+        /// How much of two regiments' fronts actually face each other, in
+        /// metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The geometry the frontage rule was missing. Taking the narrower of
+        /// the two widths meant that two regiments clipping each other by a
+        /// corner fought across their whole front — a scouting party that had
+        /// barely brushed a body of swordsmen traded blows as though it had met
+        /// them square on, which is why numbers and position seemed not to
+        /// matter at the edges of a line.
+        /// </para>
+        /// <para>
+        /// Measured as the overlap of the two shapes projected onto the axis
+        /// across the line joining them: exactly the width where men on one
+        /// side have men on the other in front of them, and nothing else.
+        /// </para>
+        /// </remarks>
+        public static float SharedFrontage(UnitInstance unit, UnitInstance enemy)
+        {
+            Vec2 between = enemy.Position - unit.Position;
+
+            // Sitting on top of one another: no meaningful line between them, so
+            // fall back to the narrower front.
+            if (between.IsNearZero)
+                return MathF.Min(unit.Footprint.Width, enemy.Footprint.Width);
+
+            Vec2 across = new Vec2(-between.Y, between.X).Normalised();
+
+            float centre = Vec2.Dot(unit.Position, across);
+            float enemyCentre = Vec2.Dot(enemy.Position, across);
+
+            float reach = unit.Shape.ProjectedRadius(across);
+            float enemyReach = enemy.Shape.ProjectedRadius(across);
+
+            float low = MathF.Max(centre - reach, enemyCentre - enemyReach);
+            float high = MathF.Min(centre + reach, enemyCentre + enemyReach);
+
+            return MathF.Max(0f, high - low);
         }
 
         private static int Casualties(
@@ -392,7 +455,7 @@ namespace BattleChess.Rules
                         * attackerFighting
                         * (attack / defence)
                         * (1f - armour)
-                        * battle.Rng.NextVariance(CasualtyVariance);
+                        * battle.Rng.NextVariance(charge ? ChargeVariance : CasualtyVariance);
 
             // A pulse cannot kill more men than are actually standing in the
             // fight, however lopsided the odds.

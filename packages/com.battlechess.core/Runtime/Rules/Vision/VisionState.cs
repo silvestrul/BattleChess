@@ -23,6 +23,11 @@ namespace BattleChess.Rules
     public sealed class VisionState
     {
         private bool[] _seen = Array.Empty<bool>();
+
+        /// <summary>Where each army last saw each enemy, and when.</summary>
+        private Vec2[] _lastSeenAt = Array.Empty<Vec2>();
+        private int[] _lastSeenTick = Array.Empty<int>();
+
         private int _units;
 
         /// <summary>
@@ -43,19 +48,37 @@ namespace BattleChess.Rules
         public bool InPlay { get; private set; }
 
         /// <summary>Recomputes every sighting from scratch.</summary>
-        public void Recompute(BattleState battle)
+        public void Recompute(BattleState battle, int tick = 0)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
             InPlay = true;
+            LatestTick = tick;
 
             int armies = battle.Armies.Count;
             int units = battle.AllUnits.Count;
 
             if (_seen.Length != armies * units)
+            {
                 _seen = new bool[armies * units];
+
+                var places = new Vec2[armies * units];
+                var whens = new int[armies * units];
+
+                // Anything already remembered survives the resize.
+                for (int i = 0; i < Math.Min(_lastSeenAt.Length, places.Length); i++)
+                {
+                    places[i] = _lastSeenAt[i];
+                    whens[i] = _lastSeenTick[i];
+                }
+
+                _lastSeenAt = places;
+                _lastSeenTick = whens;
+            }
             else
+            {
                 Array.Clear(_seen, 0, _seen.Length);
+            }
 
             _units = units;
 
@@ -74,13 +97,53 @@ namespace BattleChess.Rules
 
                         if (LineOfSight.CanSee(battle, observer, target))
                         {
-                            _seen[a * units + target.Id.Value] = true;
+                            int slot = a * units + target.Id.Value;
+
+                            _seen[slot] = true;
+
+                            // Note where they were. A sighting that goes stale
+                            // is worth more than no sighting at all — it is the
+                            // difference between fog you can plan against and
+                            // simply forgetting an army exists.
+                            _lastSeenAt[slot] = target.Position;
+                            _lastSeenTick[slot] = tick;
+
                             break;
                         }
                     }
                 }
             }
         }
+
+        /// <summary>
+        /// Where an army last saw a unit, and how long ago in ticks.
+        /// </summary>
+        /// <remarks>
+        /// Returns false if this army has never laid eyes on it. A remembered
+        /// position is exactly as reliable as its age: a marker ten seconds old
+        /// is almost certainly still right, one from three turns ago is a guess
+        /// that the enemy has probably already made wrong.
+        /// </remarks>
+        public bool TryRecall(BattleState battle, PlayerId viewer, UnitInstance target, out Vec2 where, out int age)
+        {
+            where = default;
+            age = 0;
+
+            int army = IndexOfArmy(battle, viewer);
+            if (army < 0 || _units == 0) return false;
+
+            int slot = army * _units + target.Id.Value;
+            if (slot < 0 || slot >= _lastSeenAt.Length) return false;
+            if (_lastSeenTick[slot] == 0 && _lastSeenAt[slot].IsNearZero) return false;
+
+            where = _lastSeenAt[slot];
+            age = Math.Max(0, LatestTick - _lastSeenTick[slot]);
+
+            return true;
+        }
+
+        /// <summary>The tick the last recompute ran on.</summary>
+        public int LatestTick { get; private set; }
 
         /// <summary>Whether an army can currently see a unit.</summary>
         /// <remarks>
@@ -157,7 +220,7 @@ namespace BattleChess.Rules
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (tick % RefreshIntervalTicks != 0) return;
 
-            battle.Vision.Recompute(battle);
+            battle.Vision.Recompute(battle, tick);
         }
     }
 }

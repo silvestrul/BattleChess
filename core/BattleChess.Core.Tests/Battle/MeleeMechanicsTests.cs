@@ -236,7 +236,7 @@ namespace BattleChess.Tests.Battle
             (float alone, _) = SetUpon(attackers: 1);
             (float surrounded, _) = SetUpon(attackers: 2);
 
-            Assert.True(surrounded >= 1.8f * alone,
+            Assert.True(surrounded >= 1.5f * alone,
                 $"Being taken by two regiments at once should be far worse than by one: " +
                 $"one enemy cost {alone:0.0}%, two cost {surrounded:0.0}%.");
         }

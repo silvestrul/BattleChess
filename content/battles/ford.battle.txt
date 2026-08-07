@@ -1,8 +1,12 @@
 # The Fight for the Ford
 #
-# Both sides want the only crossing artillery can use. Everything else can wade
-# the river, slowly and at a defensive penalty, so the ford is worth more to the
-# guns than to anyone else — and both armies know it.
+# Both sides want the only quick way over. Everything can wade the river,
+# slowly and at a defensive penalty, so the ford is worth having — and both
+# armies know it.
+#
+# A medieval order of battle: no guns. Artillery still exists in units.cfg and
+# can be deployed by any scenario that wants it; this one is here to see how
+# the field plays with bows, spears and horse alone.
 #
 # Positions are authored map cells (column,row), matching what `map valley`
 # draws. Facing accepts compass points or degrees.
@@ -44,9 +48,9 @@ type   = archers
 at     = 8,11
 facing = east
 
-# On the road, because wheels have nowhere else to be.
+# Horse archers on the road, free to swing wherever the line needs them.
 [deploy 0]
-type   = artillery
+type   = horsearchers
 at     = 5,11
 facing = east
 
@@ -79,7 +83,7 @@ at     = 32,11
 facing = west
 
 [deploy 1]
-type   = artillery
+type   = horsearchers
 at     = 36,11
 facing = west
 

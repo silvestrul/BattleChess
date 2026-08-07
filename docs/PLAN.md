@@ -309,6 +309,29 @@ Full roster, faction asymmetry, maps. Live mode = async + turn timer + presence.
 
 - **Warships.** Naval units fighting on the water the land army currently treats as a hard edge. Fits the existing seams unusually well: a `Boat` movement type is one enum value plus a `speed.boat` line per terrain, which inverts passability for free — deep water becomes the only passable ground and land the obstacle. Broadside arcs would be the genuinely new mechanic, since facing already exists but firing arcs do not. Worth deciding whether naval battles are separate engagements or ships support a land battle from a coastline.
 
+### Special unit types *(to be detailed)*
+
+Beyond the six line units. Nothing specified yet — the shape of the request is "more kinds of thing", and what matters is that the content system already takes them without code changes: a new `[unit ...]` block is a new unit, and a genuinely new *behaviour* is one `Define(...)` line in `UnitAttributes` plus a line per unit that wants it.
+
+Worth settling when specifying: whether these are variants of existing classes (heavy cavalry, crossbowmen, militia — cheap, all content) or new `UnitClass` values with their own counter relationships (which touches `attackVs` tables everywhere and is the expensive kind); and whether any need a rule that does not exist yet, since that is the only part that cannot be data.
+
+The **commander** already parked below is the first of these and the one the win condition depends on.
+
+### More randomness *(open question — partly done)*
+
+Variance was deliberately kept low: with hidden information and blind orders, high spread reads as *unfair* rather than exciting, because a player cannot tell being outplayed from being unlucky. That reasoning still holds, but the battles were reading as arithmetic.
+
+**Done:** exchange and volley spread widened 10% → 15%, and a charge now rolls at 35% — the one moment worth gambling on, because the instant of impact is where battles turn and a charge that always does exactly what the sum says is a charge nobody holds their breath over.
+
+**Proposed, in order of how much character they add per unit of unfairness:**
+
+1. **Regiment quality at muster.** Each unit rolls ±10% on its morale rating when raised, from the battle seed. Two spearmen regiments stop being interchangeable, reserves and rotation start to matter, and it is *visible* — so it reads as character rather than luck. This is the best of the four.
+2. **A breaking point that is not a round number.** Units break somewhere in 0.15–0.25 rather than exactly 0.20, rolled per regiment. Stops the rout threshold being computable, so committing the reserve becomes a judgement instead of a calculation.
+3. **Rally that is not guaranteed.** A broken regiment that gets clear rolls to come back rather than always rallying. Makes pursuit worth more and gives a routed flank real weight.
+4. **Wider melee spread generally.** Simplest, and the one I would do last — it adds noise without adding story.
+
+Any of these stays reproducible: everything rolls off the battle seed, so a published seed still replays exactly.
+
 ### Terrain fog *(parked — designed, not built)*
 
 The original M4 design had knowledge of the *ground* as well as of the enemy: every map cell in one of three states — `Unknown` (never seen), `Remembered` (terrain known, any units on it stale), `Visible` (live). Settled for now as **units only**: both players are assumed to have a map of the field, which is what a real commander has and which removes a large class of tedium.

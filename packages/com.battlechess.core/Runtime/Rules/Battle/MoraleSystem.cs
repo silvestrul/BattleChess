@@ -26,6 +26,22 @@ namespace BattleChess.Rules
     {
         // ---- What breaks a unit ---------------------------------------------
 
+        /// <summary>
+        /// How much of the shock reported by everything else actually lands.
+        /// </summary>
+        /// <remarks>
+        /// A single dial rather than thirty percent shaved off a dozen
+        /// constants scattered across combat, shooting and morale. Every rule
+        /// that frightens men reports what happened and this decides what it
+        /// costs, so tuning how brittle the whole army is stays one number
+        /// instead of an afternoon of arithmetic.
+        ///
+        /// Battles were ending too early: regiments broke while they still had
+        /// three quarters of their strength and most fights were decided in
+        /// five or six turns, which left no room for a reserve to matter.
+        /// </remarks>
+        private const float ShockScale = 0.7f;
+
         /// <summary>Morale lost per fraction of the regiment killed in a pulse.</summary>
         private const float CasualtyShock = 2.0f;
 
@@ -90,6 +106,10 @@ namespace BattleChess.Rules
             float pressure = unit.PendingMoraleShock;
             unit.PendingMoraleShock = 0f;
 
+            // Whether anything at all has happened to these men this pulse —
+            // shot at as much as fought.
+            bool underFire = pressure > 0f;
+
             // How badly the army as a whole is faring. Men know when they are
             // losing even where they stand.
             pressure += ArmyLossesPressure * ArmyLossFraction(battle, unit.Owner);
@@ -99,6 +119,11 @@ namespace BattleChess.Rules
             int breaking = RoutingFriendsNear(battle, unit);
             if (breaking > 0) pressure += NearbyRoutShock * breaking;
 
+            // Everything that frightens men, damped in one place. Recovery is
+            // deliberately left alone — this decides how hard they are to
+            // break, not how slowly they come back.
+            pressure *= ShockScale;
+
             bool fighting = unit.EnemiesInContact > 0;
 
             // Left alone, a unit collects itself — and does so against the
@@ -106,14 +131,22 @@ namespace BattleChess.Rules
             // it. Gating recovery on there being no pressure at all meant a
             // rallied regiment standing safely in the rear still sank, purely
             // because its army was behind, and could never come back.
-            if (!fighting)
+            //
+            // "Left alone" has to mean nobody is killing them, not merely that
+            // nobody is within sword's reach. Counting only melee meant a
+            // regiment under artillery recovered faster than it was being
+            // shelled — a battery took three hundred and seventy men off a
+            // body of swordsmen across thirty-two turns and they never so much
+            // as wavered, which is the exact opposite of morale deciding
+            // fights before casualties do.
+            if (!fighting && !underFire)
                 pressure -= RecoveryPerPulse;
 
             if (pressure <= 0f && unit.Morale >= 1f) return;
 
             // A unit's own steadiness resists all of it, and a formation that has
             // come apart resists none of it.
-            float rating = MathF.Max(0.1f, unit.Def.Get(UnitAttributes.Morale));
+            float rating = MathF.Max(0.1f, unit.MoraleRating);
             float brittleness = 2f - unit.Organization;
 
             unit.Morale -= pressure / rating * (pressure > 0f ? brittleness : 1f);
@@ -188,10 +221,18 @@ namespace BattleChess.Rules
                 if (unit.Morale >= RallyThreshold)
                 {
                     unit.State = UnitState.Wavering;
-                    unit.Route = null;
+
+                    // Rallies where it stands and waits to be told what to do.
+                    // Without clearing the order it kept whatever it had been
+                    // given before it broke — usually an attack — and marched
+                    // straight back into the fight that had just routed it,
+                    // shaken, alone and at half strength. Men who have run do
+                    // not re-form and charge of their own accord.
+                    unit.GiveOrder(UnitOrder.Stand(Stance.Defend), unit.Position);
 
                     log.Info("Morale",
-                        $"{unit.Def.DisplayName} has rallied at {unit.Strength} men, still shaken.",
+                        $"{unit.Def.DisplayName} has rallied at {unit.Strength} men, still shaken — " +
+                        "holding where it stands until ordered.",
                         unit.Id);
                 }
             }
