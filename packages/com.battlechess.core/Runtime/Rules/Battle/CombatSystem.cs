@@ -79,7 +79,22 @@ namespace BattleChess.Rules
         private const float CasualtyShockPerFraction = 2.0f;
 
         /// <summary>Shock from being taken in the flank, scaling to the rear.</summary>
-        private const float MaxFlankShock = 0.03f;
+        /// <remarks>
+        /// This is what a flank attack is <i>for</i>, now that frontage is
+        /// measured honestly. A regiment struck square in the side presents its
+        /// depth — five metres against a hundred — so only a handful of men on
+        /// either side can reach each other and almost nobody dies. What breaks
+        /// a formation taken in the flank was never the casualties; it is that
+        /// the men on that end are being killed by something they are not
+        /// facing and cannot answer, and the ones who can see it are the ones
+        /// who run first.
+        ///
+        /// Raised fourfold when the geometry stopped pretending a perpendicular
+        /// contact was a full-width battle. At the old figure a lone flanking
+        /// regiment did nothing at all: no casualties, because there was no
+        /// shared front, and no fright either.
+        /// </remarks>
+        private const float MaxFlankShock = 0.12f;
 
         /// <summary>One-off shock from a charge landing.</summary>
         private const float ChargeShock = 0.05f;
@@ -380,21 +395,31 @@ namespace BattleChess.Rules
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
-            // Deliberately the narrower of the two fronts, not their geometric
-            // overlap. Measuring the true overlap is more honest about where
-            // men are standing and it destroys the flanking rule: a regiment
-            // taken in the side presents its depth — five metres against a
-            // hundred — so the shared front collapses and *neither* side can
-            // fight. Flank attacks did nothing at all, and a second attacker
-            // coming round the side made a fight easier for the defender.
+            // The ground the two regiments actually share, not the narrower of
+            // their two fronts.
             //
-            // The asymmetry a flank attack needs — many engaging few who cannot
-            // answer — lives in FlankingMultiplier instead, which is an
-            // abstraction rather than a geometry, and works.
-            float share = unit.Footprint.Width / Math.Max(1, unit.EnemiesInContact);
-            float enemyShare = enemy.Footprint.Width / Math.Max(1, enemy.EnemiesInContact);
+            // Taking the narrower width ignored the angle between them
+            // completely: two bodies of swordsmen crossing at a right angle
+            // overlap by four and a half metres and fought with two hundred and
+            // sixty men each — the same figure as a square, head-on meeting.
+            // What was drawn on the field and what was fought were different
+            // things, and the position a player had worked for counted for
+            // nothing.
+            //
+            // Measuring it honestly is only safe because flanking no longer
+            // depends on this number. A flank is won by bringing a second
+            // regiment against an enemy's exposed end — which this rule handles
+            // by splitting their front between both attackers — rather than by
+            // driving perpendicular into their side, which is a small fight in
+            // life as well as here.
+            float overlap = SharedFrontage(unit, enemy);
 
-            float contactWidth = MathF.Min(share, enemyShare);
+            // Each side is limited by its own crowding and nobody else's. Taking
+            // the smaller of the two shares meant a regiment fighting two
+            // enemies dragged both of them down with it, so a second attacker
+            // coming round made the fight *easier* for the defender — the exact
+            // inversion that flanking is supposed to punish.
+            float contactWidth = overlap / Math.Max(1, unit.EnemiesInContact);
             Formation formation = unit.Formation;
 
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
