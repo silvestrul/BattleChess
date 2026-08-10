@@ -79,8 +79,26 @@ namespace BattleChess.Rules
         public float Organization
         {
             get => _organization;
-            set => _organization = Math.Clamp(value, 0f, 1f);
+            set => _organization = Math.Clamp(value, MinimumOrganization, 1f);
         }
+
+        /// <summary>
+        /// How disordered a regiment can get before it stops getting worse.
+        /// </summary>
+        /// <remarks>
+        /// A body of men that has lost all formation is a mob, and a mob is
+        /// what routing represents — so there is no need for cohesion to model
+        /// it as well. Left unbounded, the two rules doubled up: regiments that
+        /// were still standing and still willing to fight had been ground down
+        /// to a state where they could barely do either, and every long battle
+        /// ended between two rabbles rather than two armies.
+        ///
+        /// The floor also puts a ceiling on how much of the game any single
+        /// mistake can decide, which matters more here than usual because
+        /// cohesion multiplies attack, defence, stopping power and breakthrough
+        /// all at once.
+        /// </remarks>
+        public const float MinimumOrganization = 0.4f;
 
         /// <summary>The order this unit is currently drawn up in.</summary>
         public FormationDef FormationOrder { get; private set; }

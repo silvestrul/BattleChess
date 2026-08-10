@@ -154,17 +154,24 @@ namespace BattleChess.Rules
             if (unit.Organization >= 1f) return;
             if (unit.EnemiesInContact > 0) return;
 
-            // Not while standing in the thing that is pulling them apart. Men
-            // in a river are not dressing their ranks, and letting recovery run
-            // there simply cancelled part of the crossing — a wood came out
-            // costing almost nothing, which is the whole point of a wood
-            // undone.
-            if (battle.WorstDisorderUnder(unit) > 0f) return;
+            // Standing still re-forms a regiment wherever it is standing, bad
+            // ground included. Halting in a wood to dress the ranks is a real
+            // thing to do with a turn, and blocking it meant a unit that had
+            // stopped in a marsh simply stayed a rabble — which reads as the
+            // game punishing you for terrain you already paid to cross.
+            //
+            // On the march it is different: you cannot both wade a river and
+            // close your files, and letting recovery run there cancelled most
+            // of the crossing.
+            if (unit.IsMarching)
+            {
+                if (battle.WorstDisorderUnder(unit) > 0f) return;
 
-            float rate = CohesionRecoveryPerPulse;
-            if (unit.IsMarching) rate *= CohesionRecoveryWhileMarching;
+                unit.Organization += CohesionRecoveryPerPulse * CohesionRecoveryWhileMarching;
+                return;
+            }
 
-            unit.Organization += rate;
+            unit.Organization += CohesionRecoveryPerPulse;
         }
 
         private static void ApplyPressure(BattleState battle, UnitInstance unit, IBattleLog log)

@@ -152,7 +152,16 @@ namespace BattleChess.Rules
             {
                 UnitInstance current = battle.Get(unit.Order.Target);
 
-                if (current.IsFighting && InContactWith(unit, current)) return false;
+                // Judged on being at grips or nearly so, not on strict contact.
+                // Contact is 8 m and a zone of control halts a unit at ten to
+                // twenty, so a regiment stopped one metre short of the enemy it
+                // was attacking counted as not engaged at all — and was handed
+                // straight back to whichever other enemy happened to be
+                // nearest.
+                if (current.IsFighting &&
+                    OrientedRect.Within(unit.Shape, current.Shape,
+                        MathF.Max(ContactMetres, current.ZoneOfControl)))
+                    return false;
             }
 
             // Never a shooter. Their answer to something in the way is to shoot

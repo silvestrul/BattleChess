@@ -30,7 +30,15 @@ namespace BattleChess.Rules
     public sealed class ContactSystem : IBattleSystem
     {
         /// <summary>Organization lost per tick while riding through an enemy formation.</summary>
-        private const float EnemyBreakthroughDisorderPerTick = 0.02f;
+        /// <remarks>
+        /// Halved. At the old figure a breakthrough cost more than a point of
+        /// cohesion per turn of contact — more than the entire scale — so
+        /// anything that spent a few seconds forcing a line came out the far
+        /// side as a rabble regardless of how it went. Charged per tick because
+        /// it is the duration of the shoving that matters, which means it needs
+        /// to be small.
+        /// </remarks>
+        private const float EnemyBreakthroughDisorderPerTick = 0.01f;
 
         /// <summary>Organization lost per tick while pushing through a friendly formation.</summary>
         /// <remarks>
@@ -84,6 +92,20 @@ namespace BattleChess.Rules
             float breakthrough = unit.EffectiveBreakthrough;
 
             OrientedRect shape = unit.Shape;
+
+            // A regiment closing the last few metres onto the enemy it has been
+            // ordered to fight is not marching past anybody, and nobody else's
+            // zone of control has any business stopping it.
+            //
+            // This is the dead band that kept two lines from ever meeting.
+            // Melee reaches 8 m and zones of control reach ten to twenty, so a
+            // unit with a second enemy nearby was halted a metre or two short of
+            // the fight, had its route cleared, re-planned it, and was halted
+            // again — every tick, forever. The recorded game shows spearmen
+            // stopped at 9 m from the cavalry they were attacking, by the zone
+            // of control of a different regiment 14 m away, for two hundred
+            // ticks together.
+            if (IsAboutToMakeContact(battle, unit)) return;
 
             foreach (UnitInstance enemy in battle.UnitsOnField())
             {
@@ -168,6 +190,29 @@ namespace BattleChess.Rules
                 unit.HeldUpBy = enemy.Id;
                 return;
             }
+        }
+
+        /// <summary>
+        /// How near a unit must be to its ordered target before other people's
+        /// zones of control stop applying to it, in metres.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately short — a stride or two past melee reach, not a licence
+        /// to march across a battlefield unimpeded because something on the far
+        /// side has been clicked. Wide enough to cover the gap between where a
+        /// zone of control halts a unit and where its men can actually reach.
+        /// </remarks>
+        private const float ClosingReachMetres = OrderSystem.ContactMetres * 2f;
+
+        private static bool IsAboutToMakeContact(BattleState battle, UnitInstance unit)
+        {
+            if (unit.Order.Kind != OrderKind.Attack || !unit.Order.Target.IsValid) return false;
+
+            UnitInstance target = battle.Get(unit.Order.Target);
+
+            return target.IsFighting
+                && target.Owner != unit.Owner
+                && OrientedRect.Within(unit.Shape, target.Shape, ClosingReachMetres);
         }
 
         /// <summary>

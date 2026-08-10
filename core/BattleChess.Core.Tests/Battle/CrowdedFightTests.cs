@@ -90,6 +90,35 @@ namespace BattleChess.Tests.Battle
             Assert.Equal(engaged, ours.Order.Target);
         }
 
+        [Fact]
+        public void AnEnemysZoneOfControlCannotKeepARegimentOneMetreShortOfTheFightItIsIn()
+        {
+            var field = new Battlefield("plains", 20300);
+
+            // The recorded shape: spearmen attacking cavalry, with a second
+            // enemy regiment standing just off to the side. Melee reaches 8 m
+            // and a zone of control halts a march at ten to twenty, so the
+            // attacker was stopped a metre or two short of its own target by
+            // somebody else's zone — and re-planned that march every tick for
+            // two hundred ticks without ever landing a blow.
+            UnitInstance quarry = field.Add(1, "cavalry", field.Centre, Facing.West);
+            UnitInstance bystander = field.Add(1, "spearmen", field.Centre + new Vec2(10f, 105f), Facing.West);
+
+            Battlefield.Hold(quarry);
+            Battlefield.Hold(bystander);
+
+            UnitInstance ours = field.Add(0, "spearmen", field.Centre - new Vec2(200f, 0f), Facing.East);
+            Battlefield.Press(ours, quarry);
+
+            field.RunTurns(6);
+
+            Assert.True(field.TimesSaid("exchange") >= 10,
+                $"It should be fighting: only {field.TimesSaid("exchange")} pulses landed in six turns.");
+
+            Assert.True(Battlefield.LostPercent(quarry) > 0f,
+                "And the enemy it was ordered to attack should be the one bleeding.");
+        }
+
         // ---- Staying on the map ------------------------------------------------
 
         [Theory]
