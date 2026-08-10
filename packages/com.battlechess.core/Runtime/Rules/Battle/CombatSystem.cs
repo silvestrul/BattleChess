@@ -395,31 +395,7 @@ namespace BattleChess.Rules
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
-            // The ground the two regiments actually share, not the narrower of
-            // their two fronts.
-            //
-            // Taking the narrower width ignored the angle between them
-            // completely: two bodies of swordsmen crossing at a right angle
-            // overlap by four and a half metres and fought with two hundred and
-            // sixty men each — the same figure as a square, head-on meeting.
-            // What was drawn on the field and what was fought were different
-            // things, and the position a player had worked for counted for
-            // nothing.
-            //
-            // Measuring it honestly is only safe because flanking no longer
-            // depends on this number. A flank is won by bringing a second
-            // regiment against an enemy's exposed end — which this rule handles
-            // by splitting their front between both attackers — rather than by
-            // driving perpendicular into their side, which is a small fight in
-            // life as well as here.
-            float overlap = SharedFrontage(unit, enemy);
-
-            // Each side is limited by its own crowding and nobody else's. Taking
-            // the smaller of the two shares meant a regiment fighting two
-            // enemies dragged both of them down with it, so a second attacker
-            // coming round made the fight *easier* for the defender — the exact
-            // inversion that flanking is supposed to punish.
-            float contactWidth = overlap / Math.Max(1, unit.EnemiesInContact);
+            float contactWidth = EngagedWidth(unit, enemy) / Math.Max(1, unit.EnemiesInContact);
             Formation formation = unit.Formation;
 
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
@@ -431,6 +407,78 @@ namespace BattleChess.Rules
             int canSupport = Math.Min(behind, frontRank * SupportingRanks);
 
             return frontRank + (int)MathF.Round(canSupport * SupportingRankContribution);
+        }
+
+        /// <summary>
+        /// How far off a unit's own front a threat is coming from, 0 for
+        /// straight ahead and 1 for straight behind.
+        /// </summary>
+        private static float OffFront(UnitInstance unit, UnitInstance enemy) =>
+            Facing.AbsoluteDelta(unit.Facing, Facing.Towards(unit.Position, enemy.Position)) / MathF.PI;
+
+        /// <summary>
+        /// Beyond this far off its front, a regiment has no formed line facing
+        /// the threat and can be enveloped.
+        /// </summary>
+        private const float FrontalArc = 0.25f;
+
+        /// <summary>
+        /// How much of its width a regiment loses the use of when it is taken
+        /// from directly behind.
+        /// </summary>
+        /// <remarks>
+        /// Men attacked from a quarter they are not facing cannot bring their
+        /// numbers to bear: the ranks are the wrong way round, the front rank
+        /// is at the back, and only those who can physically turn are fighting
+        /// at all. This is the "deals very little" half of being caught out of
+        /// position.
+        /// </remarks>
+        private const float OutOfArcPenalty = 0.75f;
+
+        /// <summary>
+        /// How wide a front this unit can actually bring against an enemy, in
+        /// metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two regiments that are both facing each other fight across the
+        /// ground they genuinely share, so meeting square on is a full-width
+        /// battle and clipping each other by a corner is a small one. That much
+        /// is pure geometry, and it is what stops a position a player worked
+        /// for from counting for nothing.
+        /// </para>
+        /// <para>
+        /// An enemy with no formed line toward you is a different matter. Their
+        /// flank is a five-metre face, but there is nothing to stop your men
+        /// folding round it and piling in along their whole length, so you
+        /// bring your own frontage to bear rather than theirs. Measuring the
+        /// bare overlap in that case made a flank attack do <i>nothing</i>:
+        /// no casualties, because the shared front was five metres wide, which
+        /// is not what happens to a regiment taken in the side.
+        /// </para>
+        /// <para>
+        /// The asymmetry is the whole point. The attacker fights with its full
+        /// width; the flanked regiment answers with the narrow face it actually
+        /// presents, reduced again for being caught facing the wrong way. Many
+        /// engaging few who cannot reply — which is what being outmanoeuvred
+        /// should feel like.
+        /// </para>
+        /// </remarks>
+        private static float EngagedWidth(UnitInstance unit, UnitInstance enemy)
+        {
+            float overlap = SharedFrontage(unit, enemy);
+
+            // Their front is turned away from us, so there is nothing holding
+            // our line off: we envelop as far as our own width allows, capped
+            // by how much of them there is to get at.
+            float reach = OffFront(enemy, unit) > FrontalArc
+                ? MathF.Min(unit.Footprint.Width, MathF.Max(enemy.Footprint.Width, enemy.Footprint.Depth))
+                : overlap;
+
+            // And we are under the same rule in reverse.
+            float formed = 1f - OutOfArcPenalty * OffFront(unit, enemy);
+
+            return MathF.Max(0f, reach * formed);
         }
 
         /// <summary>

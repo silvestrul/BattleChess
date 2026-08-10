@@ -67,19 +67,7 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void AFlankIsANarrowFightRatherThanAWideOne()
-        {
-            float front = LossesFacing(180f);
-            float flank = LossesFacing(90f);
-
-            Assert.True(flank < front,
-                $"A regiment struck square in the side presents its depth — five metres against a " +
-                $"hundred — so only a handful of men on each side can reach each other. It should cost " +
-                $"far fewer lives than a frontal meeting, not more: front {front:0.0}%, flank {flank:0.0}%.");
-        }
-
-        [Fact]
-        public void AFlankBreaksMenRatherThanKillingThem()
+        public void AFlankedRegimentCanBarelyFightBack()
         {
             ClashResult front = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
                                             DefenderFacingDegrees = 180f }.Run();
@@ -87,15 +75,34 @@ namespace BattleChess.Tests.Battle
             ClashResult flank = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
                                             DefenderFacingDegrees = 90f }.Run();
 
-            // The whole point of getting round a flank, and the thing that
-            // makes it worth doing even though almost nobody dies. Men on that
-            // end are being killed by something they are not facing and cannot
-            // answer, and the ones who can see it are the ones who run first.
-            Assert.True(flank.DefenderMorale < front.DefenderMorale,
-                $"A flank attack that costs no lives and frightens nobody is not worth marching for. " +
+            Assert.True(front.AttackerLost > 0.5f,
+                "A frontal meeting has to cost the attacker too, or there is nothing to weigh.");
+
+            // The whole of what being caught out of position means. The men on
+            // that flank are fighting something they are not facing: the ranks
+            // are the wrong way round and only those who can physically turn
+            // are fighting at all.
+            Assert.True(flank.AttackerLost <= 0.25f * front.AttackerLost,
+                $"Taking a regiment in the side should be nearly free: the attacker lost " +
+                $"{flank.AttackerLost:0.0}% flanking against {front.AttackerLost:0.0}% head-on.");
+        }
+
+        [Fact]
+        public void AFlankIsWonBeforeItIsFought()
+        {
+            ClashResult front = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
+                                            DefenderFacingDegrees = 180f }.Run();
+
+            ClashResult flank = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
+                                            DefenderFacingDegrees = 90f }.Run();
+
+            // Not chiefly a matter of casualties. A regiment struck in the side
+            // is losing men it cannot avenge, and the ones who can see that are
+            // the ones who run first — so the fright arrives long before the
+            // butcher's bill does.
+            Assert.True(flank.DefenderMorale < front.DefenderMorale - 0.15f,
                 $"Morale after a frontal fight {front.DefenderMorale:0.00}, after a flank " +
-                $"{flank.DefenderMorale:0.00} — on {flank.DefenderLost:0.0}% casualties against " +
-                $"{front.DefenderLost:0.0}%.");
+                $"{flank.DefenderMorale:0.00}.");
         }
 
         [Fact]

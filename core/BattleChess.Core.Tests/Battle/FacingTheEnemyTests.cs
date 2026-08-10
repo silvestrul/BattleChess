@@ -53,27 +53,36 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void ComingAboutTakesTimeAndAPikeBlockIsSlowestOfAll()
         {
-            float pikes = StillOffBearingAfterHalfAMinute("spearmen");
-            float horse = StillOffBearingAfterHalfAMinute("cavalry");
+            float pikes = StillOffBearingAfterTwentySeconds("spearmen");
+            float horse = StillOffBearingAfterTwentySeconds("cavalry");
 
             Assert.True(pikes > horse + 30f,
-                $"Turn rate has to decide who gets caught out of position. Half a minute after being " +
+                $"Turn rate has to decide who gets caught out of position. Twenty seconds after being " +
                 $"taken in the back, a pike block was still {pikes:0}° off its enemy and cavalry " +
                 $"{horse:0}°.");
 
-            Assert.True(horse < 20f, "Horse should be round and fighting by then.");
+            Assert.True(horse < 60f, "Horse should be most of the way round by then.");
         }
 
         /// <summary>
         /// Spins a regiment to face directly away from the enemy already among
-        /// it, then reports how far off it still is half a minute later.
+        /// it, then reports how far off it still is twenty seconds later.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Measured as the angle remaining rather than the angle turned. Turned
         /// degrees flatters nobody and reads zero for cavalry, which comes about
         /// so fast it is already facing the enemy before the clock starts.
+        /// </para>
+        /// <para>
+        /// Twenty seconds rather than thirty, because a regiment held facing
+        /// the wrong way is now being butchered while it turns — the whole
+        /// point of the rule. Given half a minute both of them break and run,
+        /// and a routing unit faces where it is going, which measures the rout
+        /// rather than the wheel.
+        /// </para>
         /// </remarks>
-        private static float StillOffBearingAfterHalfAMinute(string key)
+        private static float StillOffBearingAfterTwentySeconds(string key)
         {
             var field = new Battlefield("plains", 19100);
 
@@ -88,7 +97,7 @@ namespace BattleChess.Tests.Battle
             // Squarely in the back, whatever the approach happened to leave.
             ours.Facing = Facing.FromVector(ours.Position - theirs.Position);
 
-            field.RunPulses(3);
+            field.RunPulses(2);
 
             return OffBearing(ours, theirs);
         }
