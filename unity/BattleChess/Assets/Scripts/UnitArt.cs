@@ -41,13 +41,49 @@ namespace BattleChess.Unity
 
             if (_symbols.TryGetValue(def.Key, out Sprite cached)) return cached;
 
-            // Cached even when nothing is found, so a missing file costs one
+            // The named picture from content first — one sheet of medallions
+            // sliced into fifteen, and units.cfg says which one each kind of
+            // troops wears. Falling back to a file named after the unit keeps
+            // the older one-image-per-unit arrangement working, so either way
+            // of supplying artwork is fine and neither needs code.
+            string icon = def.Get(UnitAttributes.Icon);
+
+            Sprite loaded = (!string.IsNullOrWhiteSpace(icon) ? FromSheets(icon) : null)
+                            ?? Resources.Load<Sprite>($"{SymbolFolder}/{def.Key}");
+
+            // Cached even when nothing is found, so a missing picture costs one
             // lookup for the whole session rather than one per unit per load.
-            Sprite loaded = Resources.Load<Sprite>($"{SymbolFolder}/{def.Key}");
             _symbols[def.Key] = loaded;
 
             return loaded;
         }
+
+        /// <summary>
+        /// Finds a named sprite in any sliced sheet under the art folder.
+        /// </summary>
+        /// <remarks>
+        /// <c>Resources.Load</c> cannot reach inside a multiple-sprite texture,
+        /// so every sheet is read once and its slices indexed by name. Searching
+        /// all of them rather than one known file means a second sheet can be
+        /// dropped in beside the first without anything being told about it.
+        /// </remarks>
+        private static Sprite FromSheets(string spriteName)
+        {
+            if (_sheet == null)
+            {
+                _sheet = new Dictionary<string, Sprite>();
+
+                foreach (Sprite sprite in Resources.LoadAll<Sprite>(SymbolFolder))
+                {
+                    if (sprite != null && !_sheet.ContainsKey(sprite.name))
+                        _sheet[sprite.name] = sprite;
+                }
+            }
+
+            return _sheet.TryGetValue(spriteName, out Sprite found) ? found : null;
+        }
+
+        private static Dictionary<string, Sprite> _sheet;
 
         /// <summary>
         /// The rectangle a regiment is drawn as: the supplied plate if there is
@@ -86,6 +122,7 @@ namespace BattleChess.Unity
         public static void Forget()
         {
             _symbols.Clear();
+            _sheet = null;
             _plate = null;
         }
     }
