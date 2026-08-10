@@ -206,6 +206,52 @@ namespace BattleChess.Unity
             // Clicks on the debug panels must not also fall through to the map.
             if (Input.GetMouseButtonDown(0) && !PointerOverPanels())
                 HandleClick(_camera != null ? _camera.MouseWorldPosition() : default);
+
+            if (_settingBearing) TrackBearingDrag();
+        }
+
+        /// <summary>How far the mouse must be dragged before it counts as setting a facing, in metres.</summary>
+        private const float BearingDragMetres = 15f;
+
+        private bool _settingBearing;
+        private Vec2 _bearingFrom;
+
+        /// <summary>
+        /// Watches a drag begun on empty ground and turns it into an arrival
+        /// facing when the button comes up.
+        /// </summary>
+        /// <remarks>
+        /// Click to march and the regiment keeps its front exactly where it is,
+        /// edging sideways if it must. Drag, and it comes round to the bearing
+        /// you drew on arrival. Without this there is no way to change front at
+        /// all except by attacking somebody, and with it a plain move stops
+        /// spinning a hundred metres of frontage through a right angle every
+        /// time you reposition a line.
+        /// </remarks>
+        private void TrackBearingDrag()
+        {
+            Vec2 here = _camera != null ? _camera.MouseWorldPosition() : default;
+            Vec2 drawn = here - _bearingFrom;
+
+            bool far = drawn.Length >= BearingDragMetres;
+
+            if (Input.GetMouseButton(0))
+            {
+                _status = far
+                    ? $"Facing {Facing.FromVector(drawn).Degrees:0}° on arrival — release to confirm."
+                    : "Drag to set the facing, or release to keep the current front.";
+
+                return;
+            }
+
+            _settingBearing = false;
+
+            Facing? bearing = far ? Facing.FromVector(drawn) : (Facing?)null;
+
+            _lastDestination = _bearingFrom;
+            _hasDestination = true;
+
+            PlanRoute(_selected, _bearingFrom, bearing);
         }
 
         /// <summary>
@@ -746,9 +792,10 @@ namespace BattleChess.Unity
                 return;
             }
 
-            _lastDestination = world;
-            _hasDestination = true;
-            PlanRoute(_selected, world);
+            // Held rather than issued at once: the drag that follows, if there
+            // is one, says which way to be facing when it arrives.
+            _settingBearing = true;
+            _bearingFrom = world;
         }
 
         /// <summary>
@@ -801,8 +848,10 @@ namespace BattleChess.Unity
                 $"org {unit.Organization:0.00}, stance {unit.Stance}.";
         }
 
-        private void PlanRoute(UnitInstance unit, Vec2 destination)
+        private void PlanRoute(UnitInstance unit, Vec2 destination, Facing? bearing = null)
         {
+            if (unit == null) return;
+
             // A unit is a point at its centre by default: if the centre can be
             // there, the unit can. Ticking 'Route by unit width' opts into
             // width-aware routing, which refuses gaps the regiment could not
@@ -875,7 +924,8 @@ namespace BattleChess.Unity
                 // Record it as an order, not just a route, so the order system
                 // can keep it honest — following a target, or reacting to what
                 // turns up on the way.
-                unit.GiveOrder(UnitOrder.MoveTo(destination, _options.WheelBeforeMarching), unit.Position);
+                unit.GiveOrder(
+                    UnitOrder.MoveTo(destination, _options.WheelBeforeMarching, bearing: bearing), unit.Position);
                 unit.Route = new MovementRoute(path.Waypoints, _options.WheelBeforeMarching);
 
                 float offBy = Facing.AbsoluteDelta(unit.Facing, Facing.Towards(unit.Position, path.Waypoints[1])) * Mathf.Rad2Deg;

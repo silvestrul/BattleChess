@@ -165,10 +165,17 @@ namespace BattleChess.Tests.Battle
         /// asks for and the pathfinder answers once; the systems then carry it
         /// out or refuse to.
         /// </remarks>
-        public void March(UnitInstance unit, Vec2 destination, Stance stance = Stance.Advance)
+        /// <param name="bearing">
+        /// Which way to face on arrival. Null keeps the current front, which is
+        /// the game's default and means a unit ordered backwards edges along at
+        /// a fifth of its pace rather than turning about. Tests that mean
+        /// "wheel round and go" have to say so, exactly as a player does.
+        /// </param>
+        public void March(
+            UnitInstance unit, Vec2 destination, Stance stance = Stance.Advance, Facing? bearing = null)
         {
             unit.Stance = stance;
-            unit.GiveOrder(UnitOrder.MoveTo(destination), unit.Position);
+            unit.GiveOrder(UnitOrder.MoveTo(destination, bearing: bearing), unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
 

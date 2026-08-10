@@ -33,7 +33,7 @@ namespace BattleChess.Tests.Battle
             // Marched clean out of sight. They stay tracked until they pass the
             // edge of the scouts' vision, so the marker lands there rather than
             // where they started — which is the point of it.
-            field.March(enemy, field.Centre + new Vec2(900f, 0f));
+            field.March(enemy, field.Centre + new Vec2(900f, 0f), bearing: Facing.East);
             field.RunTurns(8);
 
             Assert.False(field.State.Vision.CanSee(field.State, watcher.Owner, enemy),
@@ -83,7 +83,7 @@ namespace BattleChess.Tests.Battle
             Battlefield.Hold(enemy);
             field.RunTurns(1);
 
-            field.March(enemy, field.Centre + new Vec2(900f, 0f));
+            field.March(enemy, field.Centre + new Vec2(900f, 0f), bearing: Facing.East);
 
             field.RunTurns(5);
             field.State.Vision.TryRecall(field.State, watcher.Owner, enemy, out _, out int early);

@@ -227,6 +227,17 @@ namespace BattleChess.Rules
                 return;
             }
 
+            // Where it is going and where it is looking are two different
+            // questions, and conflating them was what pivoted a line ninety
+            // degrees for a fifty-metre sidestep. A march order leaves the
+            // front where the player put it unless asked for otherwise; an
+            // attack faces what it is charging, which is never in doubt.
+            Facing marchBearing = desired;
+
+            desired = unit.Order.Kind == OrderKind.Move
+                ? unit.Order.Bearing ?? unit.Facing
+                : marchBearing;
+
             // Decide whether this unit is halting to come round before it turns,
             // so a halted pivot gets the faster rate it has earned.
             float offBefore = Facing.AbsoluteDelta(unit.Facing, desired) * 180f / MathF.PI;
@@ -260,7 +271,14 @@ namespace BattleChess.Rules
                 return;
             }
 
-            float speed = terrainSpeed * AlignmentPenalty(offByDegrees);
+            // Charged against the line of march, not against whatever the unit
+            // is trying to face. A regiment holding its front while it
+            // sidesteps is edging along at a fifth of its pace, and that price
+            // is what makes keeping your facing a decision rather than a free
+            // option.
+            float offTheLineOfMarch = Facing.AbsoluteDelta(unit.Facing, marchBearing) * 180f / MathF.PI;
+
+            float speed = terrainSpeed * AlignmentPenalty(offTheLineOfMarch);
             float step = speed * BattleClock.SecondsPerTick;
 
             // Bad ground pulls a formation apart as it is crossed. Charged per

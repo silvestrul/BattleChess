@@ -144,7 +144,10 @@ namespace BattleChess.Tests.Battle
             {
                 float side = pass % 2 == 0 ? 1f : -1f;
 
-                field.March(horse, field.Centre + new Vec2(overshootMetres * side, 0f));
+                // Cavalry riding through and coming back wheels about to do
+                // it — a charge delivered backwards at a walk is not a charge.
+                Vec2 goal = field.Centre + new Vec2(overshootMetres * side, 0f);
+                field.March(horse, goal, bearing: Facing.FromVector(goal - horse.Position));
 
                 // Long enough to get there and settle, whichever distance it is.
                 field.RunTurns(4);
@@ -173,7 +176,8 @@ namespace BattleChess.Tests.Battle
             {
                 float side = pass % 2 == 0 ? 1f : -1f;
 
-                field.March(horse, field.Centre + new Vec2(200f * side, 0f));
+                Vec2 goal = field.Centre + new Vec2(200f * side, 0f);
+                field.March(horse, goal, bearing: Facing.FromVector(goal - horse.Position));
 
                 for (int turn = 0; turn < 3; turn++)
                 {
