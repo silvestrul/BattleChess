@@ -128,6 +128,83 @@ namespace BattleChess.Rules
                 unit.Facing, Facing.FromVector(toEnemy), turnThisTick * MathF.PI / 180f);
         }
 
+        /// <summary>What a regiment must do about the ground in front of it.</summary>
+        private enum Fit
+        {
+            /// <summary>It fits as it is.</summary>
+            Fine,
+
+            /// <summary>It fits at some other bearing, so come round to that.</summary>
+            ComeRound,
+
+            /// <summary>It fits at no bearing at all.</summary>
+            Blocked
+        }
+
+        /// <summary>How far either way a regiment will look for a bearing that fits, in degrees.</summary>
+        /// <remarks>
+        /// Ninety is the whole of the useful range: at a right angle a line is
+        /// presenting its depth instead of its frontage, which for a body a
+        /// hundred metres wide and five deep is the narrowest it can possibly
+        /// be. Anything beyond that is the same shapes again.
+        /// </remarks>
+        private const float SqueezeSearchDegrees = 90f;
+
+        /// <summary>Steps the search takes, in degrees.</summary>
+        private const float SqueezeStepDegrees = 6f;
+
+        /// <summary>
+        /// Decides whether a regiment can carry on as it is, has to turn to get
+        /// through, or cannot get through at all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The nearest fitting bearing wins, so a unit turns as little as it
+        /// must. It searches outward in both directions at once and takes the
+        /// first success, which means a wide line squeezing between two woods
+        /// comes round just far enough to clear them and no further.
+        /// </para>
+        /// <para>
+        /// A regiment already standing somewhere it does not fit is exempt
+        /// entirely. That happens — deployed onto bad ground, or left there by
+        /// an older rule — and a unit that cannot legally be where it is must
+        /// still be able to walk off it, or it is stuck for the whole battle.
+        /// </para>
+        /// </remarks>
+        private static Fit ChooseBearingToFit(
+            BattleState battle, UnitInstance unit, MovementRoute route, out Facing bearing)
+        {
+            bearing = unit.Facing;
+
+            if (!battle.FormationFits(unit, unit.Position, unit.Facing)) return Fit.Fine;
+
+            float reach = battle.SpeedOf(unit) * BattleClock.SecondsPerTick;
+            Vec2 probe = KeepOnTheField(battle, unit, Vec2.MoveTowards(unit.Position, route.Target, reach));
+
+            if (battle.FormationFits(unit, probe, unit.Facing)) return Fit.Fine;
+
+            for (float off = SqueezeStepDegrees; off <= SqueezeSearchDegrees; off += SqueezeStepDegrees)
+            {
+                float radians = off * MathF.PI / 180f;
+
+                Facing left = unit.Facing.RotatedBy(radians);
+                if (battle.FormationFits(unit, probe, left))
+                {
+                    bearing = left;
+                    return Fit.ComeRound;
+                }
+
+                Facing right = unit.Facing.RotatedBy(-radians);
+                if (battle.FormationFits(unit, probe, right))
+                {
+                    bearing = right;
+                    return Fit.ComeRound;
+                }
+            }
+
+            return Fit.Blocked;
+        }
+
         /// <summary>
         /// Holds a formed regiment inside the map, footprint and all.
         /// </summary>
@@ -234,9 +311,34 @@ namespace BattleChess.Rules
             // attack faces what it is charging, which is never in doubt.
             Facing marchBearing = desired;
 
-            desired = unit.Order.Kind == OrderKind.Move
-                ? unit.Order.Bearing ?? unit.Facing
-                : marchBearing;
+            desired = unit.Order.Kind == OrderKind.Move ? unit.OrderFacing : marchBearing;
+
+            // A regiment is a shape, and ground it cannot cross is ground it
+            // cannot be on. Carrying on as it is may put part of the formation
+            // in a wood or a river that the centre misses entirely, so before
+            // anything else it asks whether it still fits — and if not, whether
+            // there is a bearing it could come round to that does.
+            switch (ChooseBearingToFit(battle, unit, route, out Facing threading))
+            {
+                case Fit.ComeRound:
+                    desired = threading;
+                    break;
+
+                case Fit.Blocked:
+                    // Said every time, not on a tick counter. The march is
+                    // abandoned on this same tick, so a throttled message is
+                    // one that usually never appears at all — and a regiment
+                    // that has silently stopped is indistinguishable from one
+                    // that has stopped taking orders.
+                    log.Blocked("Move",
+                        $"{unit.Def.DisplayName} cannot get its whole frontage past " +
+                        $"{battle.TerrainAt(unit.Position).DisplayName} — " +
+                        $"{unit.Footprint.Width:0} m of front and no way through at any bearing.",
+                        unit.Id);
+
+                    unit.Route = null;
+                    return;
+            }
 
             // Decide whether this unit is halting to come round before it turns,
             // so a halted pivot gets the faster rate it has earned.
@@ -297,7 +399,16 @@ namespace BattleChess.Rules
             if (disorder > 0f)
                 unit.Organization -= disorder * step;
 
-            unit.Position = KeepOnTheField(battle, unit, Vec2.MoveTowards(unit.Position, route.Target, step));
+            Vec2 next = KeepOnTheField(battle, unit, Vec2.MoveTowards(unit.Position, route.Target, step));
+
+            // The last word. A regiment part-way through coming round has a
+            // bearing that does not fit yet, and stepping forward on it would
+            // put the leading flank into exactly the wood it is turning to
+            // avoid. It wheels on the spot until the shape clears, which is
+            // what threading a gap actually looks like.
+            if (battle.FormationFits(unit, next, unit.Facing) ||
+                !battle.FormationFits(unit, unit.Position, unit.Facing))
+                unit.Position = next;
 
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
             {

@@ -183,11 +183,25 @@ namespace BattleChess.Rules
         /// <remarks>Anchors pursuit, so an aggressive unit cannot be lured off the field.</remarks>
         public Vec2 OrderAnchor { get; private set; }
 
+        /// <summary>
+        /// The front this unit was told to hold, or held when it was ordered.
+        /// </summary>
+        /// <remarks>
+        /// Remembered rather than read live, because a regiment turns for
+        /// reasons that are not a change of plan — coming round to thread a gap
+        /// between two woods, most obviously. Reading the current facing would
+        /// let each of those quietly become the new intent, so a unit that
+        /// squeezed through something would come out the far side permanently
+        /// facing whichever way the gap happened to run.
+        /// </remarks>
+        public Facing OrderFacing { get; private set; }
+
         /// <summary>Gives the unit a new instruction, clearing any current march.</summary>
         public void GiveOrder(UnitOrder order, Vec2 anchor)
         {
             Order = order;
             OrderAnchor = anchor;
+            OrderFacing = order.Bearing ?? Facing;
             Route = null;
             HeldUpBy = UnitId.None;
 

@@ -227,6 +227,9 @@ namespace BattleChess.Rules
         private const int MaxSamplesAcross = 16;
         private const int MaxSamplesDeep = 8;
 
+        private const int MaxFitSamplesAcross = 9;
+        private const int MaxFitSamplesDeep = 3;
+
         /// <summary>
         /// The worst disorder inflicted by any ground the formation is standing
         /// on.
@@ -291,6 +294,62 @@ namespace BattleChess.Rules
             }
 
             return worst;
+        }
+
+        /// <summary>
+        /// Whether every part of a formation would be standing on ground it can
+        /// cross.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Movement has always asked this of a single point at the regiment's
+        /// centre, which for a body a hundred metres wide is barely a question
+        /// at all — a line could sit with half its frontage inside a mountain
+        /// and the rules saw a centre on open grass. Bodies of men occupy
+        /// ground, and ground they cannot cross is ground they cannot be on.
+        /// </para>
+        /// <para>
+        /// Sampled on the same grid as the disorder reading, and deliberately
+        /// coarse. The question is whether a formation is broadly on passable
+        /// country, not whether one man's boot is on a rock.
+        /// </para>
+        /// </remarks>
+        public bool FormationFits(UnitInstance unit, Vec2 centre, Facing facing)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            Footprint footprint = unit.Footprint;
+            var shape = new OrientedRect(centre, facing, footprint);
+
+            // Coarser than the disorder reading on purpose. This one is asked
+            // several times a tick, including once per candidate bearing while
+            // a regiment is looking for a way through, so it has to be cheap.
+            int across = SampleCount(footprint.Width, MaxFitSamplesAcross);
+            int deep = SampleCount(footprint.Depth, MaxFitSamplesDeep);
+
+            Vec2 right = shape.Right;
+            Vec2 forward = shape.Forward;
+
+            for (int d = 0; d < deep; d++)
+            {
+                float alongDepth = Offset(d, deep, footprint.HalfDepth);
+
+                for (int a = 0; a < across; a++)
+                {
+                    Vec2 point = shape.Centre
+                               + right * Offset(a, across, footprint.HalfWidth)
+                               + forward * alongDepth;
+
+                    // Off the map counts as ground nobody can stand on, which
+                    // is also what keeps a formation from overhanging the edge.
+                    if (!Terrain.Bounds.Contains(point)) return false;
+
+                    if (Movement.SpeedMultiplier(Terrain.At(point), unit.Def.Movement) <= 0f)
+                        return false;
+                }
+            }
+
+            return true;
         }
 
         private static int SampleCount(float extent, int cap) =>
