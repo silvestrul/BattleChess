@@ -244,20 +244,28 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// Open-ground speed of the slowest regiment in a unit's bond, which is
-        /// the pace the whole body keeps.
+        /// The pace a whole wing keeps: the speed of whichever of its regiments
+        /// is currently moving slowest, terrain and all.
         /// </summary>
         /// <remarks>
-        /// Base speed rather than the speed over the ground each regiment
-        /// happens to be standing on. Cavalry bound to infantry ought to march
-        /// at infantry pace — that is the whole cost of tying them together —
-        /// but one regiment wading a ford should not stop the entire wing dead
-        /// while it does.
+        /// <para>
+        /// Over the ground rather than on paper. A wing whose left is fording a
+        /// river and whose right is on a road is not a wing for very long if
+        /// each marches at what its own footing allows — it arrives as two
+        /// halves at two different times, which is the thing binding them was
+        /// meant to prevent. So the whole body waits for the ford.
+        /// </para>
+        /// <para>
+        /// A regiment that cannot move at all is skipped rather than allowed to
+        /// freeze everybody. Being stranded on ground you cannot cross is a
+        /// separate problem with its own message, and letting it stop the wing
+        /// would make it unrecoverable without unbinding.
+        /// </para>
         /// </remarks>
         public float PaceOfBond(UnitInstance unit)
         {
             if (unit == null) throw new ArgumentNullException(nameof(unit));
-            if (unit.Bond == 0) return unit.BaseSpeed;
+            if (unit.Bond == 0) return SpeedOf(unit);
 
             float slowest = float.MaxValue;
 
@@ -266,10 +274,13 @@ namespace BattleChess.Rules
                 if (_units[i].Bond != unit.Bond) continue;
                 if (!_units[i].IsFighting) continue;
 
-                if (_units[i].BaseSpeed < slowest) slowest = _units[i].BaseSpeed;
+                float speed = SpeedOf(_units[i]);
+                if (speed <= 0f) continue;
+
+                if (speed < slowest) slowest = speed;
             }
 
-            return slowest < float.MaxValue ? slowest : unit.BaseSpeed;
+            return slowest < float.MaxValue ? slowest : SpeedOf(unit);
         }
 
         /// <summary>

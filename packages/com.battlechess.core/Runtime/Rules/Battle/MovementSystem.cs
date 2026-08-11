@@ -87,10 +87,58 @@ namespace BattleChess.Rules
                 // deliberately squares up during its final approach, so a charge
                 // arrives properly aligned without anything turning on its own
                 // after the fact.
-                if (unit.Route == null || unit.Route.IsComplete) continue;
+                if (unit.Route == null || unit.Route.IsComplete)
+                {
+                    WheelOnTheSpot(unit);
+                    continue;
+                }
 
                 StepUnit(battle, unit, tick, log);
             }
+        }
+
+        /// <summary>
+        /// Brings a halted regiment round to the front it has been told to hold.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Not the automatic turn that used to be here. This one only ever
+        /// chases the front the player asked for — a regiment given no new front
+        /// stands exactly where it was left, and one taken in the flank stays
+        /// flanked until somebody does something about it.
+        /// </para>
+        /// <para>
+        /// What it makes possible is doing something about it. Facing could
+        /// previously only be set as a by-product of going somewhere, so a
+        /// regiment caught out of position had no way to come about at all
+        /// without being marched off and back again.
+        /// </para>
+        /// <para>
+        /// Nothing but the turn rate slows it. In particular no friendly
+        /// formation does: men come about within their own frontage and do not
+        /// need anybody's permission, and gating this on collisions would mean a
+        /// regiment in a crowded line could never face the enemy that had got
+        /// round it — which is the one position where turning matters most.
+        /// </para>
+        /// </remarks>
+        private static void WheelOnTheSpot(UnitInstance unit)
+        {
+            // Men running face where they are going, and that is decided by the
+            // route they are running along.
+            if (unit.State == UnitState.Routing) return;
+
+            Facing want = unit.DressingBearing ?? unit.OrderFacing;
+            if (Facing.AbsoluteDelta(unit.Facing, want) < 0.001f) return;
+
+            float rate = unit.Def.Get(UnitAttributes.TurnRate);
+
+            // Standing troops dress ranks rather than chase them — but not with
+            // an enemy already among them, which is the hardest way there is to
+            // change front and should feel like it.
+            if (unit.EnemiesInContact == 0) rate *= PivotBonusWhileHalted;
+
+            unit.Facing = Facing.RotateTowards(
+                unit.Facing, want, rate * BattleClock.SecondsPerTick * MathF.PI / 180f);
         }
 
         /// <summary>
@@ -268,31 +316,92 @@ namespace BattleChess.Rules
             Vec2 intended = next - unit.Position;
             Vec2 alongside = intended - away * Vec2.Dot(intended, away);
 
-            Vec2 sidestep = alongside.IsNearZero
-                ? unit.Position
-                : KeepOnTheField(battle, unit, unit.Position + alongside);
+            float reach = intended.Length;
+            if (reach <= 0f) return unit.Position;
 
             // A regiment that cannot legally stand where it already is may go
             // anywhere that gets it out, exactly as with impassable ground.
             bool stuckAlready = !battle.FormationFits(unit, unit.Position, unit.Facing);
 
-            bool sideways = !alongside.IsNearZero
-                            && FriendInTheWay(battle, unit, sidestep) == null
-                            && (stuckAlready || battle.FormationFits(unit, sidestep, unit.Facing));
+            // Glancing contact: keep whatever part of the step runs along their
+            // flank and drop the part that pushes into them.
+            //
+            // Judged as a real fraction of the step rather than merely non-zero.
+            // A regiment marching dead into somebody's back leaves a tangential
+            // component of about a ten-thousandth of a metre, which is not zero
+            // and is not movement either — it took this branch, edged forward by
+            // nothing, and did it again every tick forever. From the player's
+            // chair that is indistinguishable from the hard stop this was
+            // written to avoid.
+            if (alongside.Length > reach * SlideIsWorthTaking)
+            {
+                Vec2 sidestep = KeepOnTheField(battle, unit, unit.Position + alongside);
 
-            if (sideways) return sidestep;
+                if (FriendInTheWay(battle, unit, sidestep) == null &&
+                    (stuckAlready || battle.FormationFits(unit, sidestep, unit.Facing)))
+                    return sidestep;
+            }
 
-            // Said on a counter rather than every tick: a friend in the way
-            // persists for as long as they stand there, and a line of it every
-            // second would bury everything else.
+            // Squarely into their back, so there is nothing worth sliding along.
+            // Go round instead of standing there — a regiment that has been
+            // ordered somewhere and simply stops because one of its own is in
+            // the way is a regiment that has stopped taking orders, whatever the
+            // log says about why.
+            //
+            // Across the line of march, toward the nearer end of the formation
+            // in the way, so the detour is the short way round and gets shorter
+            // every tick.
+            //
+            // Measured against the march rather than against the shortest way
+            // out of the overlap, which is the version that did not work. The
+            // shortest way out swings between the blocker's faces as the two
+            // rectangles slide past each other, so the detour reversed itself
+            // every few ticks: a recorded run had cavalry cover thirty-eight
+            // metres in its first turn and then rock between two positions eight
+            // metres apart for the next seven. The line of march does not swing.
+            Vec2 heading = intended / reach;
+            Vec2 pastTheirFlank = new Vec2(-heading.Y, heading.X);
+
+            if (Vec2.Dot(unit.Position - blocker.Position, pastTheirFlank) < 0f)
+                pastTheirFlank = -pastTheirFlank;
+
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                // The nearer end first; the far one only if that way is blocked
+                // as well, which is what happens threading a packed line.
+                Vec2 thisWay = attempt == 0 ? pastTheirFlank : -pastTheirFlank;
+
+                Vec2 round = KeepOnTheField(battle, unit, unit.Position + thisWay * reach);
+
+                if (FriendInTheWay(battle, unit, round) != null) continue;
+                if (!stuckAlready && !battle.FormationFits(unit, round, unit.Facing)) continue;
+
+                if (tick % 30 == 0)
+                    log.Decision("Move",
+                        $"{unit.Def.DisplayName} is working round its own {blocker.Def.DisplayName} " +
+                        "rather than through it.",
+                        unit.Id);
+
+                return round;
+            }
+
+            // Boxed in on both sides as well as in front. Said on a counter
+            // rather than every tick: it persists for as long as they all stand
+            // there, and a line of it every second would bury everything else.
             if (tick % 20 == 0)
                 log.Blocked("Move",
-                    $"{unit.Def.DisplayName} cannot get past its own {blocker.Def.DisplayName} and is " +
-                    "waiting behind it — move one of them, or take it round.",
+                    $"{unit.Def.DisplayName} is hemmed in by its own {blocker.Def.DisplayName} with no way " +
+                    "round either flank — move one of them.",
                     unit.Id);
 
             return unit.Position;
         }
+
+        /// <summary>
+        /// How much of a step must survive along a friend's flank before edging
+        /// past them counts as movement rather than as being stuck.
+        /// </summary>
+        private const float SlideIsWorthTaking = 0.5f;
 
         /// <summary>
         /// A friendly formation this step would newly stand inside, if there is
@@ -429,15 +538,12 @@ namespace BattleChess.Rules
                 return;
             }
 
-            float terrainSpeed = battle.SpeedOf(unit);
-
-            // Regiments bound into a wing keep the pace of the slowest of them.
-            // Without it "they move together" lasts about ten seconds — cavalry
-            // is three times an infantryman's speed, so a mixed wing tears
-            // itself apart on the first march and arrives as separate regiments
-            // at separate times, which is exactly what binding them was meant
-            // to prevent.
-            terrainSpeed *= battle.PaceOfBond(unit) / MathF.Max(0.01f, unit.BaseSpeed);
+            // The pace of the slowest regiment in this one's wing, over the
+            // ground it is actually standing on — so a wing whose left is
+            // fording a river waits for it rather than arriving in two halves at
+            // two different times. For a unit on its own this is just its own
+            // speed here.
+            float terrainSpeed = battle.PaceOfBond(unit);
 
             if (terrainSpeed <= 0f)
             {

@@ -37,7 +37,23 @@ namespace BattleChess.Unity
         /// Depth a regiment is drawn and hit-tested at, however thin it really
         /// is. Cosmetic only — the rules always use the true footprint.
         /// </summary>
-        public const float ClickableDepthMetres = 18f;
+        public const float ClickableDepthMetres = 9f;
+
+        /// <summary>
+        /// How large a regiment is drawn against the ground it really holds.
+        /// </summary>
+        /// <remarks>
+        /// <b>Purely how it looks.</b> Every rule — contact, zones of control,
+        /// terrain under the formation, whether two bodies can share ground —
+        /// still uses the true footprint, so nothing fights, collides or routes
+        /// differently for being drawn smaller.
+        ///
+        /// The cost of that is worth naming: at a half scale two regiments make
+        /// contact with a visible gap between their plates, because the ground
+        /// they hold reaches further than the rectangle on screen says. Press F1
+        /// and the debug overlay draws the true shapes over the top.
+        /// </remarks>
+        public const float DrawnScale = 0.5f;
 
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
@@ -509,9 +525,7 @@ namespace BattleChess.Unity
             float minX = Mathf.Min(from.X, to.X), maxX = Mathf.Max(from.X, to.X);
             float minY = Mathf.Min(from.Y, to.Y), maxY = Mathf.Max(from.Y, to.Y);
 
-            Footprint real = unit.Footprint;
-            var clickable = new Footprint(real.Width, Mathf.Max(real.Depth, ClickableDepthMetres));
-            var shape = new OrientedRect(unit.Position, unit.Facing, clickable);
+            OrientedRect shape = Clickable(unit);
 
             foreach (Vec2 corner in shape.GetCorners())
             {
@@ -1196,14 +1210,29 @@ namespace BattleChess.Unity
         {
             foreach (UnitInstance unit in _battle.UnitsOnField())
             {
-                Footprint real = unit.Footprint;
-                var clickable = new Footprint(real.Width, Mathf.Max(real.Depth, ClickableDepthMetres));
-
-                if (new OrientedRect(unit.Position, unit.Facing, clickable).ContainsPoint(world))
+                if (Clickable(unit).ContainsPoint(world))
                     return unit;
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// The shape the mouse tests against: what the player can see, floored
+        /// at a depth thick enough to hit.
+        /// </summary>
+        /// <remarks>
+        /// Matches the drawn plate rather than the true footprint, so clicking
+        /// picks up the regiment you were pointing at rather than one whose
+        /// frontage reaches further than it looks.
+        /// </remarks>
+        private static OrientedRect Clickable(UnitInstance unit)
+        {
+            Footprint real = unit.Footprint;
+
+            return new OrientedRect(unit.Position, unit.Facing, new Footprint(
+                real.Width * DrawnScale,
+                Mathf.Max(real.Depth * DrawnScale, ClickableDepthMetres)));
         }
 
         private void SetSelection(List<UnitInstance> units)
@@ -1238,9 +1267,38 @@ namespace BattleChess.Unity
                 $"org {unit.Organization:0.00}, stance {unit.Stance}.";
         }
 
+        /// <summary>
+        /// How near a regiment's own ground a right-drag has to land before it
+        /// means "change front" rather than "march", in metres.
+        /// </summary>
+        private const float TurnInPlaceMetres = 30f;
+
         private void PlanRoute(UnitInstance unit, Vec2 destination, Facing? bearing = null, bool quiet = false)
         {
             if (unit == null) return;
+
+            // Right-drag on a regiment where it already stands is how you change
+            // front without going anywhere. Without this there is no way to
+            // order it at all: the route from a point to itself is empty, the
+            // pathfinder rightly refuses it, and the order was thrown away with
+            // the march — so a regiment caught in the flank could never be told
+            // to come about.
+            if (bearing.HasValue && Vec2.Distance(unit.Position, destination) <= TurnInPlaceMetres)
+            {
+                unit.GiveOrder(UnitOrder.Face(bearing.Value), unit.Position);
+
+                float toTurn = Facing.AbsoluteDelta(unit.Facing, bearing.Value) * Mathf.Rad2Deg;
+                float rate = unit.Def.Get(UnitAttributes.TurnRate);
+
+                _console.Decision("Move",
+                    $"{unit.Def.DisplayName} changing front to {bearing.Value.Degrees:0}° where it stands — " +
+                    $"{toTurn:0}° at {rate:0}°/s" +
+                    (unit.EnemiesInContact > 0 ? ", and slower with the enemy among it." : "."),
+                    unit.Id);
+
+                if (!quiet) _status = $"{unit.Def.DisplayName} coming about — {toTurn:0}°.";
+                return;
+            }
 
             // A unit is a point at its centre by default: if the centre can be
             // there, the unit can. Ticking 'Route by unit width' opts into

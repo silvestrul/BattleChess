@@ -30,10 +30,10 @@ namespace BattleChess.Unity
         private const float SymbolFillsDepth = 0.8f;
 
         /// <summary>Never drawn smaller than this, in metres, or it vanishes when zoomed out.</summary>
-        private const float MinSymbolMetres = 14f;
+        private const float MinSymbolMetres = 7f;
 
         /// <summary>Nor larger, or a deep column wears a badge wider than itself.</summary>
-        private const float MaxSymbolMetres = 26f;
+        private const float MaxSymbolMetres = 13f;
 
         private SpriteRenderer _body;
         private SpriteRenderer _symbol;
@@ -144,14 +144,22 @@ namespace BattleChess.Unity
             // Z rotation.
             transform.rotation = Quaternion.Euler(0f, 0f, facing.Degrees);
 
-            // Drawn no thinner than a shape you can actually see and click. A
-            // regiment in line is a hundred metres wide and four deep, which at
-            // any sensible zoom is a hairline. Cosmetic only — every rule still
-            // uses the true footprint, so nothing fights or collides differently
-            // for being drawn thicker.
-            float drawnDepth = Mathf.Max(footprint.Depth, BattlefieldController.ClickableDepthMetres);
+            // Drawn at a fraction of the ground it really holds, and no thinner
+            // than a shape you can actually see and click — a regiment in line
+            // is a hundred metres wide and four deep, which at any sensible zoom
+            // is a hairline.
+            //
+            // Cosmetic only. Every rule still uses the true footprint, so
+            // nothing fights, collides or routes differently for how it is
+            // drawn; the price is that two regiments make contact with a gap
+            // still showing between their plates. F1 draws the true shapes.
+            float drawnWidth = footprint.Width * BattlefieldController.DrawnScale;
 
-            ScaleToMetres(_body, drawnDepth, footprint.Width);
+            float drawnDepth = Mathf.Max(
+                footprint.Depth * BattlefieldController.DrawnScale,
+                BattlefieldController.ClickableDepthMetres);
+
+            ScaleToMetres(_body, drawnDepth, drawnWidth);
 
             // Fade with losses, so a mauled regiment reads as mauled even before
             // you notice it has narrowed.
@@ -178,18 +186,18 @@ namespace BattleChess.Unity
             // reads as a deliberate manoeuvre instead of the sprite happening to
             // rotate.
             bool wheeling = offByDegrees > 8f;
-            float edgeThickness = wheeling ? 7f : 3f;
+            float edgeThickness = wheeling ? 3.5f : 1.5f;
 
             // Sits on the front of the drawn body, not the true one, or it floats
             // inside a regiment that is being drawn thicker than it is.
-            _frontEdge.transform.localScale = new Vector3(edgeThickness, footprint.Width, 1f);
+            _frontEdge.transform.localScale = new Vector3(edgeThickness, drawnWidth, 1f);
             _frontEdge.transform.localPosition = new Vector3((drawnDepth - edgeThickness) * 0.5f, 0f, 0f);
 
             _frontEdge.color = wheeling
                 ? Color.Lerp(new Color(1f, 0.75f, 0.2f), new Color(1f, 0.35f, 0.1f), Mathf.InverseLerp(8f, 120f, offByDegrees))
                 : _selected ? Color.yellow : Color.white;
 
-            DrawSymbol(drawnDepth, footprint);
+            DrawSymbol(drawnDepth, drawnWidth);
         }
 
         /// <summary>
@@ -216,7 +224,7 @@ namespace BattleChess.Unity
         /// at exactly the moment identifying it matters.
         /// </para>
         /// </remarks>
-        private void DrawSymbol(float drawnDepth, Footprint footprint)
+        private void DrawSymbol(float drawnDepth, float drawnWidth)
         {
             if (_symbol == null) return;
 
@@ -224,7 +232,7 @@ namespace BattleChess.Unity
 
             // Never wider than the regiment itself. A unit fought down to a
             // stub should not wear a badge overhanging its own flanks.
-            size = Mathf.Min(size, footprint.Width * 0.9f);
+            size = Mathf.Min(size, drawnWidth * 0.9f);
 
             ScaleToMetres(_symbol, size, size);
 

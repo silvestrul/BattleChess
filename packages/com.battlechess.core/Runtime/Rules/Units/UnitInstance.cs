@@ -237,12 +237,50 @@ namespace BattleChess.Rules
         /// </remarks>
         public Facing? DressingBearing { get; set; }
 
+        /// <summary>
+        /// How far off its front a march can run before the regiment turns to
+        /// face it instead of edging along, in radians.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Holding the front through a move is right for a sidestep and absurd
+        /// for a withdrawal: told to fall back, a regiment would walk backwards
+        /// the whole way at a fifth of its pace, which is not a manoeuvre anyone
+        /// has ever ordered.
+        /// </para>
+        /// <para>
+        /// A right angle is where the arithmetic already turns over. Speed falls
+        /// away with the square of how far off the line of march a unit points,
+        /// so past ninety degrees a regiment is crawling badly enough that
+        /// wheeling and marching properly is quicker even counting the wheel.
+        /// Drawing a bearing overrides this either way — a fighting withdrawal
+        /// facing the enemy is a real order, and it should be one you have to
+        /// actually give.
+        /// </para>
+        /// </remarks>
+        private const float TurnAboutBeyond = MathF.PI * 0.5f;
+
+        /// <summary>
+        /// The front to hold for an order that did not name one.
+        /// </summary>
+        private Facing FrontFor(UnitOrder order, Vec2 anchor)
+        {
+            if (order.Kind != OrderKind.Move) return Facing;
+
+            Vec2 toDestination = order.Destination - anchor;
+            if (toDestination.IsNearZero) return Facing;
+
+            Facing lineOfMarch = Facing.FromVector(toDestination);
+
+            return Facing.AbsoluteDelta(Facing, lineOfMarch) > TurnAboutBeyond ? lineOfMarch : Facing;
+        }
+
         /// <summary>Gives the unit a new instruction, clearing any current march.</summary>
         public void GiveOrder(UnitOrder order, Vec2 anchor)
         {
             Order = order;
             OrderAnchor = anchor;
-            OrderFacing = order.Bearing ?? Facing;
+            OrderFacing = order.Bearing ?? FrontFor(order, anchor);
             Route = null;
             HeldUpBy = UnitId.None;
             DressingBearing = null;

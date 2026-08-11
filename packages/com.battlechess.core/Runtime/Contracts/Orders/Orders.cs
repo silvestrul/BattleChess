@@ -109,6 +109,19 @@ namespace BattleChess.Contracts
             new UnitOrder(OrderKind.Stand, Vec2.Zero, UnitId.None, false, stance, null);
 
         /// <summary>
+        /// Change front where you stand, without going anywhere.
+        /// </summary>
+        /// <remarks>
+        /// The order that was missing. Facing could only ever be set as a
+        /// by-product of going somewhere, so a regiment caught in the flank had
+        /// no way to come about at all — it had to be marched off and back, and
+        /// nothing else automatically turned it. Wheeling on the spot is one of
+        /// the oldest things a body of men can be told to do.
+        /// </remarks>
+        public static UnitOrder Face(Facing bearing, Stance? stance = null) =>
+            new UnitOrder(OrderKind.Stand, Vec2.Zero, UnitId.None, false, stance, bearing);
+
+        /// <summary>
         /// Marches to a place. Pass <paramref name="bearing"/> to say which way
         /// to face on arrival; leave it out to keep the current front.
         /// </summary>
