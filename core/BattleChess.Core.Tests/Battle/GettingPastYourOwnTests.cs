@@ -198,6 +198,26 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
+        public void AShortShuffleBackwardsIsNotWorthTurningRoundFor()
+        {
+            var field = new Battlefield("plains", 21800);
+
+            UnitInstance foot = field.Add(0, "swordsmen", field.Centre, Facing.East);
+
+            // A nudge of a few metres, backwards. Coming about for this would
+            // swing the whole line through a half circle to cover a distance
+            // shorter than the regiment is wide, which made small corrections
+            // near the front line unusable.
+            field.March(foot, field.Centre - new Vec2(foot.Footprint.Width * 0.4f, 0f));
+
+            field.RunTurns(1);
+
+            Assert.True(Facing.AbsoluteDelta(foot.Facing, Facing.East) < 0.05f,
+                $"It should have edged back holding its front, not wheeled about: facing " +
+                $"{foot.Facing.Degrees:0}°.");
+        }
+
+        [Fact]
         public void ASidestepStillHoldsTheFrontWhereItWasPut()
         {
             var field = new Battlefield("plains", 21600);

@@ -538,30 +538,26 @@ namespace BattleChess.Rules
         /// near the 45° boundary commits rather than dithering between two.
         /// </para>
         /// <para>
-        /// A regiment manoeuvring as part of a bound wing lines up on the
-        /// enemy's face where it already stands in that wing, so the whole body
-        /// arrives abreast rather than every regiment converging on one slot and
-        /// jamming behind whichever got there first. The wing's centre is what
-        /// meets the enemy's centre; each regiment keeps its own place in the
-        /// line. For a unit on its own the offset is exactly zero, so this is
-        /// the same rule either way.
+        /// Everybody attacking the same regiment forms on the same face and
+        /// stands beside each other along it, rather than each picking its own
+        /// and one of them wandering round the back. Two regiments sent at one
+        /// enemy should hit it together — which halves what each of them deals
+        /// and takes, because they are sharing a frontage, and is worth doing
+        /// anyway for what it does to the defender's nerve.
+        /// </para>
+        /// <para>
+        /// The lowest-numbered attacker decides the face for all of them, which
+        /// is arbitrary but reproducible — and it hands the player the choice
+        /// without needing a control for it, since the face follows from where
+        /// that regiment is standing when the order is given.
         /// </para>
         /// </remarks>
         private static Vec2 DressingSlot(
             BattleState battle, UnitInstance unit, UnitInstance quarry, out Facing square)
         {
             OrientedRect theirs = quarry.Shape;
-            Vec2 offset = unit.Position - quarry.Position;
 
-            float offTheFront = Vec2.Dot(offset, theirs.Forward);
-            float offTheFlank = Vec2.Dot(offset, theirs.Right);
-
-            // Outward normal of the face this regiment is standing off. Compared
-            // by magnitude and signed separately, so a unit sitting exactly on
-            // one of the axes still gets a definite answer.
-            Vec2 outward = MathF.Abs(offTheFront) >= MathF.Abs(offTheFlank)
-                ? theirs.Forward * (offTheFront >= 0f ? 1f : -1f)
-                : theirs.Right * (offTheFlank >= 0f ? 1f : -1f);
+            Vec2 outward = ChooseFace(battle, unit, quarry);
 
             square = Facing.FromVector(-outward);
 
@@ -574,12 +570,155 @@ namespace BattleChess.Rules
                            + dressed.ProjectedRadius(outward)
                            - ContactMetres * 0.5f;
 
-            // Where this regiment stands within its own wing, measured along the
-            // face it is about to meet.
             Vec2 alongTheFace = new Vec2(-outward.Y, outward.X);
-            float place = Vec2.Dot(unit.Position - battle.CentreOfBond(unit), alongTheFace);
 
-            return quarry.Position + outward * standOff + alongTheFace * place;
+            return quarry.Position
+                 + outward * standOff
+                 + alongTheFace * PlaceInTheAttackingLine(battle, unit, quarry);
+        }
+
+        /// <summary>
+        /// How far a regiment must have got round an enemy before it stops
+        /// squaring up to them and goes for the flank instead.
+        /// </summary>
+        /// <remarks>
+        /// A regiment meets an enemy one of two ways: front to front, or square
+        /// on to its flank. There is no third arrangement worth having, because
+        /// anything between the two presents a corner to a corner and neither
+        /// side can bring its numbers to bear.
+        /// <para>
+        /// Frontal is the default and this decides how far off the front you
+        /// must already be to earn the other. At two, a regiment has to be twice
+        /// as far round the side as it is in front — past sixty degrees off
+        /// their bearing — before it goes for the flank. Anything less committed
+        /// than that squares up, which stops a charge aimed at the front from
+        /// drifting round the corner because it happened to set off at an angle.
+        /// </para>
+        /// <para>
+        /// Both choices hold once made: marching toward a frontal slot reduces
+        /// how far round the side you are, and marching toward a flanking slot
+        /// reduces how far in front. So a regiment commits rather than dithering
+        /// on the boundary.
+        /// </para>
+        /// </remarks>
+        private const float FlankingBias = 2f;
+
+        /// <summary>
+        /// The outward normal of the enemy face this regiment will form on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Judged from where the attackers were standing when they were sent,
+        /// averaged over all of them — not from where they have got to. Two
+        /// separate things go wrong otherwise, and both were seen.
+        /// </para>
+        /// <para>
+        /// Read from a regiment's live position, the choice feeds back on
+        /// itself: an attacker takes its slot beside the enemy's front, which
+        /// leaves it a few metres in front and twenty to one side, and on the
+        /// next re-plan that reads exactly like standing off the flank — so the
+        /// attack hauls itself round the corner one re-plan at a time. Read from
+        /// the middle of the attackers instead, it still swings while half of
+        /// them are strung out on the march.
+        /// </para>
+        /// <para>
+        /// Where they set off from cannot move, so it settles both. It also
+        /// hands the player the choice without needing a control for it: the
+        /// face follows from where the regiments were standing when the order
+        /// was given, and re-ordering them from somewhere else changes it.
+        /// </para>
+        /// <para>
+        /// Deliberately still read against the enemy's <i>current</i> bearing.
+        /// A regiment that turns to receive an attack coming at its flank
+        /// converts it into a frontal one, which is precisely what turning to
+        /// receive it is for — and holding the face fixed instead had attackers
+        /// grinding away at a flank the defender no longer presented, breaking
+        /// regiments that should have held.
+        /// </para>
+        /// </remarks>
+        private static Vec2 ChooseFace(BattleState battle, UnitInstance unit, UnitInstance quarry)
+        {
+            Vec2 setOffFrom = Vec2.Zero;
+            int attackers = 0;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (!IsGoingFor(other, unit, quarry)) continue;
+
+                setOffFrom += other.OrderAnchor;
+                attackers++;
+            }
+
+            setOffFrom = attackers > 0 ? setOffFrom / attackers : unit.Position;
+
+            OrientedRect theirs = quarry.Shape;
+            Vec2 offset = setOffFrom - quarry.Position;
+
+            float offTheFront = Vec2.Dot(offset, theirs.Forward);
+            float offTheFlank = Vec2.Dot(offset, theirs.Right);
+
+            // Signed separately from the comparison, so a body sitting exactly
+            // on one of the axes still gets a definite answer.
+            return MathF.Abs(offTheFlank) > MathF.Abs(offTheFront) * FlankingBias
+                ? theirs.Right * (offTheFlank >= 0f ? 1f : -1f)
+                : theirs.Forward * (offTheFront >= 0f ? 1f : -1f);
+        }
+
+        /// <summary>
+        /// Whether a regiment counts as one of the ones going for this target.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="asking"/> is always included whether or not its order
+        /// has been written yet. A unit closing under an aggressive stance has
+        /// not been told to attack anybody by name, but it is plainly one of the
+        /// regiments about to arrive.
+        /// </remarks>
+        private static bool IsGoingFor(UnitInstance other, UnitInstance asking, UnitInstance quarry)
+        {
+            if (other.Owner != asking.Owner) return false;
+            if (!other.IsFighting) return false;
+            if (other.Id == asking.Id) return true;
+
+            return other.Order.Kind == OrderKind.Attack && other.Order.Target == quarry.Id;
+        }
+
+        /// <summary>Elbow room left between two regiments drawn up side by side.</summary>
+        private const float ShoulderRoomMetres = 4f;
+
+        /// <summary>
+        /// How far along the enemy's face this regiment stands, measured from
+        /// the middle of everybody attacking it.
+        /// </summary>
+        /// <remarks>
+        /// Each attacker gets its own stretch of the face, packed in id order
+        /// and centred as a body on the target's centre. Two regiments sent at
+        /// one enemy therefore arrive shoulder to shoulder against its front
+        /// rather than both aiming at the same spot and jamming behind whichever
+        /// arrived first — which, now that friendly formations cannot share
+        /// ground, is what would otherwise happen every time.
+        /// </remarks>
+        private static float PlaceInTheAttackingLine(
+            BattleState battle, UnitInstance unit, UnitInstance quarry)
+        {
+            float wholeLine = 0f;
+            float aheadOfUs = 0f;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (!IsGoingFor(other, unit, quarry)) continue;
+
+                float berth = other.Footprint.Width + ShoulderRoomMetres;
+
+                if (other.Id.Value < unit.Id.Value) aheadOfUs += berth;
+
+                wholeLine += berth;
+            }
+
+            float ours = unit.Footprint.Width + ShoulderRoomMetres;
+
+            // The middle of our own stretch, against the middle of the whole
+            // line. Alone, this is exactly zero.
+            return aheadOfUs + ours * 0.5f - wholeLine * 0.5f;
         }
 
         /// <summary>Whether this unit would be dressing on that one if it re-planned now.</summary>

@@ -117,7 +117,29 @@ namespace BattleChess.Rules
         private const float LosingExchangeShock = 0.01f;
 
         /// <summary>Shock per enemy beyond the first in contact.</summary>
-        private const float OutnumberedShock = 0.01f;
+        /// <remarks>
+        /// Tripled, because it is carrying the whole point of concentrating two
+        /// regiments on one. Sharing a frontage means each attacker deals and
+        /// takes about half what it would alone, so the raw exchange comes out
+        /// very nearly even and sending the second regiment bought nothing.
+        /// What it actually buys is the defender's nerve: men fighting two
+        /// bodies at once are losing whether or not the casualty figures say so,
+        /// and morale is where that has to show up.
+        /// </remarks>
+        private const float OutnumberedShock = 0.03f;
+
+        /// <summary>
+        /// How much of its own fright a regiment is spared for each friendly
+        /// regiment fighting the same enemy alongside it.
+        /// </summary>
+        /// <remarks>
+        /// The other half of the same idea. Men with a friendly regiment at
+        /// their shoulder, both set on the same enemy, hold far better than the
+        /// same men alone — so two attackers should not merely hurt the defender
+        /// more, they should each be steadier for having company. At a half, a
+        /// second regiment cuts what the first feels by a third.
+        /// </remarks>
+        private const float ShoulderToShoulderRelief = 0.5f;
 
         /// <summary>
         /// Organization lost per pulse for each enemy beyond the first.
@@ -341,6 +363,15 @@ namespace BattleChess.Rules
 
             if (unit.EnemiesInContact > 1)
                 shock += OutnumberedShock * (unit.EnemiesInContact - 1);
+
+            // Everybody else in on this enemy is somebody standing with us. The
+            // count is taken from the enemy's side of the fight, which is
+            // exactly "how many of us are on them", and it is already final by
+            // the time any exchange is resolved.
+            int alongside = enemy.EnemiesInContact - 1;
+
+            if (alongside > 0)
+                shock /= 1f + ShoulderToShoulderRelief * alongside;
 
             // Reach keeps the horror at arm's length. Men killing at the end of
             // a pike are doing something less appalling than men wrestling, and

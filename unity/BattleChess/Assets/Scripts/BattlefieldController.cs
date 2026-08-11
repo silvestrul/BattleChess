@@ -50,6 +50,33 @@ namespace BattleChess.Unity
         /// </remarks>
         public const float ClickableDepthMetres = 9f;
 
+        /// <summary>
+        /// How much thicker than life a regiment's bar is drawn.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A drawing convention, not a claim about the ground. The men are still
+        /// standing where they were — same ranks, same spacing, same forty
+        /// metres of front — but a six-metre bar at any useful zoom is a
+        /// hairline, and a battle drawn in hairlines is unreadable. Thickening
+        /// it is the same liberty the map-and-counters films take: the block
+        /// says "a regiment is here, facing this way", and its length is the
+        /// part that has to be true.
+        /// </para>
+        /// <para>
+        /// Deliberately exaggerating the <i>short</i> side only. Frontage is the
+        /// number that decides how many men can reach the enemy, so a plate
+        /// claiming more of it than the regiment holds would lie about the one
+        /// thing the player is reading it for — which is what the earlier
+        /// half-scale drawing got wrong in the other direction.
+        /// </para>
+        /// </remarks>
+        public const float DrawnDepthExaggeration = 2f;
+
+        /// <summary>The depth a regiment is drawn and hit-tested at, in metres.</summary>
+        public static float DrawnDepthOf(Footprint footprint) =>
+            Mathf.Max(footprint.Depth * DrawnDepthExaggeration, ClickableDepthMetres);
+
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
 
@@ -339,8 +366,9 @@ namespace BattleChess.Unity
             if (Input.GetMouseButton(1))
             {
                 _status = far
-                    ? $"Facing {Facing.FromVector(drawn).Degrees:0}° on arrival — release to confirm."
-                    : "Drag to set the facing, or release to keep the current front.";
+                    ? $"Forming a line on that bearing, facing {FrontOfDrawnLine(drawn).Degrees:0}° — " +
+                      "release to confirm, drag the other way to face about."
+                    : "Drag out the line they should form on, or release to keep the current front.";
 
                 return;
             }
@@ -350,8 +378,36 @@ namespace BattleChess.Unity
             _lastDestination = _orderAt;
             _hasDestination = true;
 
-            MarchSelection(_orderAt, far ? Facing.FromVector(drawn) : (Facing?)null);
+            MarchSelection(_orderAt, far ? FrontOfDrawnLine(drawn) : (Facing?)null);
         }
+
+        /// <summary>
+        /// The front a regiment holds when it forms along a line the player has
+        /// dragged out.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The drag traces the <i>rank</i>, not the gaze — you draw the line the
+        /// men stand in and they face square out of it. Dragging along the
+        /// direction a regiment already faces therefore turns it a quarter
+        /// circle, which is correct and was the whole confusion when the drag
+        /// meant the direction to look: an order to keep the current front read
+        /// as a right-angle wheel.
+        /// </para>
+        /// <para>
+        /// Which of the two square-out directions is settled by handedness: the
+        /// drag runs from the regiment's left flank to its right. So the same
+        /// line dragged the other way faces them about, and both are reachable
+        /// without a modifier.
+        /// </para>
+        /// <para>
+        /// Length sets nothing. Frontage comes from how many men are standing
+        /// and how deep they are drawn up, so a longer drag only makes the
+        /// bearing easier to aim.
+        /// </para>
+        /// </remarks>
+        private static Facing FrontOfDrawnLine(Vec2 drawn) =>
+            Facing.FromVector(new Vec2(-drawn.Y, drawn.X));
 
         // ---- Selection --------------------------------------------------------
 
@@ -1225,9 +1281,8 @@ namespace BattleChess.Unity
         {
             Footprint real = unit.Footprint;
 
-            return new OrientedRect(unit.Position, unit.Facing, new Footprint(
-                real.Width,
-                Mathf.Max(real.Depth, ClickableDepthMetres)));
+            return new OrientedRect(unit.Position, unit.Facing,
+                new Footprint(real.Width, DrawnDepthOf(real)));
         }
 
         private void SetSelection(List<UnitInstance> units)

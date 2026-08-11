@@ -144,15 +144,12 @@ namespace BattleChess.Unity
             // Z rotation.
             transform.rotation = Quaternion.Euler(0f, 0f, facing.Degrees);
 
-            // The true frontage, and a depth floored at something you can see
-            // and click — a regiment in line is forty metres wide and six deep,
-            // which at any sensible zoom is a hairline. That floor is the only
-            // liberty taken with the shape, so two regiments in contact look
-            // like two regiments in contact.
+            // The true frontage, and a deliberately chunky depth. Frontage is
+            // what decides how many men can reach the enemy, so the bar's length
+            // has to be honest; its thickness is only there to be seen, and a
+            // six-metre bar at any useful zoom is a hairline.
             float drawnWidth = footprint.Width;
-
-            float drawnDepth = Mathf.Max(
-                footprint.Depth, BattlefieldController.ClickableDepthMetres);
+            float drawnDepth = BattlefieldController.DrawnDepthOf(footprint);
 
             ScaleToMetres(_body, drawnDepth, drawnWidth);
 
@@ -181,7 +178,7 @@ namespace BattleChess.Unity
             // reads as a deliberate manoeuvre instead of the sprite happening to
             // rotate.
             bool wheeling = offByDegrees > 8f;
-            float edgeThickness = wheeling ? 3.5f : 1.5f;
+            float edgeThickness = wheeling ? 4.5f : 2f;
 
             // Sits on the front of the drawn body, not the true one, or it floats
             // inside a regiment that is being drawn thicker than it is.

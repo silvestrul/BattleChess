@@ -278,7 +278,13 @@ namespace BattleChess.Rules
             if (order.Kind != OrderKind.Move) return Facing;
 
             Vec2 toDestination = order.Destination - anchor;
-            if (toDestination.IsNearZero) return Facing;
+
+            // Nothing shorter than the regiment's own frontage is worth coming
+            // about for. A nudge of a few metres was enough to spin a whole line
+            // through a half circle if it happened to point backwards, which is
+            // an absurd answer to being asked to shuffle sideways — and it made
+            // small corrections near the front line unusable.
+            if (toDestination.Length < Footprint.Width) return Facing;
 
             Facing lineOfMarch = Facing.FromVector(toDestination);
 

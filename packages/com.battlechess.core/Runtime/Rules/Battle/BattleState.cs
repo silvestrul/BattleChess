@@ -215,35 +215,6 @@ namespace BattleChess.Rules
         // ---- Bonds ------------------------------------------------------------
 
         /// <summary>
-        /// The middle of the body of regiments a unit manoeuvres with, or its
-        /// own position if it manoeuvres alone.
-        /// </summary>
-        /// <remarks>
-        /// Only the regiments still holding together count. A wing that has lost
-        /// one to a rout should close up on the survivors rather than keep
-        /// dressing on a gap where a regiment used to be.
-        /// </remarks>
-        public Vec2 CentreOfBond(UnitInstance unit)
-        {
-            if (unit == null) throw new ArgumentNullException(nameof(unit));
-            if (unit.Bond == 0) return unit.Position;
-
-            Vec2 total = Vec2.Zero;
-            int members = 0;
-
-            for (int i = 0; i < _units.Count; i++)
-            {
-                if (_units[i].Bond != unit.Bond) continue;
-                if (!_units[i].IsFighting) continue;
-
-                total += _units[i].Position;
-                members++;
-            }
-
-            return members > 0 ? total / members : unit.Position;
-        }
-
-        /// <summary>
         /// The pace a whole wing keeps: the speed of whichever of its regiments
         /// is currently moving slowest, terrain and all.
         /// </summary>
