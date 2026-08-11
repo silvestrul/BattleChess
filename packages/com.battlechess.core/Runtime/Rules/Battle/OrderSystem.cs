@@ -170,8 +170,7 @@ namespace BattleChess.Rules
             // scratch, losing seven men a pulse while dealing literally none,
             // until it broke. Judged on what the unit is armed for rather than
             // on its name, so a new missile unit inherits it for free.
-            if (unit.Def.Get(UnitAttributes.RangedAttack) > unit.Def.Get(UnitAttributes.Attack))
-                return false;
+            if (ShootsRatherThanCharges(unit)) return false;
 
             UnitInstance blocker = battle.Get(unit.HeldUpBy);
             if (!blocker.IsFighting) return false;
@@ -228,6 +227,9 @@ namespace BattleChess.Rules
         {
             Vec2 home = battle.GetArmy(unit.Owner).RetreatDirection;
             MapBounds bounds = battle.Terrain.Bounds;
+
+            // Men running are not dressing a line onto anybody.
+            unit.DressingBearing = null;
 
             // Off the edge and away. The men are gone from this battle but not
             // from the army — that is the whole point of routing rather than
@@ -370,6 +372,17 @@ namespace BattleChess.Rules
                 return;
             }
 
+            // Bowmen told to attack are being told to shoot, not to charge. Far
+            // enough in that the volleys land is where the order has been
+            // carried out — walking the last hundred and eighty metres to cross
+            // swords is the opposite of what archers are for, and it was what
+            // made a regiment of them charge a spear wall it could not scratch.
+            if (ShootsRatherThanCharges(unit) && InShootingPosition(unit, target))
+            {
+                unit.Route = null;
+                return;
+            }
+
             if (InContactWith(unit, target))
             {
                 unit.Route = null;
@@ -382,7 +395,15 @@ namespace BattleChess.Rules
             // fills the console with the same line forever.
             if (unit.HeldUpBy.IsValid) return;
 
+            // Crossing into dressing range changes what the march is aiming at,
+            // and a target standing still never trips the distance check — so
+            // without this the regiment would walk the whole way in on its
+            // original bearing and arrive at whatever angle it set off at,
+            // which is the entire thing dressing exists to prevent.
+            bool shouldDress = WillDressOn(unit, target);
+
             bool stale = !unit.IsMarching ||
+                         shouldDress != unit.DressingBearing.HasValue ||
                          (tick % RepathIntervalTicks == 0 &&
                           Vec2.Distance(unit.Route!.Destination, target.Position) > RepathThresholdMetres);
 
@@ -396,26 +417,47 @@ namespace BattleChess.Rules
             Vec2 approach = (unit.Position - quarry.Position).Normalised();
             if (approach.IsNearZero) approach = unit.Facing.Opposite().ToVector();
 
-            // How much of each formation lies between the two centres along the
-            // line of approach.
-            //
-            // Adding half-DEPTHS was right only for a head-on meeting. A
-            // regiment coming at a line from the side has to cross half its
-            // frontage — fifty-three metres for cavalry, not four — so the aim
-            // point landed deep inside the enemy formation, at a place the unit
-            // could never stand. It marched at that point, never arrived, and
-            // re-planned the same impossible route every few ticks. From the
-            // player's chair that reads as regiments refusing to engage unless
-            // aimed dead at each other's centres.
-            float standOff = quarry.Shape.ProjectedRadius(approach)
-                           + unit.Shape.ProjectedRadius(approach);
+            Vec2 want;
 
-            // Then aim slightly inside contact rather than exactly at its edge,
-            // so arriving means fighting rather than stopping a metre short of
-            // a fight and waiting to be told again.
-            standOff -= ContactMetres * 0.5f;
+            if (ShootsRatherThanCharges(unit))
+            {
+                // Bowmen and guns stop where their reach begins. Measured centre
+                // to centre because that is what the shooting rule measures, so
+                // arriving here means the volleys land.
+                want = quarry.Position + approach * ShootingReach(unit);
+                unit.DressingBearing = null;
+            }
+            else if (OrientedRect.Within(unit.Shape, quarry.Shape, DressingRangeMetres))
+            {
+                want = DressingSlot(unit, quarry, out Facing square);
+                unit.DressingBearing = square;
+            }
+            else
+            {
+                // How much of each formation lies between the two centres along
+                // the line of approach.
+                //
+                // Adding half-DEPTHS was right only for a head-on meeting. A
+                // regiment coming at a line from the side has to cross half its
+                // frontage — fifty-three metres for cavalry, not four — so the
+                // aim point landed deep inside the enemy formation, at a place
+                // the unit could never stand. It marched at that point, never
+                // arrived, and re-planned the same impossible route every few
+                // ticks. From the player's chair that reads as regiments
+                // refusing to engage unless aimed dead at each other's centres.
+                float standOff = quarry.Shape.ProjectedRadius(approach)
+                               + unit.Shape.ProjectedRadius(approach);
 
-            Vec2 aim = NearestReachable(battle, unit, quarry.Position + approach * standOff, unit.Position);
+                // Then aim slightly inside contact rather than exactly at its
+                // edge, so arriving means fighting rather than stopping a metre
+                // short of a fight and waiting to be told again.
+                standOff -= ContactMetres * 0.5f;
+
+                want = quarry.Position + approach * standOff;
+                unit.DressingBearing = null;
+            }
+
+            Vec2 aim = NearestReachable(battle, unit, want, unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, aim, unit.Def.Movement);
 
@@ -444,6 +486,129 @@ namespace BattleChess.Rules
 
         /// <summary>How close two formations must come before their men can reach each other.</summary>
         public const float ContactMetres = 8f;
+
+        // ---- Squaring up -----------------------------------------------------
+
+        /// <summary>
+        /// How near a regiment comes before it starts dressing its line onto the
+        /// enemy, in metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Far enough out that there is room to come round and sidestep before
+        /// the two bodies meet, near enough that the manoeuvre is committed
+        /// rather than speculative. A hundred metres is about a minute for
+        /// infantry and twenty seconds for horse.
+        /// </para>
+        /// <para>
+        /// Deliberately not the whole march. Aiming at the aligned slot from the
+        /// far side of the field would have a hundred-metre line crabbing
+        /// sideways across the entire battlefield at a fifth of its pace to
+        /// arrive on the correct axis, which is both slower and stupider than
+        /// walking straight at the enemy and tidying up at the end.
+        /// </para>
+        /// </remarks>
+        private const float DressingRangeMetres = 100f;
+
+        /// <summary>
+        /// Where a regiment must stand to meet its target squarely, and the
+        /// front it must hold to do it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two equal regiments should end up rectangle on rectangle, centre
+        /// opposite centre. So the slot sits on the normal through the target's
+        /// centre, off whichever of its four faces this unit is currently
+        /// nearest — attack a line from in front and you draw up in front of it;
+        /// get round to its side first and you draw up against its depth, which
+        /// is what a flank attack is.
+        /// </para>
+        /// <para>
+        /// That makes flanking something you manoeuvre for rather than something
+        /// the approach angle hands you by accident. It also means the choice of
+        /// face is self-reinforcing: marching toward the chosen slot increases
+        /// this unit's offset along that face's normal, so a regiment starting
+        /// near the 45° boundary commits rather than dithering between two.
+        /// </para>
+        /// </remarks>
+        private static Vec2 DressingSlot(UnitInstance unit, UnitInstance quarry, out Facing square)
+        {
+            OrientedRect theirs = quarry.Shape;
+            Vec2 offset = unit.Position - quarry.Position;
+
+            float offTheFront = Vec2.Dot(offset, theirs.Forward);
+            float offTheFlank = Vec2.Dot(offset, theirs.Right);
+
+            // Outward normal of the face this regiment is standing off. Compared
+            // by magnitude and signed separately, so a unit sitting exactly on
+            // one of the axes still gets a definite answer.
+            Vec2 outward = MathF.Abs(offTheFront) >= MathF.Abs(offTheFlank)
+                ? theirs.Forward * (offTheFront >= 0f ? 1f : -1f)
+                : theirs.Right * (offTheFlank >= 0f ? 1f : -1f);
+
+            square = Facing.FromVector(-outward);
+
+            // Half of each formation lies between the two centres along that
+            // normal: theirs as it stands, and ours as it will stand once it has
+            // come round — which is its depth, not its frontage.
+            var dressed = new OrientedRect(unit.Position, square, unit.Footprint);
+
+            float standOff = theirs.ProjectedRadius(outward)
+                           + dressed.ProjectedRadius(outward)
+                           - ContactMetres * 0.5f;
+
+            return quarry.Position + outward * standOff;
+        }
+
+        /// <summary>Whether this unit would be dressing on that one if it re-planned now.</summary>
+        private static bool WillDressOn(UnitInstance unit, UnitInstance quarry) =>
+            !ShootsRatherThanCharges(unit) &&
+            OrientedRect.Within(unit.Shape, quarry.Shape, DressingRangeMetres);
+
+        // ---- Shooting rather than closing ------------------------------------
+
+        /// <summary>
+        /// How much of its reach a shooter closes to before it stops, as a
+        /// fraction.
+        /// </summary>
+        /// <remarks>
+        /// Not the whole of it. A volley at the very edge of the range does half
+        /// damage and is the least accurate shot the unit has, and stopping
+        /// exactly at the limit means any drift by either side breaks the
+        /// engagement off. Coming a little inside costs a few seconds of being
+        /// shot at and buys a shot worth firing.
+        /// </remarks>
+        private const float ShootingStandoffFraction = 0.85f;
+
+        /// <summary>
+        /// Whether this unit's answer to an enemy is to shoot it rather than
+        /// close with it.
+        /// </summary>
+        /// <remarks>
+        /// Judged on what the unit is armed for rather than on its name, so a
+        /// new missile unit inherits the behaviour without anything being told
+        /// about it.
+        /// </remarks>
+        public static bool ShootsRatherThanCharges(UnitInstance unit) =>
+            unit.Def.Get(UnitAttributes.Range) > 0f &&
+            unit.Def.Get(UnitAttributes.RangedAttack) > unit.Def.Get(UnitAttributes.Attack);
+
+        /// <summary>How far out a shooter means to stand from what it is shooting, in metres.</summary>
+        private static float ShootingReach(UnitInstance unit) =>
+            unit.Def.Get(UnitAttributes.Range) * ShootingStandoffFraction;
+
+        /// <summary>
+        /// Whether a shooter is already near enough that its volleys land, and
+        /// so has nothing left to do about its orders.
+        /// </summary>
+        /// <remarks>
+        /// Anything closer counts too. A regiment charged by cavalry is well
+        /// inside its own reach and should stand and shoot, not back away to a
+        /// tidier distance — withdrawing from a threat is what the Evade stance
+        /// is for, and it should stay a decision somebody made.
+        /// </remarks>
+        private static bool InShootingPosition(UnitInstance unit, UnitInstance quarry) =>
+            Vec2.Distance(unit.Position, quarry.Position) <= ShootingReach(unit);
 
         /// <summary>Step size when hunting back from an unreachable goal, in metres.</summary>
         private const float ReachableProbeStep = 12f;

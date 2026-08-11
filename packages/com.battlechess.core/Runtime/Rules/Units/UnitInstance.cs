@@ -196,6 +196,28 @@ namespace BattleChess.Rules
         /// </remarks>
         public Facing OrderFacing { get; private set; }
 
+        /// <summary>
+        /// The front this regiment is coming round onto for the last hundred
+        /// metres of a charge, or null if it is not dressing on anybody.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two bodies of men meet properly or they meet badly, and the
+        /// difference is decided in the final approach rather than at the moment
+        /// of impact. A regiment marches at its enemy by whatever line the
+        /// ground allows — often a diagonal — and then, close in, squares up:
+        /// it repositions onto the enemy's centre and comes round until the two
+        /// rectangles are face to face.
+        /// </para>
+        /// <para>
+        /// Kept here rather than derived, because movement needs to know a
+        /// regiment is dressing without re-deciding it. That decision costs a
+        /// route plan, and it is made once every few ticks; the facing it
+        /// produces is wanted on every one of them.
+        /// </para>
+        /// </remarks>
+        public Facing? DressingBearing { get; set; }
+
         /// <summary>Gives the unit a new instruction, clearing any current march.</summary>
         public void GiveOrder(UnitOrder order, Vec2 anchor)
         {
@@ -204,6 +226,7 @@ namespace BattleChess.Rules
             OrderFacing = order.Bearing ?? Facing;
             Route = null;
             HeldUpBy = UnitId.None;
+            DressingBearing = null;
 
             if (order.StanceOverride.HasValue)
                 Stance = order.StanceOverride.Value;

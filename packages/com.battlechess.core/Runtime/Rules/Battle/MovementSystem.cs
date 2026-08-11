@@ -77,56 +77,34 @@ namespace BattleChess.Rules
                 // it is an execution.
                 if (!unit.IsFighting && unit.State != UnitState.Routing) continue;
 
-                if (unit.Route == null || unit.Route.IsComplete)
-                {
-                    TurnToFaceTheFight(battle, unit);
-                    continue;
-                }
+                // A halted regiment holds the front it was left on. It does not
+                // quietly come about to face whoever turns up, because being
+                // caught pointing the wrong way is a mistake the player made and
+                // ought to keep — the whole value of getting round an enemy is
+                // that they are still facing the way you left them.
+                //
+                // What replaced it is the dressing rule below: an attack ordered
+                // deliberately squares up during its final approach, so a charge
+                // arrives properly aligned without anything turning on its own
+                // after the fact.
+                if (unit.Route == null || unit.Route.IsComplete) continue;
 
                 StepUnit(battle, unit, tick, log);
             }
         }
 
         /// <summary>
-        /// Brings a halted regiment round to face whatever is fighting it.
+        /// How much faster a regiment comes round while dressing onto the enemy
+        /// it is charging.
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// Facing used to be set only while marching, so a unit that stopped
-        /// kept whatever bearing it happened to halt on — for the rest of the
-        /// battle. A regiment that arrived at an angle then fought permanently
-        /// flanked, taking up to twice the casualties it should, and nothing
-        /// anywhere said why. Cavalry charging home, overshooting slightly and
-        /// stopping side-on was losing to swordsmen it beats comfortably.
-        /// </para>
-        /// <para>
-        /// This is also what makes flanking a manoeuvre rather than a lottery.
-        /// A flank attack should be worth something because you got round them
-        /// faster than they could come about — which is exactly what turn rate
-        /// is for, and why a pike block at two and a half degrees a second is
-        /// so much easier to catch than cavalry at seven. Without it, the bonus
-        /// went to whoever happened to stop on a lucky bearing.
-        /// </para>
-        /// <para>
-        /// At the ordinary turn rate, not the halted pivot bonus. Coming about
-        /// with an enemy already among you is the hardest way to do it.
-        /// </para>
+        /// The final approach is the one moment a body of men is genuinely
+        /// hurrying to change front — officers dressing ranks on the run, with
+        /// the enemy a minute away. At the ordinary rate a spear block needs the
+        /// better part of that minute to come round ninety degrees, which is the
+        /// whole approach spent wheeling and none of it spent closing.
         /// </remarks>
-        private static void TurnToFaceTheFight(BattleState battle, UnitInstance unit)
-        {
-            if (unit.EnemiesInContact <= 0) return;
-
-            UnitInstance? enemy = NearestEnemyInContact(battle, unit);
-            if (enemy == null) return;
-
-            Vec2 toEnemy = enemy.Position - unit.Position;
-            if (toEnemy.IsNearZero) return;
-
-            float turnThisTick = unit.Def.Get(UnitAttributes.TurnRate) * BattleClock.SecondsPerTick;
-
-            unit.Facing = Facing.RotateTowards(
-                unit.Facing, Facing.FromVector(toEnemy), turnThisTick * MathF.PI / 180f);
-        }
+        private const float DressingTurnBonus = 5f;
 
         /// <summary>What a regiment must do about the ground in front of it.</summary>
         private enum Fit
@@ -245,29 +223,6 @@ namespace BattleChess.Rules
             return Math.Clamp(value, min + halfExtent, max - halfExtent);
         }
 
-        private static UnitInstance? NearestEnemyInContact(BattleState battle, UnitInstance unit)
-        {
-            UnitInstance? nearest = null;
-            float bestSquared = float.MaxValue;
-
-            foreach (UnitInstance other in battle.UnitsOnField())
-            {
-                if (other.Owner == unit.Owner) continue;
-                if (!other.IsFighting) continue;
-                if (!OrderSystem.InContactWith(unit, other)) continue;
-
-                float squared = Vec2.DistanceSquared(unit.Position, other.Position);
-
-                if (squared < bestSquared)
-                {
-                    bestSquared = squared;
-                    nearest = other;
-                }
-            }
-
-            return nearest;
-        }
-
         private static void StepUnit(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
         {
             MovementRoute route = unit.Route!;
@@ -313,6 +268,15 @@ namespace BattleChess.Rules
 
             desired = unit.Order.Kind == OrderKind.Move ? unit.OrderFacing : marchBearing;
 
+            // The last hundred metres of a charge. The order system has already
+            // aimed this march at a slot squarely off one of the enemy's faces;
+            // this is the other half of the same manoeuvre, bringing the front
+            // round to match so the two rectangles meet flush rather than at
+            // whatever angle the approach happened to run.
+            Facing? dressOn = unit.DressingBearing;
+            bool dressing = dressOn.HasValue;
+            if (dressOn.HasValue) desired = dressOn.Value;
+
             // A regiment is a shape, and ground it cannot cross is ground it
             // cannot be on. Carrying on as it is may put part of the formation
             // in a wood or a river that the centre misses entirely, so before
@@ -347,6 +311,7 @@ namespace BattleChess.Rules
 
             float turnRate = unit.Def.Get(UnitAttributes.TurnRate);
             if (pivotingHalted) turnRate *= PivotBonusWhileHalted;
+            if (dressing) turnRate *= DressingTurnBonus;
 
             float turnThisTick = turnRate * BattleClock.SecondsPerTick;
             unit.Facing = Facing.RotateTowards(unit.Facing, desired, turnThisTick * MathF.PI / 180f);
