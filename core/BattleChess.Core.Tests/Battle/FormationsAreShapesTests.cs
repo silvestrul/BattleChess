@@ -140,7 +140,7 @@ namespace BattleChess.Tests.Battle
                 // or far away, never under its centre — which is the whole
                 // point of the test.
                 int centreColumn = canvas.ColumnAt(canvas.Columns * canvas.CellSize * 0.5f);
-                int column = riverUnderFlank ? centreColumn + 2 : centreColumn + 12;
+                int column = riverUnderFlank ? centreColumn + 1 : centreColumn + 12;
 
                 canvas.Band(column, column, "river");
             });
@@ -160,7 +160,7 @@ namespace BattleChess.Tests.Battle
                 int centre = canvas.ColumnAt(canvas.Columns * canvas.CellSize * 0.5f);
 
                 canvas.Band(centre + 1, centre + 1, "forest");
-                canvas.Band(centre + 2, centre + 2, "river");
+                canvas.Band(centre - 1, centre - 1, "river");
             });
 
             UnitInstance line = field.Add(0, "cavalry", field.Centre, Facing.North);

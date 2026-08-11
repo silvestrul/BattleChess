@@ -555,6 +555,20 @@ namespace BattleChess.Rules
                         * attackerFighting
                         * (attack / defence)
                         * (1f - armour)
+                        // A man who costs three footmen is three times the
+                        // trouble to put down — he is better armoured, better
+                        // trained, and quite possibly on a horse.
+                        //
+                        // Without this, every regiment covering the same ground
+                        // meant expensive troops were strictly worse: a body of
+                        // three hundred and fifty riders and one of eight
+                        // hundred swordsmen took the same casualties in men, so
+                        // the riders lost twice the fraction and broke first.
+                        // Cavalry lost to a square it is supposed to be unable
+                        // to break. Costing casualties in what the men are
+                        // worth rather than in bodies makes a rectangle a
+                        // rectangle whatever is standing in it.
+                        / MathF.Max(0.1f, defender.Def.Get(UnitAttributes.CostPerMan))
                         * battle.Rng.NextVariance(charge ? ChargeVariance : CasualtyVariance);
 
             // A pulse cannot kill more men than are actually standing in the
