@@ -74,17 +74,20 @@ namespace BattleChess.Unity
 
         private void HandlePan()
         {
-            // Middle or right drag pans; left is left free for selection.
-            if (Input.GetMouseButtonDown(2) || Input.GetMouseButtonDown(1))
+            // Middle drag only. Left belongs to selection and right to orders —
+            // both buttons now mean something on the field, and a pan that also
+            // issued an order would be unusable. WASD is the everyday way to get
+            // about.
+            if (Input.GetMouseButtonDown(2))
             {
                 _dragOrigin = _camera.ScreenToWorldPoint(Input.mousePosition);
                 _dragging = true;
             }
 
-            if (Input.GetMouseButtonUp(2) || Input.GetMouseButtonUp(1))
+            if (Input.GetMouseButtonUp(2))
                 _dragging = false;
 
-            if (_dragging && (Input.GetMouseButton(2) || Input.GetMouseButton(1)))
+            if (_dragging && Input.GetMouseButton(2))
             {
                 Vector3 current = _camera.ScreenToWorldPoint(Input.mousePosition);
                 transform.position += new Vector3(_dragOrigin.x - current.x, _dragOrigin.y - current.y, 0f);

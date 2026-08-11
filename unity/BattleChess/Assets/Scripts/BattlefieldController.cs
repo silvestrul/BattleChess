@@ -59,7 +59,25 @@ namespace BattleChess.Unity
         private float _tickAccumulator;
 
         private readonly List<UnitView> _views = new List<UnitView>();
-        private UnitInstance _selected;
+
+        /// <summary>
+        /// Every regiment currently under command, in the order they were
+        /// picked up.
+        /// </summary>
+        /// <remarks>
+        /// A list rather than one unit because an army is commanded in wings,
+        /// not one regiment at a time. Ordering six regiments into a line was
+        /// six selections and six orders, which is micromanagement rather than
+        /// command — and it is the thing that most made this feel like a debug
+        /// harness instead of a game.
+        /// </remarks>
+        private readonly List<UnitInstance> _selection = new List<UnitInstance>();
+
+        /// <summary>
+        /// The regiment the detail panels talk about — the first one picked.
+        /// </summary>
+        private UnitInstance Primary => _selection.Count > 0 ? _selection[0] : null;
+
         private Vec2 _lastDestination;
         private bool _hasDestination;
         private string _status = string.Empty;
@@ -121,7 +139,7 @@ namespace BattleChess.Unity
             BuildPathLine();
             ReportSetup();
 
-            _status = $"{_battle.Name} — click a regiment.";
+            _status = $"{_battle.Name} — left-click a regiment, or drag a box round several.";
         }
 
         /// <summary>
@@ -203,39 +221,109 @@ namespace BattleChess.Unity
 
             RefreshOverlayUnits();
 
-            // Clicks on the debug panels must not also fall through to the map.
-            if (Input.GetMouseButtonDown(0) && !PointerOverPanels())
-                HandleClick(_camera != null ? _camera.MouseWorldPosition() : default);
-
-            if (_settingBearing) TrackBearingDrag();
+            TrackSelection();
+            TrackOrders();
         }
+
+        // ---- Mouse ------------------------------------------------------------
 
         /// <summary>How far the mouse must be dragged before it counts as setting a facing, in metres.</summary>
         private const float BearingDragMetres = 15f;
 
-        private bool _settingBearing;
-        private Vec2 _bearingFrom;
+        /// <summary>How far a left drag must run before it counts as a box rather than a click, in metres.</summary>
+        private const float BoxDragMetres = 12f;
+
+        private bool _boxing;
+        private Vec2 _boxFrom;
+
+        private bool _ordering;
+        private Vec2 _orderAt;
+
+        private Vec2 MouseWorld() => _camera != null ? _camera.MouseWorldPosition() : default;
 
         /// <summary>
-        /// Watches a drag begun on empty ground and turns it into an arrival
-        /// facing when the button comes up.
+        /// Left button: click to pick up a regiment, drag a box to pick up
+        /// several.
         /// </summary>
         /// <remarks>
-        /// Click to march and the regiment keeps its front exactly where it is,
-        /// edging sideways if it must. Drag, and it comes round to the bearing
-        /// you drew on arrival. Without this there is no way to change front at
-        /// all except by attacking somebody, and with it a plain move stops
-        /// spinning a hundred metres of frontage through a right angle every
-        /// time you reposition a line.
+        /// Left says what you are commanding and right says what it should do.
+        /// Left used to mean select, march, attack and set a facing all at once,
+        /// which was already overloaded and becomes impossible with groups —
+        /// there is no way to tell "drag a box round these four" apart from
+        /// "march there facing that way" if both are the same button.
         /// </remarks>
-        private void TrackBearingDrag()
+        private void TrackSelection()
         {
-            Vec2 here = _camera != null ? _camera.MouseWorldPosition() : default;
-            Vec2 drawn = here - _bearingFrom;
+            if (Input.GetMouseButtonDown(0) && !PointerOverPanels())
+            {
+                _boxing = true;
+                _boxFrom = MouseWorld();
+            }
 
-            bool far = drawn.Length >= BearingDragMetres;
+            if (!_boxing) return;
+
+            Vec2 here = MouseWorld();
+            bool dragged = Vec2.Distance(here, _boxFrom) >= BoxDragMetres;
 
             if (Input.GetMouseButton(0))
+            {
+                if (dragged)
+                    _status = $"Selecting {CountWithin(_boxFrom, here)} regiment(s) — release to confirm.";
+
+                return;
+            }
+
+            _boxing = false;
+
+            if (dragged) SelectWithin(_boxFrom, here);
+            else SelectAt(_boxFrom);
+        }
+
+        /// <summary>
+        /// Right button: click to march or attack, drag to march and arrive on
+        /// the bearing you drew.
+        /// </summary>
+        /// <remarks>
+        /// Click to march and each regiment keeps its front exactly where it is,
+        /// edging sideways if it must. Drag, and they come round to the drawn
+        /// bearing on arrival. Without the drag there is no way to change front
+        /// at all except by attacking somebody; with it, a plain reposition
+        /// stops spinning a hundred metres of frontage through a right angle
+        /// every time.
+        /// </remarks>
+        private void TrackOrders()
+        {
+            if (Input.GetMouseButtonDown(1) && !PointerOverPanels())
+            {
+                if (_selection.Count == 0)
+                {
+                    _console.Blocked("Order", "Nothing selected — left-click a regiment first.");
+                    _status = "Left-click a regiment, or drag a box round several.";
+                    return;
+                }
+
+                Vec2 at = MouseWorld();
+                UnitInstance clicked = UnitAt(at);
+
+                // Right-clicking an enemy is an attack, which follows the target
+                // as it moves rather than marching at where it used to be.
+                if (clicked != null && clicked.Owner != Primary.Owner)
+                {
+                    AttackWithSelection(clicked);
+                    return;
+                }
+
+                _ordering = true;
+                _orderAt = at;
+                return;
+            }
+
+            if (!_ordering) return;
+
+            Vec2 drawn = MouseWorld() - _orderAt;
+            bool far = drawn.Length >= BearingDragMetres;
+
+            if (Input.GetMouseButton(1))
             {
                 _status = far
                     ? $"Facing {Facing.FromVector(drawn).Degrees:0}° on arrival — release to confirm."
@@ -244,14 +332,160 @@ namespace BattleChess.Unity
                 return;
             }
 
-            _settingBearing = false;
+            _ordering = false;
 
-            Facing? bearing = far ? Facing.FromVector(drawn) : (Facing?)null;
-
-            _lastDestination = _bearingFrom;
+            _lastDestination = _orderAt;
             _hasDestination = true;
 
-            PlanRoute(_selected, _bearingFrom, bearing);
+            MarchSelection(_orderAt, far ? Facing.FromVector(drawn) : (Facing?)null);
+        }
+
+        // ---- Selection --------------------------------------------------------
+
+        /// <summary>Picks up whatever single regiment is under a point, or clears the selection.</summary>
+        private void SelectAt(Vec2 world)
+        {
+            UnitInstance clicked = UnitAt(world);
+
+            if (clicked == null)
+            {
+                SetSelection(new List<UnitInstance>());
+                _status = "Nothing there. Left-click a regiment, or drag a box round several.";
+                return;
+            }
+
+            SetSelection(new List<UnitInstance> { clicked });
+        }
+
+        /// <summary>
+        /// Picks up every regiment of one side inside a dragged box.
+        /// </summary>
+        /// <remarks>
+        /// One side only, decided by whichever regiment in the box has the lowest
+        /// id. A box drawn across a melee catches both armies, and a mixed
+        /// selection cannot be given a coherent order — so the enemy regiments
+        /// are simply left out rather than the drag being refused.
+        /// </remarks>
+        private void SelectWithin(Vec2 from, Vec2 to)
+        {
+            var caught = new List<UnitInstance>();
+            PlayerId? side = null;
+
+            foreach (UnitInstance unit in _battle.UnitsOnField())
+            {
+                if (!Touches(from, to, unit)) continue;
+
+                if (side == null) side = unit.Owner;
+                if (unit.Owner != side.Value) continue;
+
+                caught.Add(unit);
+            }
+
+            SetSelection(caught);
+
+            _status = caught.Count == 0
+                ? "Nothing in the box."
+                : $"{caught.Count} regiment(s) selected — right-click to order them.";
+        }
+
+        private int CountWithin(Vec2 from, Vec2 to)
+        {
+            int count = 0;
+            PlayerId? side = null;
+
+            foreach (UnitInstance unit in _battle.UnitsOnField())
+            {
+                if (!Touches(from, to, unit)) continue;
+
+                if (side == null) side = unit.Owner;
+                if (unit.Owner != side.Value) continue;
+
+                count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// Whether a regiment falls inside a dragged box.
+        /// </summary>
+        /// <remarks>
+        /// Any part of it counts, and so does a box drawn entirely within one —
+        /// a regiment is a hundred metres wide, so requiring the whole rectangle
+        /// would mean most drags caught nothing at all.
+        /// </remarks>
+        private static bool Touches(Vec2 from, Vec2 to, UnitInstance unit)
+        {
+            float minX = Mathf.Min(from.X, to.X), maxX = Mathf.Max(from.X, to.X);
+            float minY = Mathf.Min(from.Y, to.Y), maxY = Mathf.Max(from.Y, to.Y);
+
+            Footprint real = unit.Footprint;
+            var clickable = new Footprint(real.Width, Mathf.Max(real.Depth, ClickableDepthMetres));
+            var shape = new OrientedRect(unit.Position, unit.Facing, clickable);
+
+            foreach (Vec2 corner in shape.GetCorners())
+            {
+                if (corner.X >= minX && corner.X <= maxX && corner.Y >= minY && corner.Y <= maxY)
+                    return true;
+            }
+
+            return shape.ContainsPoint(new Vec2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f));
+        }
+
+        // ---- Orders to a whole selection --------------------------------------
+
+        /// <summary>
+        /// Sends every selected regiment at one enemy.
+        /// </summary>
+        private void AttackWithSelection(UnitInstance target)
+        {
+            foreach (UnitInstance unit in _selection)
+            {
+                if (unit.Owner == target.Owner) continue;
+
+                unit.GiveOrder(UnitOrder.Attack(target.Id, _options.WheelBeforeMarching), unit.Position);
+
+                _console.Decision("Order",
+                    $"{unit.Def.DisplayName} ordered to attack {target.Def.DisplayName} " +
+                    $"at {Vec2.Distance(unit.Position, target.Position):0} m — will follow it.",
+                    unit.Id);
+            }
+
+            _status = _selection.Count == 1
+                ? $"{Primary.Def.DisplayName} attacking {target.Def.DisplayName}."
+                : $"{_selection.Count} regiments attacking {target.Def.DisplayName}.";
+        }
+
+        /// <summary>
+        /// Marches the whole selection, keeping the shape it is already standing
+        /// in.
+        /// </summary>
+        /// <remarks>
+        /// Every regiment moves by the same displacement rather than to the same
+        /// point. Sending five regiments to one spot would have them arrive on
+        /// top of one another — and now that friends cannot occupy the same
+        /// ground, they would arrive jammed against each other instead. Moving
+        /// the formation as it stands is also simply what the player meant: a
+        /// line dragged fifty metres forward is still that line.
+        /// </remarks>
+        private void MarchSelection(Vec2 destination, Facing? bearing)
+        {
+            if (_selection.Count == 0) return;
+
+            if (_selection.Count == 1)
+            {
+                PlanRoute(Primary, destination, bearing);
+                return;
+            }
+
+            Vec2 origin = Vec2.Zero;
+            foreach (UnitInstance unit in _selection) origin += unit.Position;
+            origin /= _selection.Count;
+
+            foreach (UnitInstance unit in _selection)
+                PlanRoute(unit, destination + (unit.Position - origin), bearing, quiet: true);
+
+            _status = $"{_selection.Count} regiments marching, keeping their formation.";
         }
 
         /// <summary>
@@ -318,6 +552,61 @@ namespace BattleChess.Unity
             }
 
             GUI.color = original;
+        }
+
+        /// <summary>
+        /// Draws the box currently being dragged out, and an outline round every
+        /// regiment it would catch.
+        /// </summary>
+        /// <remarks>
+        /// The outlines matter more than the box. A regiment is a hundred metres
+        /// wide and drawn as a thin bar, so at a distance a box either obviously
+        /// contains one or is genuinely ambiguous — and letting go to find out
+        /// is how a selection gets made twice.
+        /// </remarks>
+        private void DrawSelectionBox()
+        {
+            if (!_boxing || Camera.main == null) return;
+
+            Vec2 here = MouseWorld();
+            if (Vec2.Distance(here, _boxFrom) < BoxDragMetres) return;
+
+            Vector3 a = Camera.main.WorldToScreenPoint(new Vector3(_boxFrom.X, _boxFrom.Y, 0f));
+            Vector3 b = Camera.main.WorldToScreenPoint(new Vector3(here.X, here.Y, 0f));
+
+            var box = Rect.MinMaxRect(
+                Mathf.Min(a.x, b.x), Screen.height - Mathf.Max(a.y, b.y),
+                Mathf.Max(a.x, b.x), Screen.height - Mathf.Min(a.y, b.y));
+
+            Color original = GUI.color;
+
+            GUI.color = new Color(0.95f, 0.95f, 0.6f, 0.12f);
+            GUI.DrawTexture(box, Texture2D.whiteTexture);
+
+            GUI.color = new Color(0.95f, 0.95f, 0.6f, 0.9f);
+            DrawEdges(box, 2f);
+
+            foreach (UnitInstance unit in _battle.UnitsOnField())
+            {
+                if (!Touches(_boxFrom, here, unit)) continue;
+
+                Vector3 centre = Camera.main.WorldToScreenPoint(new Vector3(unit.Position.X, unit.Position.Y, 0f));
+                if (centre.z < 0f) continue;
+
+                float radius = unit.Footprint.BoundingRadius / Camera.main.orthographicSize * Screen.height * 0.5f;
+
+                DrawEdges(new Rect(centre.x - radius, Screen.height - centre.y - radius, radius * 2f, radius * 2f), 2f);
+            }
+
+            GUI.color = original;
+        }
+
+        private static void DrawEdges(Rect area, float thickness)
+        {
+            GUI.DrawTexture(new Rect(area.x, area.y, area.width, thickness), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(area.x, area.yMax - thickness, area.width, thickness), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(area.x, area.y, thickness, area.height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(area.xMax - thickness, area.y, thickness, area.height), Texture2D.whiteTexture);
         }
 
         /// <summary>
@@ -424,41 +713,45 @@ namespace BattleChess.Unity
             bool wanted = _options.BreakSelected || _options.RestoreSelected || _options.DestroySelected;
             if (!wanted) return;
 
-            if (_selected == null)
+            if (_selection.Count == 0)
             {
                 _options.BreakSelected = _options.RestoreSelected = _options.DestroySelected = false;
                 _console.Blocked("Debug", "Nothing is selected — click a regiment first.");
                 return;
             }
 
-            if (_options.BreakSelected)
+            foreach (UnitInstance unit in _selection)
             {
-                _selected.Morale = 0f;
-                _selected.State = UnitState.Routing;
-                _selected.Route = null;
+                if (_options.BreakSelected)
+                {
+                    unit.Morale = 0f;
+                    unit.State = UnitState.Routing;
+                    unit.Route = null;
 
-                _console.Warning("Debug",
-                    $"{_selected.Def.DisplayName} broken by hand — watch what it does to the regiments beside it.",
-                    _selected.Id);
+                    _console.Warning("Debug",
+                        $"{unit.Def.DisplayName} broken by hand — watch what it does to the regiments beside it.",
+                        unit.Id);
+                }
+
+                if (_options.RestoreSelected)
+                {
+                    unit.Strength = unit.InitialStrength;
+                    unit.Morale = 1f;
+                    unit.Organization = 1f;
+                    unit.State = UnitState.Steady;
+
+                    _console.Info("Debug", $"{unit.Def.DisplayName} restored to full.", unit.Id);
+                }
+
+                if (_options.DestroySelected)
+                {
+                    unit.TakeCasualties(unit.Strength);
+
+                    _console.Warning("Debug", $"{unit.Def.DisplayName} wiped out by hand.", unit.Id);
+                }
             }
 
-            if (_options.RestoreSelected)
-            {
-                _selected.Strength = _selected.InitialStrength;
-                _selected.Morale = 1f;
-                _selected.Organization = 1f;
-                _selected.State = UnitState.Steady;
-
-                _console.Info("Debug", $"{_selected.Def.DisplayName} restored to full.", _selected.Id);
-            }
-
-            if (_options.DestroySelected)
-            {
-                _selected.TakeCasualties(_selected.Strength);
-
-                _console.Warning("Debug", $"{_selected.Def.DisplayName} wiped out by hand.", _selected.Id);
-                _selected = null;
-            }
+            if (_options.DestroySelected) SetSelection(new List<UnitInstance>());
 
             _options.BreakSelected = _options.RestoreSelected = _options.DestroySelected = false;
         }
@@ -661,7 +954,7 @@ namespace BattleChess.Unity
         /// </remarks>
         private void HandleFormationKeys()
         {
-            if (_selected == null || _formations == null) return;
+            if (_selection.Count == 0 || _formations == null) return;
 
             for (int i = 0; i < _formations.Count && i < 9; i++)
             {
@@ -669,31 +962,37 @@ namespace BattleChess.Unity
 
                 FormationDef target = _formations.All[i];
 
-                if (target.Key == _selected.FormationOrder.Key)
+                foreach (UnitInstance unit in _selection)
                 {
-                    _console.Info("Formation", $"{_selected.Def.DisplayName} is already in {target.DisplayName}.", _selected.Id);
-                    return;
+                    if (target.Key == unit.FormationOrder.Key)
+                    {
+                        _console.Info("Formation", $"{unit.Def.DisplayName} is already in {target.DisplayName}.", unit.Id);
+                        continue;
+                    }
+
+                    float widthBefore = unit.Footprint.Width;
+                    float spent = unit.AdoptFormation(target);
+                    float widthAfter = unit.Footprint.Width;
+
+                    _console.Decision("Formation",
+                        $"{unit.Def.DisplayName} formed {target.DisplayName}: " +
+                        $"frontage {widthBefore:0} m to {widthAfter:0} m, " +
+                        $"organization -{spent:0.00} (now {unit.Organization:0.00}).",
+                        unit.Id);
+
+                    if (unit.Organization < 0.4f)
+                        _console.Warning("Formation",
+                            $"{unit.Def.DisplayName} is badly disordered at {unit.Organization:0.00} — " +
+                            "further reshaping will leave it barely able to fight.", unit.Id);
                 }
 
-                float widthBefore = _selected.Footprint.Width;
-                float spent = _selected.AdoptFormation(target);
-                float widthAfter = _selected.Footprint.Width;
-
-                _console.Decision("Formation",
-                    $"{_selected.Def.DisplayName} formed {target.DisplayName}: " +
-                    $"frontage {widthBefore:0} m to {widthAfter:0} m, " +
-                    $"organization -{spent:0.00} (now {_selected.Organization:0.00}).",
-                    _selected.Id);
-
-                if (_selected.Organization < 0.4f)
-                    _console.Warning("Formation",
-                        $"{_selected.Def.DisplayName} is badly disordered at {_selected.Organization:0.00} — " +
-                        "further reshaping will leave it barely able to fight.", _selected.Id);
-
-                _status = $"{_selected.Def.DisplayName} formed {target.DisplayName} — {widthAfter:0} m frontage, organization {_selected.Organization:0.00}.";
+                _status = _selection.Count == 1
+                    ? $"{Primary.Def.DisplayName} formed {target.DisplayName} — " +
+                      $"{Primary.Footprint.Width:0} m frontage, organization {Primary.Organization:0.00}."
+                    : $"{_selection.Count} regiments formed {target.DisplayName}.";
 
                 // Re-plan, since the new shape can change what it fits through.
-                if (_hasDestination) PlanRoute(_selected, _lastDestination);
+                if (_hasDestination && _selection.Count == 1) PlanRoute(Primary, _lastDestination);
                 return;
             }
         }
@@ -708,7 +1007,7 @@ namespace BattleChess.Unity
         /// </remarks>
         private void HandleStanceKeys()
         {
-            if (_selected == null) return;
+            if (_selection.Count == 0) return;
 
             Stance? chosen = null;
             if (Input.GetKeyDown(KeyCode.Q)) chosen = Stance.Defend;
@@ -716,16 +1015,23 @@ namespace BattleChess.Unity
             else if (Input.GetKeyDown(KeyCode.R)) chosen = Stance.Aggressive;
             else if (Input.GetKeyDown(KeyCode.T)) chosen = Stance.Evade;
 
-            if (chosen == null || _selected.Stance == chosen.Value) return;
+            if (chosen == null) return;
 
-            _selected.Stance = chosen.Value;
-            _selected.HeldUpBy = UnitId.None;
+            foreach (UnitInstance unit in _selection)
+            {
+                if (unit.Stance == chosen.Value) continue;
 
-            _console.Decision("Stance",
-                $"{_selected.Def.DisplayName} now standing on {chosen.Value} — {DescribeStance(chosen.Value)}",
-                _selected.Id);
+                unit.Stance = chosen.Value;
+                unit.HeldUpBy = UnitId.None;
 
-            _status = $"{_selected.Def.DisplayName}: {chosen.Value}.";
+                _console.Decision("Stance",
+                    $"{unit.Def.DisplayName} now standing on {chosen.Value} — {DescribeStance(chosen.Value)}",
+                    unit.Id);
+            }
+
+            _status = _selection.Count == 1
+                ? $"{Primary.Def.DisplayName}: {chosen.Value}."
+                : $"{_selection.Count} regiments: {chosen.Value}.";
         }
 
         private static string DescribeStance(Stance stance) => stance switch
@@ -759,45 +1065,6 @@ namespace BattleChess.Unity
             _overlay.SetSightLines(BuildSightLines());
         }
 
-        private void HandleClick(Vec2 world)
-        {
-            UnitInstance clicked = UnitAt(world);
-
-            // Clicking an enemy while something is selected is an attack order,
-            // which follows the target as it moves rather than marching at where
-            // it used to be.
-            if (clicked != null && _selected != null && clicked.Owner != _selected.Owner)
-            {
-                _selected.GiveOrder(UnitOrder.Attack(clicked.Id, _options.WheelBeforeMarching), _selected.Position);
-
-                _console.Decision("Order",
-                    $"{_selected.Def.DisplayName} ordered to attack {clicked.Def.DisplayName} " +
-                    $"at {Vec2.Distance(_selected.Position, clicked.Position):0} m — will follow it.",
-                    _selected.Id);
-
-                _status = $"{_selected.Def.DisplayName} attacking {clicked.Def.DisplayName}.";
-                return;
-            }
-
-            if (clicked != null)
-            {
-                Select(clicked);
-                return;
-            }
-
-            if (_selected == null)
-            {
-                _console.Blocked("Order", "Nothing selected — click a regiment first.");
-                _status = "Click a regiment to select it.";
-                return;
-            }
-
-            // Held rather than issued at once: the drag that follows, if there
-            // is one, says which way to be facing when it arrives.
-            _settingBearing = true;
-            _bearingFrom = world;
-        }
-
         /// <summary>
         /// The regiment under a world point, with a generous allowance for how
         /// thin a line actually is. Iterates in id order so an overlap always
@@ -824,17 +1091,25 @@ namespace BattleChess.Unity
             return null;
         }
 
-        private void Select(UnitInstance unit)
+        private void SetSelection(List<UnitInstance> units)
         {
-            _selected = unit;
+            _selection.Clear();
+            _selection.AddRange(units);
+
             _hasDestination = false;
             _pathLine.positionCount = 0;
             _overlay.SetSearchCells(null, default);
             _overlay.SetRawPath(null, default);
 
             foreach (UnitView view in _views)
-                view.SetSelected(view.Unit == unit);
+                view.SetSelected(_selection.Contains(view.Unit));
 
+            // The full read-out only when there is one regiment to read out. A
+            // wing of six would be six paragraphs of console for one click,
+            // which buries whatever the player was actually watching.
+            if (_selection.Count != 1) return;
+
+            UnitInstance unit = _selection[0];
             TerrainDef ground = _battle.TerrainAt(unit.Position);
 
             _console.Info("Select",
@@ -848,7 +1123,7 @@ namespace BattleChess.Unity
                 $"org {unit.Organization:0.00}, stance {unit.Stance}.";
         }
 
-        private void PlanRoute(UnitInstance unit, Vec2 destination, Facing? bearing = null)
+        private void PlanRoute(UnitInstance unit, Vec2 destination, Facing? bearing = null, bool quiet = false)
         {
             if (unit == null) return;
 
@@ -882,12 +1157,18 @@ namespace BattleChess.Unity
 
             PathResult path = pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
 
-            _overlay.SetSearchCells(path.SearchCells, searchLayout);
-            _overlay.SetRawPath(path.SearchCells, searchLayout);
+            // The route overlay and the drawn line show one march. Ordering a
+            // wing would have six of them fight over the same LineRenderer and
+            // leave whichever finished last, which is worse than showing none.
+            if (!quiet)
+            {
+                _overlay.SetSearchCells(path.SearchCells, searchLayout);
+                _overlay.SetRawPath(path.SearchCells, searchLayout);
+            }
 
             if (!path.Found)
             {
-                _pathLine.positionCount = 0;
+                if (!quiet) _pathLine.positionCount = 0;
 
                 // The whole point of the failure reasons: each of these has a
                 // completely different fix, and "no route" would hide which.
@@ -903,17 +1184,18 @@ namespace BattleChess.Unity
                 return;
             }
 
-            DrawPath(path);
+            if (!quiet) DrawPath(path);
 
             float seconds = path.SecondsAt(unit.BaseSpeed);
 
-            _console.Decision("Path",
-                $"{unit.Def.DisplayName} route ({(_options.RouteLikeAi ? "fastest" : "direct")}): " +
-                $"{path.Distance:0} m walked, {path.EffectiveDistance:0} m effective, " +
-                $"{seconds / 60f:0.0} turns at {unit.BaseSpeed:0.00} m/s. " +
-                $"{path.SearchCells.Count} cells reduced to {path.Waypoints.Count} waypoints, " +
-                $"{path.CellsExplored} explored, {clearance:0} m clearance.",
-                unit.Id);
+            if (!quiet)
+                _console.Decision("Path",
+                    $"{unit.Def.DisplayName} route ({(_options.RouteLikeAi ? "fastest" : "direct")}): " +
+                    $"{path.Distance:0} m walked, {path.EffectiveDistance:0} m effective, " +
+                    $"{seconds / 60f:0.0} turns at {unit.BaseSpeed:0.00} m/s. " +
+                    $"{path.SearchCells.Count} cells reduced to {path.Waypoints.Count} waypoints, " +
+                    $"{path.CellsExplored} explored, {clearance:0} m clearance.",
+                    unit.Id);
 
             if (_options.MoveInstantly)
             {
@@ -932,22 +1214,31 @@ namespace BattleChess.Unity
                 float turnRate = unit.Def.Get(UnitAttributes.TurnRate);
                 float wheelSeconds = offBy / Mathf.Max(1f, turnRate);
 
-                _console.Info("Move",
-                    $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")}. " +
-                    $"{offBy:0}° off the bearing at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
-                    unit.Id);
-
-                // A big wheel is the most interesting thing about to happen, and
-                // at speed it is over in a second of wall time. Say so, and
-                // suggest slowing down rather than leaving it to be missed.
-                if (offBy > 45f && _options.TimeScale > 4f)
-                    _console.Decision("Move",
-                        $"That is a {offBy:0}° wheel taking {wheelSeconds:0} ticks — at x{_options.TimeScale:0} it will be over in " +
-                        $"{wheelSeconds / _options.TimeScale:0.0} s. Press '-' or use '.' to step through it.",
+                if (quiet)
+                {
+                    _console.Info("Move",
+                        $"{unit.Def.DisplayName} marching {path.Distance:0} m with the wing.", unit.Id);
+                }
+                else
+                {
+                    _console.Info("Move",
+                        $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")}. " +
+                        $"{offBy:0}° off the bearing at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
                         unit.Id);
+
+                    // A big wheel is the most interesting thing about to happen, and
+                    // at speed it is over in a second of wall time. Say so, and
+                    // suggest slowing down rather than leaving it to be missed.
+                    if (offBy > 45f && _options.TimeScale > 4f)
+                        _console.Decision("Move",
+                            $"That is a {offBy:0}° wheel taking {wheelSeconds:0} ticks — at x{_options.TimeScale:0} it will be over in " +
+                            $"{wheelSeconds / _options.TimeScale:0.0} s. Press '-' or use '.' to step through it.",
+                            unit.Id);
+                }
             }
 
-            _status = $"{unit.Def.DisplayName}: {path.Distance:0} m, {seconds / 60f:0.0} turns.";
+            if (!quiet)
+                _status = $"{unit.Def.DisplayName}: {path.Distance:0} m, {seconds / 60f:0.0} turns.";
         }
 
         private void DrawPath(PathResult path)
@@ -1052,9 +1343,11 @@ namespace BattleChess.Unity
 
             GUI.Label(new Rect(20, 16, Screen.width - 40, 22), clock + _status);
             GUI.Label(new Rect(20, 38, Screen.width - 40, 22),
-                "Click select / march / attack    1-4 reshape    QERT stance    V fog    G ghost    " +
-                "Space pause    . step    +/- speed    Right-drag pan    F1 debug");
+                "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    " +
+                "1-4 reshape    QERT stance    V fog    G ghost    Space pause    . step    " +
+                "+/- speed    Middle-drag pan    F1 debug");
 
+            DrawSelectionBox();
             DrawUnitLabels();
             DrawGhosts();
 
@@ -1062,11 +1355,11 @@ namespace BattleChess.Unity
 
             ApplyUnitActions();
 
-            if (_options.Draw(OptionsRect) && _selected != null && _hasDestination)
+            if (_options.Draw(OptionsRect) && Primary != null && _hasDestination)
             {
                 // Re-plan on any toggle, so the effect of a change is visible at
                 // once rather than needing the click repeated.
-                PlanRoute(_selected, _lastDestination);
+                PlanRoute(Primary, _lastDestination);
             }
 
             _console.Draw(ConsoleRect);
