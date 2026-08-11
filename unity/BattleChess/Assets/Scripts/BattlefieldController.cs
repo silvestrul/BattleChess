@@ -203,6 +203,8 @@ namespace BattleChess.Unity
             if (Input.GetKeyDown(KeyCode.F1))
                 _options.Visible = !_options.Visible;
 
+            if (Input.GetKeyDown(KeyCode.B)) ToggleBond();
+
             HandleClockKeys();
             HandleFogKeys();
             AdvanceClock();
@@ -343,6 +345,12 @@ namespace BattleChess.Unity
         // ---- Selection --------------------------------------------------------
 
         /// <summary>Picks up whatever single regiment is under a point, or clears the selection.</summary>
+        /// <remarks>
+        /// Clicking one regiment of a bound wing picks up the whole wing. A bond
+        /// exists precisely so the player stops thinking about its members
+        /// individually, and having to re-box them every time would undo the
+        /// entire point of tying them together.
+        /// </remarks>
         private void SelectAt(Vec2 world)
         {
             UnitInstance clicked = UnitAt(world);
@@ -354,7 +362,76 @@ namespace BattleChess.Unity
                 return;
             }
 
-            SetSelection(new List<UnitInstance> { clicked });
+            SetSelection(clicked.Bond == 0
+                ? new List<UnitInstance> { clicked }
+                : Bond(clicked.Bond));
+        }
+
+        /// <summary>Every regiment still standing that carries a given bond.</summary>
+        private List<UnitInstance> Bond(int bond)
+        {
+            var members = new List<UnitInstance>();
+
+            foreach (UnitInstance unit in _battle.UnitsOnField())
+            {
+                if (unit.Bond == bond) members.Add(unit);
+            }
+
+            return members;
+        }
+
+        // ---- Binding ----------------------------------------------------------
+
+        private int _nextBond = 1;
+
+        /// <summary>Whether every selected regiment already shares one bond.</summary>
+        private bool SelectionIsBound =>
+            _selection.Count > 0 && Primary.Bond != 0 && _selection.TrueForAll(u => u.Bond == Primary.Bond);
+
+        /// <summary>
+        /// Ties the selection into one wing, or unties it if it already is one.
+        /// </summary>
+        /// <remarks>
+        /// Bound regiments stay separate rectangles — they fight, take losses and
+        /// break individually. What they share is a pace and a place in the line:
+        /// an order to any of them moves all of them without disturbing the shape
+        /// they stand in, and an attack sends the whole wing in abreast with its
+        /// centre against the enemy's centre.
+        /// </remarks>
+        private void ToggleBond()
+        {
+            if (SelectionIsBound)
+            {
+                int was = Primary.Bond;
+
+                foreach (UnitInstance unit in _selection) unit.Bond = 0;
+
+                _console.Decision("Bond", $"Wing {was} untied — {_selection.Count} regiments back on their own.");
+                _status = $"{_selection.Count} regiments unbound.";
+                return;
+            }
+
+            if (_selection.Count < 2)
+            {
+                _console.Blocked("Bond", "Select at least two regiments to bind them into a wing.");
+                _status = "Drag a box round two or more regiments first.";
+                return;
+            }
+
+            int bond = _nextBond++;
+            float pace = float.MaxValue;
+
+            foreach (UnitInstance unit in _selection)
+            {
+                unit.Bond = bond;
+                if (unit.BaseSpeed < pace) pace = unit.BaseSpeed;
+            }
+
+            _console.Decision("Bond",
+                $"{_selection.Count} regiments bound as wing {bond} — they march together at " +
+                $"{pace:0.00} m/s, the pace of the slowest, and attack abreast.");
+
+            _status = $"Wing {bond}: {_selection.Count} regiments, {pace:0.00} m/s.";
         }
 
         /// <summary>
@@ -379,6 +456,19 @@ namespace BattleChess.Unity
                 if (unit.Owner != side.Value) continue;
 
                 caught.Add(unit);
+            }
+
+            // A box that catches part of a wing catches all of it. Half a bond
+            // cannot be given a coherent order — the other half would sit there
+            // while its own centre walked off without it.
+            for (int i = caught.Count - 1; i >= 0; i--)
+            {
+                if (caught[i].Bond == 0) continue;
+
+                foreach (UnitInstance member in Bond(caught[i].Bond))
+                {
+                    if (!caught.Contains(member)) caught.Add(member);
+                }
             }
 
             SetSelection(caught);
@@ -538,12 +628,14 @@ namespace BattleChess.Unity
                     : unit.Morale < MoraleSystem.WaveringThreshold ? new Color(1f, 0.87f, 0.4f)
                     : Color.white;
 
+                string wing = unit.Bond == 0 ? string.Empty : $"  [wing {unit.Bond}]";
+
                 string text = detailed
-                    ? $"{unit.Def.DisplayName}\n" +
+                    ? $"{unit.Def.DisplayName}{wing}\n" +
                       $"{unit.Strength}/{unit.InitialStrength}  {unit.FormationOrder.DisplayName}\n" +
                       $"mor {unit.Morale:0.00}  org {unit.Organization:0.00}\n" +
                       $"{unit.Stance}{(unit.State == UnitState.Steady ? string.Empty : "  " + unit.State)}"
-                    : unit.Def.DisplayName;
+                    : unit.Def.DisplayName + wing;
 
                 float height = detailed ? 72f : 20f;
                 var area = new Rect(screen.x - 80f, Screen.height - screen.y - height * 0.5f, 160f, height);
@@ -552,6 +644,29 @@ namespace BattleChess.Unity
             }
 
             GUI.color = original;
+        }
+
+        /// <summary>
+        /// A bind/unbind button, on the main bar rather than behind the debug
+        /// panel.
+        /// </summary>
+        /// <remarks>
+        /// Tying a wing together is a command decision, not a diagnostic, so it
+        /// belongs where the player is already looking. Only shown when there is
+        /// something it could do — a button that reports "select two regiments
+        /// first" is a button the player has to click to learn it was the wrong
+        /// one.
+        /// </remarks>
+        private void DrawBondButton()
+        {
+            bool bound = SelectionIsBound;
+
+            if (!bound && _selection.Count < 2) return;
+
+            var area = new Rect(Screen.width - 150, 14, 120, 24);
+
+            if (GUI.Button(area, bound ? $"Unbind wing {Primary.Bond}" : $"Bind {_selection.Count}"))
+                ToggleBond();
         }
 
         /// <summary>
@@ -1309,12 +1424,20 @@ namespace BattleChess.Unity
             new Rect(Screen.width - 290, 76, 280, Mathf.Max(220f, Screen.height - 316f));
         private Rect ConsoleRect => new Rect(10, Screen.height - 230, Screen.width - 310, 220);
 
+        /// <summary>The status and hint bar, which now carries a button.</summary>
+        private Rect TopBarRect => new Rect(10, 10, Screen.width - 20, 58);
+
         private bool PointerOverPanels()
         {
-            if (!_options.Visible) return false;
-
             // GUI space has y growing downward; world clicks use screen space.
             var point = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+
+            // The top bar is always up, and pressing Bind should not also drag a
+            // selection box out from underneath the button.
+            if (TopBarRect.Contains(point)) return true;
+
+            if (!_options.Visible) return false;
+
             return OptionsRect.Contains(point) || ConsoleRect.Contains(point);
         }
 
@@ -1344,8 +1467,10 @@ namespace BattleChess.Unity
             GUI.Label(new Rect(20, 16, Screen.width - 40, 22), clock + _status);
             GUI.Label(new Rect(20, 38, Screen.width - 40, 22),
                 "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    " +
-                "1-4 reshape    QERT stance    V fog    G ghost    Space pause    . step    " +
+                "B bind    1-4 reshape    QERT stance    V fog    G ghost    Space pause    . step    " +
                 "+/- speed    Middle-drag pan    F1 debug");
+
+            DrawBondButton();
 
             DrawSelectionBox();
             DrawUnitLabels();

@@ -431,6 +431,14 @@ namespace BattleChess.Rules
 
             float terrainSpeed = battle.SpeedOf(unit);
 
+            // Regiments bound into a wing keep the pace of the slowest of them.
+            // Without it "they move together" lasts about ten seconds — cavalry
+            // is three times an infantryman's speed, so a mixed wing tears
+            // itself apart on the first march and arrives as separate regiments
+            // at separate times, which is exactly what binding them was meant
+            // to prevent.
+            terrainSpeed *= battle.PaceOfBond(unit) / MathF.Max(0.01f, unit.BaseSpeed);
+
             if (terrainSpeed <= 0f)
             {
                 log.Blocked("Move",

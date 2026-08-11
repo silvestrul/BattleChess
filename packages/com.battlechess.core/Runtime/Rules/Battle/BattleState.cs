@@ -212,6 +212,66 @@ namespace BattleChess.Rules
         /// <summary>Terrain under a world position.</summary>
         public TerrainDef TerrainAt(Vec2 position) => TerrainCatalogue.Get(Terrain.At(position));
 
+        // ---- Bonds ------------------------------------------------------------
+
+        /// <summary>
+        /// The middle of the body of regiments a unit manoeuvres with, or its
+        /// own position if it manoeuvres alone.
+        /// </summary>
+        /// <remarks>
+        /// Only the regiments still holding together count. A wing that has lost
+        /// one to a rout should close up on the survivors rather than keep
+        /// dressing on a gap where a regiment used to be.
+        /// </remarks>
+        public Vec2 CentreOfBond(UnitInstance unit)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+            if (unit.Bond == 0) return unit.Position;
+
+            Vec2 total = Vec2.Zero;
+            int members = 0;
+
+            for (int i = 0; i < _units.Count; i++)
+            {
+                if (_units[i].Bond != unit.Bond) continue;
+                if (!_units[i].IsFighting) continue;
+
+                total += _units[i].Position;
+                members++;
+            }
+
+            return members > 0 ? total / members : unit.Position;
+        }
+
+        /// <summary>
+        /// Open-ground speed of the slowest regiment in a unit's bond, which is
+        /// the pace the whole body keeps.
+        /// </summary>
+        /// <remarks>
+        /// Base speed rather than the speed over the ground each regiment
+        /// happens to be standing on. Cavalry bound to infantry ought to march
+        /// at infantry pace — that is the whole cost of tying them together —
+        /// but one regiment wading a ford should not stop the entire wing dead
+        /// while it does.
+        /// </remarks>
+        public float PaceOfBond(UnitInstance unit)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+            if (unit.Bond == 0) return unit.BaseSpeed;
+
+            float slowest = float.MaxValue;
+
+            for (int i = 0; i < _units.Count; i++)
+            {
+                if (_units[i].Bond != unit.Bond) continue;
+                if (!_units[i].IsFighting) continue;
+
+                if (_units[i].BaseSpeed < slowest) slowest = _units[i].BaseSpeed;
+            }
+
+            return slowest < float.MaxValue ? slowest : unit.BaseSpeed;
+        }
+
         /// <summary>
         /// How far apart the sample points are when reading terrain under a
         /// whole formation, in metres.

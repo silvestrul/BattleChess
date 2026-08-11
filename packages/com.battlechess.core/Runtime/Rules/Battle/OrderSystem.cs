@@ -429,7 +429,7 @@ namespace BattleChess.Rules
             }
             else if (OrientedRect.Within(unit.Shape, quarry.Shape, DressingRangeMetres))
             {
-                want = DressingSlot(unit, quarry, out Facing square);
+                want = DressingSlot(battle, unit, quarry, out Facing square);
                 unit.DressingBearing = square;
             }
             else
@@ -530,8 +530,18 @@ namespace BattleChess.Rules
         /// this unit's offset along that face's normal, so a regiment starting
         /// near the 45° boundary commits rather than dithering between two.
         /// </para>
+        /// <para>
+        /// A regiment manoeuvring as part of a bound wing lines up on the
+        /// enemy's face where it already stands in that wing, so the whole body
+        /// arrives abreast rather than every regiment converging on one slot and
+        /// jamming behind whichever got there first. The wing's centre is what
+        /// meets the enemy's centre; each regiment keeps its own place in the
+        /// line. For a unit on its own the offset is exactly zero, so this is
+        /// the same rule either way.
+        /// </para>
         /// </remarks>
-        private static Vec2 DressingSlot(UnitInstance unit, UnitInstance quarry, out Facing square)
+        private static Vec2 DressingSlot(
+            BattleState battle, UnitInstance unit, UnitInstance quarry, out Facing square)
         {
             OrientedRect theirs = quarry.Shape;
             Vec2 offset = unit.Position - quarry.Position;
@@ -557,7 +567,12 @@ namespace BattleChess.Rules
                            + dressed.ProjectedRadius(outward)
                            - ContactMetres * 0.5f;
 
-            return quarry.Position + outward * standOff;
+            // Where this regiment stands within its own wing, measured along the
+            // face it is about to meet.
+            Vec2 alongTheFace = new Vec2(-outward.Y, outward.X);
+            float place = Vec2.Dot(unit.Position - battle.CentreOfBond(unit), alongTheFace);
+
+            return quarry.Position + outward * standOff + alongTheFace * place;
         }
 
         /// <summary>Whether this unit would be dressing on that one if it re-planned now.</summary>

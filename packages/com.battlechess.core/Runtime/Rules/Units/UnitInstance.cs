@@ -179,6 +179,25 @@ namespace BattleChess.Rules
         /// <summary>Steadiness actually used by the morale rule.</summary>
         public float MoraleRating => Def.Get(UnitAttributes.Morale) * Quality;
 
+        /// <summary>
+        /// The body of regiments this one manoeuvres as part of, or zero if it
+        /// is on its own.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A bond is a wing, not a formation. The regiments stay separate
+        /// rectangles that fight and break individually; what they share is a
+        /// pace and a place in the line, so an order given to any of them moves
+        /// all of them without disturbing the shape they stand in.
+        /// </para>
+        /// <para>
+        /// An integer rather than a list of members, so nothing has to be kept
+        /// consistent when a regiment is destroyed — a bond is simply whoever is
+        /// still carrying the same number.
+        /// </para>
+        /// </remarks>
+        public int Bond { get; set; }
+
         /// <summary>Where the unit stood when it last received an order.</summary>
         /// <remarks>Anchors pursuit, so an aggressive unit cannot be lured off the field.</remarks>
         public Vec2 OrderAnchor { get; private set; }
