@@ -277,7 +277,31 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// Drains organization from units standing on top of one another.
+        /// How fast two friendly regiments standing in each other shoulder
+        /// apart, in metres per second each.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Movement refuses to step a regiment into one of its own, which stops
+        /// overlaps happening but cannot undo the ones that already exist —
+        /// units deployed on top of each other, a formation widened into its
+        /// neighbour by reshaping, two regiments arriving on the same ground in
+        /// the same tick. Without a way out those stay welded together for the
+        /// whole battle, and the movement rule that forbids the problem becomes
+        /// the reason it is permanent.
+        /// </para>
+        /// <para>
+        /// Deliberately a shuffle rather than a shove. Men edge sideways to make
+        /// room; they are not repelled like magnets. At this rate a badly
+        /// overlapping pair takes the better part of a turn to sort itself out,
+        /// which is roughly how long it should look like it takes.
+        /// </para>
+        /// </remarks>
+        private const float ShufflingApartSpeed = 1.5f;
+
+        /// <summary>
+        /// Drains organization from units standing on top of one another, and
+        /// eases them apart.
         /// </summary>
         /// <remarks>
         /// Uses the real footprints rather than a radius, because this is the
@@ -287,8 +311,6 @@ namespace BattleChess.Rules
         /// </remarks>
         private static void ApplyOverlapDisorder(BattleState battle, UnitInstance unit, IBattleLog log)
         {
-            OrientedRect shape = unit.Shape;
-
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 // Each pair once, in id order.
@@ -296,13 +318,47 @@ namespace BattleChess.Rules
                 if (!other.IsFighting) continue;
                 if (other.Owner != unit.Owner) continue;
 
-                if (!IsPushingThrough(unit, other)) continue;
+                // Read fresh each time round: the pair before this one may have
+                // just moved this unit.
+                if (!OrientedRect.TryGetSeparation(unit.Shape, other.Shape, out Vec2 apart)) continue;
 
-                if (!OrientedRect.Overlaps(shape, other.Shape)) continue;
+                // Crowding costs order only when somebody is actually forcing a
+                // way through. Regiments drawn up shoulder to shoulder overlap
+                // constantly and should not be worn down for standing still.
+                if (IsPushingThrough(unit, other))
+                {
+                    unit.Organization -= FriendlyOverlapDisorderPerTick;
+                    other.Organization -= FriendlyOverlapDisorderPerTick;
+                }
 
-                unit.Organization -= FriendlyOverlapDisorderPerTick;
-                other.Organization -= FriendlyOverlapDisorderPerTick;
+                // Men running are not making room for anybody, and holding a
+                // rout off its own reserves would dam it against them.
+                if (unit.State == UnitState.Routing || other.State == UnitState.Routing) continue;
+
+                float step = ShufflingApartSpeed * BattleClock.SecondsPerTick;
+
+                // Half the correction each, along the shortest way out. Moving
+                // one alone would let a standing regiment be walked across the
+                // field by anything that leaned on it.
+                Vec2 push = apart.Normalised() * step;
+
+                unit.Position = KeepInsideTheField(battle, unit, unit.Position + push);
+                other.Position = KeepInsideTheField(battle, other, other.Position - push);
             }
         }
+
+        /// <summary>
+        /// Holds a shuffle inside the map and off ground the unit cannot stand
+        /// on.
+        /// </summary>
+        /// <remarks>
+        /// Making room for a neighbour is not a reason to back into a river, and
+        /// a regiment against the edge of the world has nowhere to give. Both
+        /// leave it where it was, still overlapping — which is the right answer:
+        /// pinned against something with a friend on top of you is a real
+        /// position to be in, and one the player can see and fix.
+        /// </remarks>
+        private static Vec2 KeepInsideTheField(BattleState battle, UnitInstance unit, Vec2 to) =>
+            battle.FormationFits(unit, to, unit.Facing) ? to : unit.Position;
     }
 }

@@ -223,6 +223,109 @@ namespace BattleChess.Rules
             return Math.Clamp(value, min + halfExtent, max - halfExtent);
         }
 
+        /// <summary>
+        /// Keeps a regiment out of its own side, edging it along a friendly
+        /// formation rather than through it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two bodies of men cannot stand in the same field, and until now
+        /// nothing said so — friendly formations interpenetrated freely and paid
+        /// only a trickle of cohesion for it. So a line was never really a line:
+        /// regiments ordered along the same axis slid into one another and the
+        /// front the player had drawn stopped meaning anything.
+        /// </para>
+        /// <para>
+        /// Refusing the step outright would be worse than the disease. An army
+        /// is a crowd, and regiments brush past each other constantly at glancing
+        /// angles; a hard stop on every touch would jam a line solid the first
+        /// time two units converged. So only the part of the step that pushes
+        /// into the friend is taken away, and whatever is left along their flank
+        /// is kept — which is how men actually get past each other.
+        /// </para>
+        /// <para>
+        /// Marching squarely into somebody's back leaves nothing to slide along,
+        /// and that is correct: it stops, and says so. Getting round is then the
+        /// player's problem, which is the whole point of the rule.
+        /// </para>
+        /// </remarks>
+        private static Vec2 MakeRoomForFriends(
+            BattleState battle, UnitInstance unit, Vec2 next, int tick, IBattleLog log)
+        {
+            // Men running do not form up and do not politely go round, and
+            // damming a rout against its own reserves would turn a withdrawal
+            // into a massacre.
+            if (unit.State == UnitState.Routing) return next;
+
+            UnitInstance? blocker = FriendInTheWay(battle, unit, next);
+            if (blocker == null) return next;
+
+            if (!OrientedRect.TryGetSeparation(
+                    new OrientedRect(next, unit.Facing, unit.Footprint), blocker.Shape, out Vec2 apart))
+                return next;
+
+            Vec2 away = apart.Normalised();
+            Vec2 intended = next - unit.Position;
+            Vec2 alongside = intended - away * Vec2.Dot(intended, away);
+
+            Vec2 sidestep = alongside.IsNearZero
+                ? unit.Position
+                : KeepOnTheField(battle, unit, unit.Position + alongside);
+
+            // A regiment that cannot legally stand where it already is may go
+            // anywhere that gets it out, exactly as with impassable ground.
+            bool stuckAlready = !battle.FormationFits(unit, unit.Position, unit.Facing);
+
+            bool sideways = !alongside.IsNearZero
+                            && FriendInTheWay(battle, unit, sidestep) == null
+                            && (stuckAlready || battle.FormationFits(unit, sidestep, unit.Facing));
+
+            if (sideways) return sidestep;
+
+            // Said on a counter rather than every tick: a friend in the way
+            // persists for as long as they stand there, and a line of it every
+            // second would bury everything else.
+            if (tick % 20 == 0)
+                log.Blocked("Move",
+                    $"{unit.Def.DisplayName} cannot get past its own {blocker.Def.DisplayName} and is " +
+                    "waiting behind it — move one of them, or take it round.",
+                    unit.Id);
+
+            return unit.Position;
+        }
+
+        /// <summary>
+        /// A friendly formation this step would newly stand inside, if there is
+        /// one.
+        /// </summary>
+        /// <remarks>
+        /// A unit already inside somebody is exempt for that pair. That happens
+        /// — deployed overlapping, or widened into a neighbour by reshaping —
+        /// and a regiment that cannot legally be where it is must still be able
+        /// to walk off it, or it is stuck for the whole battle. The shuffle in
+        /// <see cref="ContactSystem"/> is what resolves those.
+        /// </remarks>
+        private static UnitInstance? FriendInTheWay(BattleState battle, UnitInstance unit, Vec2 next)
+        {
+            var stepped = new OrientedRect(next, unit.Facing, unit.Footprint);
+            OrientedRect here = unit.Shape;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id) continue;
+                if (other.Owner != unit.Owner) continue;
+                if (!other.IsFighting) continue;
+                if (other.State == UnitState.Routing) continue;
+
+                if (!OrientedRect.Overlaps(stepped, other.Shape)) continue;
+                if (OrientedRect.Overlaps(here, other.Shape)) continue;
+
+                return other;
+            }
+
+            return null;
+        }
+
         private static void StepUnit(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
         {
             MovementRoute route = unit.Route!;
@@ -373,7 +476,7 @@ namespace BattleChess.Rules
             // what threading a gap actually looks like.
             if (battle.FormationFits(unit, next, unit.Facing) ||
                 !battle.FormationFits(unit, unit.Position, unit.Facing))
-                unit.Position = next;
+                unit.Position = MakeRoomForFriends(battle, unit, next, tick, log);
 
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
             {

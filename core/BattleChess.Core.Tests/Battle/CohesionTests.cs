@@ -119,11 +119,13 @@ namespace BattleChess.Tests.Battle
             UnitInstance foot = field.Add(1, "swordsmen", field.Centre + new Vec2(300f, 0f), Facing.West);
             Battlefield.Hold(foot);
 
-            UnitInstance horse = field.Add(0, "cavalry", field.Centre - new Vec2(300f, 0f), Facing.East);
+            UnitInstance horse = field.Add(0, "cavalry", field.Centre - new Vec2(300f, 260f), Facing.East);
 
-            // A friendly regiment squarely in the way, to be shouldered past —
-            // which is what actually drained the cohesion in the recorded game.
-            UnitInstance friend = field.Add(0, "spearmen", field.Centre - new Vec2(150f, 0f), Facing.East);
+            // A friendly regiment drawn up across the ground it has to cross.
+            // Regiments cannot walk through their own any more, so the horse
+            // brushes down its flank and round the end of the line — which is
+            // the manoeuvre that costs the cohesion this test is about.
+            UnitInstance friend = field.Add(0, "spearmen", field.Centre - new Vec2(150f, 120f), Facing.East);
             Battlefield.Hold(friend);
 
             field.March(horse, field.Centre);
