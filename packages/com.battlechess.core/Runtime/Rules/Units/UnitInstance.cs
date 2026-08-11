@@ -206,12 +206,22 @@ namespace BattleChess.Rules
         /// The front this unit was told to hold, or held when it was ordered.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Remembered rather than read live, because a regiment turns for
         /// reasons that are not a change of plan — coming round to thread a gap
         /// between two woods, most obviously. Reading the current facing would
         /// let each of those quietly become the new intent, so a unit that
         /// squeezed through something would come out the far side permanently
         /// facing whichever way the gap happened to run.
+        /// </para>
+        /// <para>
+        /// Set at muster to the front the regiment was deployed on, and not
+        /// merely left at its default. A bearing that has never been written is
+        /// due east, and once halted regiments began wheeling to hold the front
+        /// they were told to, every unit that had not yet received an order
+        /// turned east on the opening tick — so one whole army span about before
+        /// the battle started.
+        /// </para>
         /// </remarks>
         public Facing OrderFacing { get; private set; }
 
@@ -301,6 +311,7 @@ namespace BattleChess.Rules
             Owner = owner;
             Position = position;
             Facing = facing;
+            OrderFacing = facing;
             _strength = strength;
             InitialStrength = strength;
             State = UnitState.Steady;

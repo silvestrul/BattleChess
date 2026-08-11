@@ -37,23 +37,18 @@ namespace BattleChess.Unity
         /// Depth a regiment is drawn and hit-tested at, however thin it really
         /// is. Cosmetic only — the rules always use the true footprint.
         /// </summary>
-        public const float ClickableDepthMetres = 9f;
-
-        /// <summary>
-        /// How large a regiment is drawn against the ground it really holds.
-        /// </summary>
         /// <remarks>
-        /// <b>Purely how it looks.</b> Every rule — contact, zones of control,
-        /// terrain under the formation, whether two bodies can share ground —
-        /// still uses the true footprint, so nothing fights, collides or routes
-        /// differently for being drawn smaller.
+        /// The one place the drawing is allowed to differ from the truth, and
+        /// only ever by making a hairline thick enough to hit — a regiment six
+        /// metres deep is a couple of pixels at any sensible zoom.
         ///
-        /// The cost of that is worth naming: at a half scale two regiments make
-        /// contact with a visible gap between their plates, because the ground
-        /// they hold reaches further than the rectangle on screen says. Press F1
-        /// and the debug overlay draws the true shapes over the top.
+        /// Regiments were briefly drawn at half the ground they held, which was
+        /// the wrong way to make them smaller: two of them made contact with a
+        /// visible gap still showing between the plates, because the ground they
+        /// held reached further than the rectangle said. The rectangle itself is
+        /// half the size it was now, so what is drawn is what is there.
         /// </remarks>
-        public const float DrawnScale = 0.5f;
+        public const float ClickableDepthMetres = 9f;
 
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
@@ -1231,8 +1226,8 @@ namespace BattleChess.Unity
             Footprint real = unit.Footprint;
 
             return new OrientedRect(unit.Position, unit.Facing, new Footprint(
-                real.Width * DrawnScale,
-                Mathf.Max(real.Depth * DrawnScale, ClickableDepthMetres)));
+                real.Width,
+                Mathf.Max(real.Depth, ClickableDepthMetres)));
         }
 
         private void SetSelection(List<UnitInstance> units)

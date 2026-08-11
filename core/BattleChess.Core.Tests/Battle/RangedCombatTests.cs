@@ -177,15 +177,35 @@ namespace BattleChess.Tests.Battle
                 $"The price of a square is being shot at: line {inLine:0}%, square {inSquare:0}%.");
         }
 
-        private static float ApproachInFormation(string formation) =>
-            new Duel
-            {
-                Attacker = "swordsmen",
-                AttackerFormation = formation,
-                Defender = "archers",
-                StartDistance = 250f,
-                Seed = 3000,
-            }.Fight().AttackerLost;
+        /// <summary>
+        /// What crossing 250 m of open ground in a given formation costs, read
+        /// at the moment the two lines meet.
+        /// </summary>
+        /// <remarks>
+        /// Stopped at contact rather than fought to a decision. Both of these
+        /// tests are about what a formation costs you <i>under fire</i>, and
+        /// running on into the melee measured the melee as well — which for a
+        /// square is a quite different and much larger number pulling the other
+        /// way. It happened to come out right while the approach was long enough
+        /// to dominate, and stopped the moment the rectangle shrank and
+        /// regiments had to close further before fighting.
+        /// </remarks>
+        private static float ApproachInFormation(string formation)
+        {
+            var field = new Battlefield("plains", 3000);
+
+            UnitInstance bows = field.Add(1, "archers", field.Centre, Facing.West);
+            Battlefield.Hold(bows);
+
+            UnitInstance foot = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East,
+                formation: formation);
+
+            Battlefield.Press(foot, bows);
+
+            field.RunUntil(() => OrderSystem.InContactWith(foot, bows), maxTurns: 8);
+
+            return Battlefield.LostPercent(foot);
+        }
 
         // ---- Artillery -------------------------------------------------------
 

@@ -33,9 +33,25 @@ namespace BattleChess.Tests.Battle
             (float once, float _, float _) = RideThrough(passes: 1);
             (float thrice, float _, float _) = RideThrough(passes: 3);
 
-            Assert.True(thrice >= 2f * once,
-                $"Three passes must cost far more than one. Sampling contact only on the pulse let a fast " +
-                $"regiment cross the whole contact zone between two of them, so repeat charges were free: " +
+            // Half again rather than double, and the reason is worth recording
+            // because it is a real change in how a charge behaves rather than a
+            // threshold being softened until it passed.
+            //
+            // The contact window is as deep as the two formations plus melee
+            // reach either side. When the rectangle was halved that window went
+            // from about forty metres to twenty, while cavalry still covers
+            // forty-eight in the ten ticks between combat pulses. So a pass now
+            // spans exactly one pulse where it used to span two: the per-tick
+            // contact record guarantees the one — that is what it is for, and
+            // without it a pass would land nothing at all — but there is no
+            // second.
+            //
+            // What the guard is really for is the bug it was written against,
+            // where three passes cost precisely what one did. That is a ratio of
+            // one, and this still catches it decisively.
+            Assert.True(thrice >= 1.5f * once,
+                $"Three passes must cost meaningfully more than one. Sampling contact only on the pulse let a " +
+                $"fast regiment cross the whole contact zone between two of them, so repeat charges were free: " +
                 $"one pass cost {once:0.0}%, three cost {thrice:0.0}%.");
         }
 

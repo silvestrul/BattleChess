@@ -113,6 +113,33 @@ namespace BattleChess.Tests.Battle
         // ---- Changing front ---------------------------------------------------
 
         [Fact]
+        public void RegimentsThatHaveNeverBeenGivenAnOrderStayWhereTheyWerePut()
+        {
+            var field = new Battlefield("plains", 21700);
+
+            // Deployed facing every which way and left alone, exactly as a
+            // battle file leaves them before anybody has clicked anything.
+            UnitInstance west = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, 0f), Facing.West);
+            UnitInstance north = field.Add(0, "spearmen", field.Centre, Facing.North);
+            UnitInstance south = field.Add(1, "archers", field.Centre + new Vec2(300f, 0f), Facing.South);
+
+            field.RunTurns(2);
+
+            // A bearing that has never been written is due east, and once halted
+            // regiments began holding the front they were told to, every unit
+            // that had not yet received an order turned east on the opening tick
+            // — so a whole army span about before the battle had started.
+            Assert.True(Facing.AbsoluteDelta(west.Facing, Facing.West) < 0.01f,
+                $"Left facing west, now facing {west.Facing.Degrees:0}°.");
+
+            Assert.True(Facing.AbsoluteDelta(north.Facing, Facing.North) < 0.01f,
+                $"Left facing north, now facing {north.Facing.Degrees:0}°.");
+
+            Assert.True(Facing.AbsoluteDelta(south.Facing, Facing.South) < 0.01f,
+                $"Left facing south, now facing {south.Facing.Degrees:0}°.");
+        }
+
+        [Fact]
         public void ARegimentCanBeToldToComeAboutWhereItStands()
         {
             var field = new Battlefield("plains", 21300);

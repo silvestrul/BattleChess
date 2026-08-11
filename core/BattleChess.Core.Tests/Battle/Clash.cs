@@ -94,7 +94,15 @@ namespace BattleChess.Tests.Battle
             UnitInstance a = field.Add(0, attackerDef, field.Centre, Facing.East, attackerStrength, attackerForm);
 
             Footprint defenderShape = defenderForm.ApplyTo(defenderDef.NaturalFormation).FootprintFor(defenderStrength);
-            float gap = a.Footprint.HalfDepth + defenderShape.HalfDepth + 4f;
+
+            // Half of melee reach rather than a fixed four metres, so this stays
+            // comfortably inside contact whatever that reach becomes. At the
+            // literal figure it happened to equal the reach exactly once the
+            // rectangle was halved, which put every controlled fight in the
+            // suite on the boundary of touching at all — and several of them
+            // fell off it.
+            float gap = a.Footprint.HalfDepth + defenderShape.HalfDepth
+                      + OrderSystem.ContactMetres * 0.5f;
 
             UnitInstance b = field.Add(1, defenderDef, field.Centre + new Vec2(gap, 0f),
                 Facing.FromDegrees(DefenderFacingDegrees), defenderStrength, defenderForm);

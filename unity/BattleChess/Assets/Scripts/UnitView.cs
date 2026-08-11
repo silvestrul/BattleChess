@@ -144,20 +144,15 @@ namespace BattleChess.Unity
             // Z rotation.
             transform.rotation = Quaternion.Euler(0f, 0f, facing.Degrees);
 
-            // Drawn at a fraction of the ground it really holds, and no thinner
-            // than a shape you can actually see and click — a regiment in line
-            // is a hundred metres wide and four deep, which at any sensible zoom
-            // is a hairline.
-            //
-            // Cosmetic only. Every rule still uses the true footprint, so
-            // nothing fights, collides or routes differently for how it is
-            // drawn; the price is that two regiments make contact with a gap
-            // still showing between their plates. F1 draws the true shapes.
-            float drawnWidth = footprint.Width * BattlefieldController.DrawnScale;
+            // The true frontage, and a depth floored at something you can see
+            // and click — a regiment in line is forty metres wide and six deep,
+            // which at any sensible zoom is a hairline. That floor is the only
+            // liberty taken with the shape, so two regiments in contact look
+            // like two regiments in contact.
+            float drawnWidth = footprint.Width;
 
             float drawnDepth = Mathf.Max(
-                footprint.Depth * BattlefieldController.DrawnScale,
-                BattlefieldController.ClickableDepthMetres);
+                footprint.Depth, BattlefieldController.ClickableDepthMetres);
 
             ScaleToMetres(_body, drawnDepth, drawnWidth);
 

@@ -485,7 +485,14 @@ namespace BattleChess.Rules
         // ---- Helpers ---------------------------------------------------------
 
         /// <summary>How close two formations must come before their men can reach each other.</summary>
-        public const float ContactMetres = 8f;
+        /// <remarks>
+        /// Halved along with the rectangle. Reach is a question of how many
+        /// ranks separate the front two, and ranks now stand half as far apart
+        /// in metres — so at the old figure two regiments six metres deep would
+        /// have fought across a gap wider than either of them was thick, which
+        /// looks exactly as wrong as it sounds.
+        /// </remarks>
+        public const float ContactMetres = 4f;
 
         // ---- Squaring up -----------------------------------------------------
 

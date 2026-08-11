@@ -185,11 +185,17 @@ namespace BattleChess.Tests.Battle
             var field = new Battlefield("plains", 23600, RuleSet.Full, canvas =>
                 canvas.Band(canvas.Columns / 2, canvas.Columns - 1, "deepwater"));
 
-            // Centre on dry land but half the frontage in the water, which is
+            // Centre on dry land but part of the frontage in the water, which is
             // the state an older rule or a deployment could easily leave. A
             // centre actually in the water is a different matter — movement has
             // always halted for that, and rightly.
-            UnitInstance unit = field.Add(0, "cavalry", field.Centre - new Vec2(30f, 0f), Facing.North);
+            //
+            // Set back by a fraction of the regiment's own frontage rather than
+            // a fixed thirty metres, so it stays half in the water whatever size
+            // the rectangle is.
+            UnitInstance unit = field.Add(0, "cavalry", field.Centre, Facing.North);
+
+            unit.Position = field.Centre - new Vec2(unit.Footprint.HalfWidth * 0.55f, 0f);
 
             Assert.False(field.State.FormationFits(unit, unit.Position, unit.Facing),
                 "It is standing somewhere it should not be.");

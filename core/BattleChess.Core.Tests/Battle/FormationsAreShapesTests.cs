@@ -32,18 +32,25 @@ namespace BattleChess.Tests.Battle
             var field = new Battlefield("plains", 14000);
 
             // Both facing east, so each spreads its frontage north to south and
-            // is only a few metres deep. Sixty metres apart across their fronts
-            // puts them shoulder to shoulder while their centres are sixty
-            // metres away from each other.
+            // is only a few metres deep. Set a little over half a frontage apart
+            // across their fronts, which puts them shoulder to shoulder while
+            // their centres are that whole distance from each other.
+            //
+            // Measured off the regiment rather than written in metres, so the
+            // arrangement this test is about survives the rectangle being
+            // resized — which it has been, and every hard-coded offset in here
+            // quietly stopped describing it.
             UnitInstance left = field.Add(0, "cavalry", field.Centre, Facing.East);
-            UnitInstance right = field.Add(1, "cavalry", field.Centre + new Vec2(0f, 60f), Facing.East);
+
+            UnitInstance right = field.Add(1, "cavalry",
+                field.Centre + new Vec2(0f, left.Footprint.Width * 0.57f), Facing.East);
 
             float betweenCentres = Vec2.Distance(left.Position, right.Position);
             float betweenFormations = OrientedRect.GapBetween(left.Shape, right.Shape);
 
             Assert.True(betweenFormations < betweenCentres * 0.2f,
-                $"Two regiments a hundred metres wide overlap heavily at this spacing: their centres are " +
-                $"{betweenCentres:0} m apart and their formations {betweenFormations:0} m.");
+                $"Two regiments {left.Footprint.Width:0} m wide overlap heavily at this spacing: their centres " +
+                $"are {betweenCentres:0} m apart and their formations {betweenFormations:0} m.");
 
             Assert.True(OrderSystem.InContactWith(left, right),
                 "And men that close can plainly reach each other. Measured centre to centre they counted " +
@@ -57,7 +64,9 @@ namespace BattleChess.Tests.Battle
 
             // Crossed at right angles, one riding through the other's front.
             UnitInstance across = field.Add(0, "cavalry", field.Centre, Facing.North);
-            UnitInstance line = field.Add(1, "cavalry", field.Centre + new Vec2(40f, 0f), Facing.East);
+
+            UnitInstance line = field.Add(1, "cavalry",
+                field.Centre + new Vec2(across.Footprint.Width * 0.38f, 0f), Facing.East);
 
             Assert.True(OrientedRect.Overlaps(across.Shape, line.Shape),
                 "These two are standing in the same field.");
@@ -78,14 +87,23 @@ namespace BattleChess.Tests.Battle
             Battlefield.Hold(line);
 
             // And swordsmen marching north across its front, close enough that
-            // the two formations physically overlap. Their centres stay forty-
-            // five metres apart the whole way — outside the spearmen's thirty-
-            // metre zone of control — which is exactly how this used to be a
-            // free passage.
-            Vec2 start = field.Centre + new Vec2(45f, -260f);
-            Vec2 finish = field.Centre + new Vec2(45f, 260f);
+            // the two formations physically overlap. Their centres stay well
+            // outside the spearmen's zone of control the whole way, which is
+            // exactly how this used to be a free passage — the runner faces
+            // north, so it is its own frontage that sweeps through the line.
+            UnitInstance runner = field.Add(0, "swordsmen", field.Centre, Facing.North);
 
-            UnitInstance runner = field.Add(0, "swordsmen", start, Facing.North);
+            // Set so the runner's near flank laps a good way over the spear
+            // wall's, whatever either of them measures.
+            float offset = line.Footprint.HalfDepth + runner.Footprint.HalfWidth * 0.6f;
+
+            Vec2 start = field.Centre + new Vec2(offset, -260f);
+            Vec2 finish = field.Centre + new Vec2(offset, 260f);
+
+            runner.Position = start;
+
+            Assert.True(runner.Footprint.HalfWidth > offset - line.Footprint.HalfDepth,
+                "The two are meant to overlap as it goes by. If they do not, this proves nothing.");
             field.March(runner, finish);
 
             field.RunTurns(4);
@@ -136,11 +154,18 @@ namespace BattleChess.Tests.Battle
         {
             var field = new Battlefield("plains", 14300, RuleSet.Full, canvas =>
             {
-                // A north-south river. Placed either just off the unit's flank
-                // or far away, never under its centre — which is the whole
-                // point of the test.
+                // A north-south river. Placed either under the unit's flank or
+                // far away, never under its centre — which is the whole point of
+                // the test.
+                //
+                // The column immediately west of the centre one, rather than the
+                // column east of it. The centre point sits at the western edge
+                // of its own cell, so a regiment narrower than a cell reaches
+                // into the cell before it and never into the cell after — and
+                // once the rectangle was halved, a band placed to the east had
+                // nothing standing in it at all.
                 int centreColumn = canvas.ColumnAt(canvas.Columns * canvas.CellSize * 0.5f);
-                int column = riverUnderFlank ? centreColumn + 1 : centreColumn + 12;
+                int column = riverUnderFlank ? centreColumn - 1 : centreColumn + 12;
 
                 canvas.Band(column, column, "river");
             });

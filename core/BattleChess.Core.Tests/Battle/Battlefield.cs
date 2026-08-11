@@ -279,7 +279,12 @@ namespace BattleChess.Tests.Battle
         /// <summary>
         /// Places a unit just close enough to another to count as in contact.
         /// </summary>
+        /// <remarks>
+        /// Half of melee reach, so this stays comfortably inside contact
+        /// whatever that reach becomes rather than sitting exactly on its edge.
+        /// </remarks>
         public static Vec2 ContactPosition(UnitInstance from, Footprint other, Vec2 direction) =>
-            from.Position + direction.Normalised() * (from.Footprint.HalfDepth + other.HalfDepth + 4f);
+            from.Position + direction.Normalised()
+            * (from.Footprint.HalfDepth + other.HalfDepth + OrderSystem.ContactMetres * 0.5f);
     }
 }
