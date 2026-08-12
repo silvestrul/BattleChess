@@ -274,8 +274,15 @@ namespace BattleChess.Rules
         /// along its own front — is a real order, and it should be one somebody
         /// deliberately gives.
         /// </para>
+        /// <para>
+        /// Half a frontage, roughly twenty metres, which is a nudge and not a
+        /// move. It was two whole frontages, a figure inherited from when a
+        /// regiment was a hundred and six metres wide; at forty it swallowed
+        /// ordinary orders, and a march of sixty metres at a fresh bearing was
+        /// carried out sideways on the old front.
+        /// </para>
         /// </remarks>
-        private const float WorthChangingFrontFor = 2f;
+        private const float WorthChangingFrontFor = 0.5f;
 
         /// <summary>
         /// The front to hold for an order that did not name one.

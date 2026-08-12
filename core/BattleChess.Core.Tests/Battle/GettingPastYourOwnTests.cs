@@ -218,20 +218,23 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void ASidestepStillHoldsTheFrontWhereItWasPut()
+        public void ASidestepHoldsItsFrontWhenAskedTo()
         {
             var field = new Battlefield("plains", 21600);
 
             UnitInstance foot = field.Add(0, "swordsmen", field.Centre, Facing.East);
 
-            // Fifty metres to its left. Turning to face that would swing a
-            // hundred metres of frontage through a right angle for a shuffle.
-            field.March(foot, field.Centre + new Vec2(0f, 50f));
+            // Fifty metres to its left, holding the front it was given. Once a
+            // move of any real length turns a regiment to face the way it is
+            // going, sidling along a front is something the player asks for
+            // rather than something that happens by default — which is what
+            // makes it a manoeuvre with a price rather than an accident.
+            field.March(foot, field.Centre + new Vec2(0f, 50f), bearing: Facing.East);
 
             field.RunTurns(1);
 
             Assert.True(Facing.AbsoluteDelta(foot.Facing, Facing.East) < 0.05f,
-                $"A short move across the front should keep the front: it is facing {foot.Facing.Degrees:0}°.");
+                $"Asked to keep its front, it is facing {foot.Facing.Degrees:0}°.");
         }
     }
 }

@@ -35,10 +35,10 @@ namespace BattleChess.Tests.Battle
             UnitInstance unit = field.Add(0, "cavalry", field.Centre, Facing.East);
             Facing before = unit.Facing;
 
-            // A shuffle to its left, shorter than the regiment is wide. Coming
-            // about for this would spin the whole frontage through a right angle
-            // to cover less ground than it covers standing still.
-            field.March(unit, field.Centre + new Vec2(0f, unit.Footprint.Width * 0.5f));
+            // A nudge to its left, a fraction of the regiment's own width.
+            // Coming about for this would spin the whole frontage through a
+            // right angle to cover a few strides.
+            field.March(unit, field.Centre + new Vec2(0f, unit.Footprint.Width * 0.3f));
             field.RunTurns(3);
 
             Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, before)) < 5f,
