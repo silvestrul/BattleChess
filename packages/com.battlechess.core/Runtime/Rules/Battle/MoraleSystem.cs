@@ -57,6 +57,43 @@ namespace BattleChess.Rules
         /// <summary>Morale regained per pulse while out of contact.</summary>
         private const float RecoveryPerPulse = 0.012f;
 
+        /// <summary>Cohesion regained per pulse while standing clear of the enemy.</summary>
+        /// <remarks>
+        /// <para>
+        /// Men dress their ranks and close up whenever nobody is killing them.
+        /// Without this, organization was a one-way ratchet: half a dozen rules
+        /// drained it — rough ground, riding through a line, taking a charge,
+        /// shouldering past friends at a twentieth of a point a second — and
+        /// nothing anywhere put it back.
+        /// </para>
+        /// <para>
+        /// The effect was invisible in a controlled fight and ruinous in a real
+        /// one. A regiment that spent three turns manoeuvring behind its own
+        /// line arrived with a third of its cohesion, and cohesion multiplies
+        /// attack, defence, stopping power and breakthrough all at once — so
+        /// cavalry that the balance sweep says beats swordsmen four times out of
+        /// five lost to them badly, purely for having taken a long route to the
+        /// fight. Nothing on screen explained it.
+        /// </para>
+        /// <para>
+        /// The rate is bounded from both ends and the window is narrow. Too
+        /// slow and cohesion is a ratchet again. Too fast and repeated charges
+        /// stop accumulating: at twice this figure, a regiment ridden through
+        /// three times came out no worse than one ridden through once, because
+        /// each charge only undid the previous one's recovery. Roughly a third
+        /// of a charge's damage per turn is what leaves both true.
+        /// </para>
+        /// </remarks>
+        private const float CohesionRecoveryPerPulse = 0.006f;
+
+        /// <summary>How much of that a regiment manages while still on the march.</summary>
+        /// <remarks>
+        /// Ranks can be dressed on the move, but not well. Standing still is
+        /// how a broken-up formation is properly put back together, which gives
+        /// halting a use beyond waiting.
+        /// </remarks>
+        private const float CohesionRecoveryWhileMarching = 0.5f;
+
         // ---- Thresholds ------------------------------------------------------
 
         /// <summary>Below this a unit is shaken and fights worse.</summary>
@@ -97,8 +134,44 @@ namespace BattleChess.Rules
 
                 if (!unit.IsFighting) continue;
 
+                Reform(battle, unit);
                 ApplyPressure(battle, unit, log);
             }
+        }
+
+        /// <summary>
+        /// Closes the ranks up again while nobody is fighting these men.
+        /// </summary>
+        /// <remarks>
+        /// Gated on melee alone rather than on anything having happened. A
+        /// regiment under long-range fire is being killed, not disordered —
+        /// morale is what shooting costs, and it is charged separately. What
+        /// breaks a formation is crossing bad ground, being ridden through, and
+        /// having something arrive at close quarters.
+        /// </remarks>
+        private static void Reform(BattleState battle, UnitInstance unit)
+        {
+            if (unit.Organization >= 1f) return;
+            if (unit.EnemiesInContact > 0) return;
+
+            // Standing still re-forms a regiment wherever it is standing, bad
+            // ground included. Halting in a wood to dress the ranks is a real
+            // thing to do with a turn, and blocking it meant a unit that had
+            // stopped in a marsh simply stayed a rabble — which reads as the
+            // game punishing you for terrain you already paid to cross.
+            //
+            // On the march it is different: you cannot both wade a river and
+            // close your files, and letting recovery run there cancelled most
+            // of the crossing.
+            if (unit.IsMarching)
+            {
+                if (battle.WorstDisorderUnder(unit) > 0f) return;
+
+                unit.Organization += CohesionRecoveryPerPulse * CohesionRecoveryWhileMarching;
+                return;
+            }
+
+            unit.Organization += CohesionRecoveryPerPulse;
         }
 
         private static void ApplyPressure(BattleState battle, UnitInstance unit, IBattleLog log)

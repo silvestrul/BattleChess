@@ -231,8 +231,25 @@ namespace BattleChess.Rules
         private float MultiplierAt(Coord cell, MovementType movementType)
         {
             Vec2 world = _layout.ToWorld(cell);
+
+            // A cell sitting on the border has its centre a little outside the
+            // map while the cell itself plainly overlaps it. Rejecting those
+            // made a band half a cell wide unreachable all the way round the
+            // field: an order pointed anywhere near the edge came back
+            // "impassable", naming whatever harmless ground the player had
+            // actually clicked on, and the regiment stood still. Sample the
+            // nearest ground that exists instead.
             if (!_terrain.Bounds.Contains(world))
-                return 0f;
+            {
+                Vec2 onMap = _terrain.Bounds.Clamp(world);
+
+                // Only if the cell genuinely reaches the map. Anything further
+                // out is off the battlefield and stays impassable.
+                if (Vec2.DistanceSquared(onMap, world) > _layout.CellSize * _layout.CellSize)
+                    return 0f;
+
+                world = onMap;
+            }
 
             return _movement.SpeedMultiplier(_terrain.At(world), movementType);
         }

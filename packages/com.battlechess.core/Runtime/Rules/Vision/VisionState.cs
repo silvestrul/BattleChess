@@ -4,6 +4,38 @@ using BattleChess.Contracts;
 namespace BattleChess.Rules
 {
     /// <summary>
+    /// What an army saw of a regiment at one moment, frozen.
+    /// </summary>
+    /// <remarks>
+    /// Nothing here is read live. That is the entire contract: a sighting is a
+    /// memory, and a memory that updates itself is not fog, it is a spy.
+    /// </remarks>
+    public readonly struct Sighting
+    {
+        /// <summary>Where they were standing.</summary>
+        public readonly Vec2 Where;
+
+        /// <summary>Which way they were facing.</summary>
+        public readonly Facing Facing;
+
+        /// <summary>How many men they had then.</summary>
+        public readonly int Strength;
+
+        /// <summary>Ticks since. One turn is sixty.</summary>
+        public readonly int AgeTicks;
+
+        public Sighting(Vec2 where, Facing facing, int strength, int ageTicks)
+        {
+            Where = where;
+            Facing = facing;
+            Strength = strength;
+            AgeTicks = ageTicks;
+        }
+
+        public override string ToString() => $"{Strength} men at {Where}, {AgeTicks} ticks ago";
+    }
+
+    /// <summary>
     /// What each army can currently see of the other.
     /// </summary>
     /// <remarks>
@@ -24,8 +56,19 @@ namespace BattleChess.Rules
     {
         private bool[] _seen = Array.Empty<bool>();
 
-        /// <summary>Where each army last saw each enemy, and when.</summary>
+        /// <summary>
+        /// What each army last saw of each enemy, and when.
+        /// </summary>
+        /// <remarks>
+        /// Strength and facing are kept alongside the position because a
+        /// remembered sighting has to be remembered <i>whole</i>. Storing only
+        /// where they were and reading everything else off the live unit when
+        /// the marker is drawn would give the player a stale position attached
+        /// to a current headcount — fog wearing a ghost's clothes.
+        /// </remarks>
         private Vec2[] _lastSeenAt = Array.Empty<Vec2>();
+        private Facing[] _lastSeenFacing = Array.Empty<Facing>();
+        private int[] _lastSeenStrength = Array.Empty<int>();
         private int[] _lastSeenTick = Array.Empty<int>();
 
         private int _units;
@@ -63,16 +106,22 @@ namespace BattleChess.Rules
                 _seen = new bool[armies * units];
 
                 var places = new Vec2[armies * units];
+                var bearings = new Facing[armies * units];
+                var counts = new int[armies * units];
                 var whens = new int[armies * units];
 
                 // Anything already remembered survives the resize.
                 for (int i = 0; i < Math.Min(_lastSeenAt.Length, places.Length); i++)
                 {
                     places[i] = _lastSeenAt[i];
+                    bearings[i] = _lastSeenFacing[i];
+                    counts[i] = _lastSeenStrength[i];
                     whens[i] = _lastSeenTick[i];
                 }
 
                 _lastSeenAt = places;
+                _lastSeenFacing = bearings;
+                _lastSeenStrength = counts;
                 _lastSeenTick = whens;
             }
             else
@@ -106,6 +155,8 @@ namespace BattleChess.Rules
                             // difference between fog you can plan against and
                             // simply forgetting an army exists.
                             _lastSeenAt[slot] = target.Position;
+                            _lastSeenFacing[slot] = target.Facing;
+                            _lastSeenStrength[slot] = target.Strength;
                             _lastSeenTick[slot] = tick;
 
                             break;
@@ -126,8 +177,21 @@ namespace BattleChess.Rules
         /// </remarks>
         public bool TryRecall(BattleState battle, PlayerId viewer, UnitInstance target, out Vec2 where, out int age)
         {
-            where = default;
-            age = 0;
+            bool recalled = TryRecall(battle, viewer, target, out Sighting sighting);
+
+            where = sighting.Where;
+            age = sighting.AgeTicks;
+
+            return recalled;
+        }
+
+        /// <summary>
+        /// The whole of what an army last saw of a unit: where, facing which
+        /// way, how many, and how long ago.
+        /// </summary>
+        public bool TryRecall(BattleState battle, PlayerId viewer, UnitInstance target, out Sighting sighting)
+        {
+            sighting = default;
 
             int army = IndexOfArmy(battle, viewer);
             if (army < 0 || _units == 0) return false;
@@ -136,8 +200,11 @@ namespace BattleChess.Rules
             if (slot < 0 || slot >= _lastSeenAt.Length) return false;
             if (_lastSeenTick[slot] == 0 && _lastSeenAt[slot].IsNearZero) return false;
 
-            where = _lastSeenAt[slot];
-            age = Math.Max(0, LatestTick - _lastSeenTick[slot]);
+            sighting = new Sighting(
+                _lastSeenAt[slot],
+                _lastSeenFacing[slot],
+                _lastSeenStrength[slot],
+                Math.Max(0, LatestTick - _lastSeenTick[slot]));
 
             return true;
         }

@@ -165,10 +165,17 @@ namespace BattleChess.Tests.Battle
         /// asks for and the pathfinder answers once; the systems then carry it
         /// out or refuse to.
         /// </remarks>
-        public void March(UnitInstance unit, Vec2 destination, Stance stance = Stance.Advance)
+        /// <param name="bearing">
+        /// Which way to face on arrival. Null keeps the current front, which is
+        /// the game's default and means a unit ordered backwards edges along at
+        /// a fifth of its pace rather than turning about. Tests that mean
+        /// "wheel round and go" have to say so, exactly as a player does.
+        /// </param>
+        public void March(
+            UnitInstance unit, Vec2 destination, Stance stance = Stance.Advance, Facing? bearing = null)
         {
             unit.Stance = stance;
-            unit.GiveOrder(UnitOrder.MoveTo(destination), unit.Position);
+            unit.GiveOrder(UnitOrder.MoveTo(destination, bearing: bearing), unit.Position);
 
             PathResult path = _pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
 
@@ -186,17 +193,33 @@ namespace BattleChess.Tests.Battle
             unit.GiveOrder(UnitOrder.Stand(), unit.Position);
         }
 
+        /// <summary>
+        /// Everything the rules said while this battle ran.
+        /// </summary>
+        /// <remarks>
+        /// Some behaviour is far easier to assert on through what the rules
+        /// <i>reported</i> than through the state they left behind. Whether a
+        /// charge landed is the clearest case: the effect is a multiplier
+        /// buried inside a casualty figure that a dozen other things also move,
+        /// but the combat rule says "Charge lands" in as many words, so
+        /// counting those is both exact and legible in a failure message.
+        /// </remarks>
+        public TranscriptLog Transcript { get; } = new TranscriptLog();
+
+        /// <summary>How many times a line contains a given phrase.</summary>
+        public int TimesSaid(string phrase) => Transcript.Count(phrase);
+
         public void RunTurns(int turns)
         {
             for (int i = 0; i < turns; i++)
-                Clock.AdvanceTurn(State);
+                Clock.AdvanceTurn(State, Transcript);
         }
 
         /// <summary>Runs combat pulses only — ten ticks each.</summary>
         public void RunPulses(int pulses)
         {
             for (int i = 0; i < pulses * CombatSystem.PulseIntervalTicks; i++)
-                Clock.Advance(State);
+                Clock.Advance(State, Transcript);
         }
 
         /// <summary>
@@ -212,7 +235,7 @@ namespace BattleChess.Tests.Battle
         {
             for (int turn = 1; turn <= maxTurns; turn++)
             {
-                Clock.AdvanceTurn(State);
+                Clock.AdvanceTurn(State, Transcript);
 
                 if (condition())
                     return turn;
@@ -229,7 +252,7 @@ namespace BattleChess.Tests.Battle
         {
             for (int turn = 1; turn <= maxTurns; turn++)
             {
-                Clock.AdvanceTurn(State);
+                Clock.AdvanceTurn(State, Transcript);
 
                 foreach (UnitInstance unit in watch)
                 {
@@ -256,7 +279,12 @@ namespace BattleChess.Tests.Battle
         /// <summary>
         /// Places a unit just close enough to another to count as in contact.
         /// </summary>
+        /// <remarks>
+        /// Half of melee reach, so this stays comfortably inside contact
+        /// whatever that reach becomes rather than sitting exactly on its edge.
+        /// </remarks>
         public static Vec2 ContactPosition(UnitInstance from, Footprint other, Vec2 direction) =>
-            from.Position + direction.Normalised() * (from.Footprint.HalfDepth + other.HalfDepth + 4f);
+            from.Position + direction.Normalised()
+            * (from.Footprint.HalfDepth + other.HalfDepth + OrderSystem.ContactMetres * 0.5f);
     }
 }

@@ -276,5 +276,83 @@ namespace BattleChess.Tests.Battle
                 "Two hundred metres apart and utterly invisible to one another, because a range stands " +
                 "between them. This is the manoeuvre the whole vision rule exists to make possible.");
         }
+
+        // ---- What sight is actually worth --------------------------------------
+        //
+        // Vision that only greys out a sprite is decoration. These two are the
+        // tests that make it a rule: reach is worth nothing without eyes, and
+        // ground you cannot see over is ground you cannot shoot over.
+
+        [Fact]
+        public void ShootersCannotFireAtEnemiesTheyCannotSee()
+        {
+            Assert.Equal(0f, ShellingLosses(withScouts: false));
+
+            Assert.True(ShellingLosses(withScouts: true) > 0f,
+                "Guns reach 360 m and see 200. Left to themselves they should be firing at nothing; " +
+                "given a scout far enough forward to find the enemy, they should open up. That is the " +
+                "whole bargain of a long-ranged weapon — reach is worthless without eyes.");
+        }
+
+        /// <summary>
+        /// A battery 300 m from an enemy it cannot possibly see, with or without
+        /// a scouting party forward to find them for it.
+        /// </summary>
+        private static float ShellingLosses(bool withScouts)
+        {
+            var field = new Battlefield("plains", 11900);
+
+            UnitInstance guns = field.Add(0, "artillery", field.Centre - new Vec2(300f, 0f), Facing.East);
+            UnitInstance enemy = field.Add(1, "swordsmen", field.Centre, Facing.West);
+
+            Battlefield.Hold(guns);
+            Battlefield.Hold(enemy);
+
+            if (withScouts)
+            {
+                UnitInstance scouts = field.Add(0, "scouts", field.Centre - new Vec2(150f, 0f), Facing.East);
+                Battlefield.Hold(scouts);
+            }
+
+            field.RunTurns(4);
+
+            return Battlefield.LostPercent(enemy);
+        }
+
+        [Fact]
+        public void AHillBetweenTwoRegimentsStopsTheVolleys()
+        {
+            Assert.True(VolleyLosses(ridge: null) > 0f,
+                "A hundred and twenty metres of open ground is well inside bowshot.");
+
+            Assert.Equal(0f, VolleyLosses(ridge: "hill"));
+        }
+
+        /// <summary>
+        /// Two bodies of archers 120 m apart — comfortably inside their 145 m
+        /// range — with an optional rise standing between them.
+        /// </summary>
+        private static float VolleyLosses(string? ridge)
+        {
+            const float gap = 120f;
+
+            var field = new Battlefield("plains", 12000, RuleSet.Full, canvas =>
+            {
+                if (ridge == null) return;
+
+                int middle = canvas.ColumnAt(canvas.Columns * canvas.CellSize * 0.5f);
+                canvas.Band(middle - 1, middle + 1, ridge);
+            });
+
+            UnitInstance ours = field.Add(0, "archers", field.Centre - new Vec2(gap * 0.5f, 0f), Facing.East);
+            UnitInstance theirs = field.Add(1, "archers", field.Centre + new Vec2(gap * 0.5f, 0f), Facing.West);
+
+            Battlefield.Hold(ours);
+            Battlefield.Hold(theirs);
+
+            field.RunTurns(3);
+
+            return Battlefield.LostPercent(theirs);
+        }
     }
 }

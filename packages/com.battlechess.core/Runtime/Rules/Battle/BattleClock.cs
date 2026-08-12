@@ -77,7 +77,29 @@ namespace BattleChess.Rules
 
             // Fixed order, every tick, so the same seed produces the same battle.
             for (int i = 0; i < _systems.Count; i++)
-                _systems[i].Step(battle, Tick, sink);
+            {
+                try
+                {
+                    _systems[i].Step(battle, Tick, sink);
+                }
+                catch (Exception failure)
+                {
+                    // A rule that throws must not be able to stop the clock in
+                    // silence. One did: sampling terrain under a regiment
+                    // standing near the map edge asked about ground that was
+                    // off the map, the catalogue threw, and the exception came
+                    // out of the movement system on every tick. The battle
+                    // simply stopped advancing, and from the player's chair the
+                    // army looked stuck against the border with nothing said
+                    // anywhere about why.
+                    //
+                    // Reported once per system per tick and then stepped over.
+                    // A battle missing one system's turn is wrong; a battle
+                    // that has quietly frozen is unfixable and undiagnosable.
+                    sink.Warning("Clock",
+                        $"The {_systems[i].Name} rule failed on tick {Tick} and was skipped: {failure.Message}");
+                }
+            }
 
             Tick++;
             battle.TurnNumber = Turn;

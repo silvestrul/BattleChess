@@ -222,5 +222,26 @@ namespace BattleChess.Contracts
         /// <summary>Cost per man, for army-building budgets.</summary>
         public static readonly AttributeKey<float> CostPerMan =
             Registry.Define("costPerMan", 1f, AttributeParsers.Float);
+
+        // ---- How it is drawn --------------------------------------------------
+
+        /// <summary>Which picture stands for this unit, by name.</summary>
+        /// <remarks>
+        /// <para>
+        /// Content rather than client code, for the same reason
+        /// <see cref="UnitDef.Glyph"/> is: which shape means "spearmen" is a
+        /// property of what spearmen are, not of one particular way of drawing
+        /// a battlefield. A table buried in the Unity project would mean
+        /// adding a unit type took an edit in two places and a rebuild, when
+        /// the whole point of this file is that it takes a block of text.
+        /// </para>
+        /// <para>
+        /// Empty means no picture, which is not an error — the regiment draws
+        /// as a plain plate and plays identically. Nothing in the simulation
+        /// ever reads this.
+        /// </para>
+        /// </remarks>
+        public static readonly AttributeKey<string> Icon =
+            Registry.Define("icon", string.Empty, AttributeParsers.Text);
     }
 }

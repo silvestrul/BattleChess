@@ -79,8 +79,26 @@ namespace BattleChess.Rules
         public float Organization
         {
             get => _organization;
-            set => _organization = Math.Clamp(value, 0f, 1f);
+            set => _organization = Math.Clamp(value, MinimumOrganization, 1f);
         }
+
+        /// <summary>
+        /// How disordered a regiment can get before it stops getting worse.
+        /// </summary>
+        /// <remarks>
+        /// A body of men that has lost all formation is a mob, and a mob is
+        /// what routing represents — so there is no need for cohesion to model
+        /// it as well. Left unbounded, the two rules doubled up: regiments that
+        /// were still standing and still willing to fight had been ground down
+        /// to a state where they could barely do either, and every long battle
+        /// ended between two rabbles rather than two armies.
+        ///
+        /// The floor also puts a ceiling on how much of the game any single
+        /// mistake can decide, which matters more here than usual because
+        /// cohesion multiplies attack, defence, stopping power and breakthrough
+        /// all at once.
+        /// </remarks>
+        public const float MinimumOrganization = 0.4f;
 
         /// <summary>The order this unit is currently drawn up in.</summary>
         public FormationDef FormationOrder { get; private set; }
@@ -161,17 +179,179 @@ namespace BattleChess.Rules
         /// <summary>Steadiness actually used by the morale rule.</summary>
         public float MoraleRating => Def.Get(UnitAttributes.Morale) * Quality;
 
+        /// <summary>
+        /// The body of regiments this one manoeuvres as part of, or zero if it
+        /// is on its own.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A bond is a wing, not a formation. The regiments stay separate
+        /// rectangles that fight and break individually; what they share is a
+        /// pace and a place in the line, so an order given to any of them moves
+        /// all of them without disturbing the shape they stand in.
+        /// </para>
+        /// <para>
+        /// An integer rather than a list of members, so nothing has to be kept
+        /// consistent when a regiment is destroyed — a bond is simply whoever is
+        /// still carrying the same number.
+        /// </para>
+        /// </remarks>
+        public int Bond { get; set; }
+
         /// <summary>Where the unit stood when it last received an order.</summary>
         /// <remarks>Anchors pursuit, so an aggressive unit cannot be lured off the field.</remarks>
         public Vec2 OrderAnchor { get; private set; }
+
+        /// <summary>
+        /// The front this unit was told to hold, or held when it was ordered.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Remembered rather than read live, because a regiment turns for
+        /// reasons that are not a change of plan — coming round to thread a gap
+        /// between two woods, most obviously. Reading the current facing would
+        /// let each of those quietly become the new intent, so a unit that
+        /// squeezed through something would come out the far side permanently
+        /// facing whichever way the gap happened to run.
+        /// </para>
+        /// <para>
+        /// Set at muster to the front the regiment was deployed on, and not
+        /// merely left at its default. A bearing that has never been written is
+        /// due east, and once halted regiments began wheeling to hold the front
+        /// they were told to, every unit that had not yet received an order
+        /// turned east on the opening tick — so one whole army span about before
+        /// the battle started.
+        /// </para>
+        /// </remarks>
+        public Facing OrderFacing { get; private set; }
+
+        /// <summary>
+        /// The front this regiment is coming round onto for the last hundred
+        /// metres of a charge, or null if it is not dressing on anybody.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two bodies of men meet properly or they meet badly, and the
+        /// difference is decided in the final approach rather than at the moment
+        /// of impact. A regiment marches at its enemy by whatever line the
+        /// ground allows — often a diagonal — and then, close in, squares up:
+        /// it repositions onto the enemy's centre and comes round until the two
+        /// rectangles are face to face.
+        /// </para>
+        /// <para>
+        /// Kept here rather than derived, because movement needs to know a
+        /// regiment is dressing without re-deciding it. That decision costs a
+        /// route plan, and it is made once every few ticks; the facing it
+        /// produces is wanted on every one of them.
+        /// </para>
+        /// </remarks>
+        public Facing? DressingBearing { get; set; }
+
+        // ---- Whether a march is getting anywhere -------------------------------
+
+        /// <summary>The closest this regiment has come to its goal on this order.</summary>
+        public float NearestApproach { get; set; } = float.MaxValue;
+
+        /// <summary>Ticks since it last got meaningfully closer.</summary>
+        public int TicksWithoutProgress { get; set; }
+
+        /// <summary>How many times this order has been re-planned after stalling.</summary>
+        public int FailedReplans { get; set; }
+
+        /// <summary>Forgets what the march had achieved, as when a fresh one begins.</summary>
+        public void ForgetProgress()
+        {
+            NearestApproach = float.MaxValue;
+            TicksWithoutProgress = 0;
+        }
+
+        /// <summary>The friendly regiment this one is currently working its way round.</summary>
+        /// <remarks>
+        /// Kept so the choice of side is made once and then held. Deciding it
+        /// afresh every tick is what produced the thrashing: a regiment sitting
+        /// on the line that separates the two answers gets a different one each
+        /// time it asks.
+        /// </remarks>
+        public UnitId GoingRound { get; set; } = UnitId.None;
+
+        /// <summary>
+        /// The bearing it committed to stepping off along, to get round
+        /// <see cref="GoingRound"/>.
+        /// </summary>
+        /// <remarks>
+        /// A bearing on the world and not a side of the line of march. Storing
+        /// it as a side does not work: the perpendicular is taken from the
+        /// current heading, and the heading is itself being turned by the
+        /// deflection — so "the same side" quietly means a different direction
+        /// every tick, and the commitment holds nothing.
+        /// </remarks>
+        public Facing GoingRoundBearing { get; set; }
+
+        /// <summary>
+        /// Shorter than this and an order is not a move at all, in metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A guard against a degenerate order rather than a rule about
+        /// manoeuvre. A destination on top of the regiment gives no line of
+        /// march to face along, and asking for the bearing of a zero-length
+        /// vector answers due east — which would swing an army to face east the
+        /// first time one of its regiments was told to go where it already is.
+        /// That happens routinely in a group order, where every member is
+        /// displaced by the same amount and one of them may already be there.
+        /// </para>
+        /// <para>
+        /// There is deliberately no larger threshold than this. Three separate
+        /// versions of one tried to say how long a move must be before a
+        /// regiment turns to face it — two frontages, then half a frontage —
+        /// and each was reported as a regiment ignoring an order. The last
+        /// recording settled it: every move that failed to turn was between
+        /// nine and eighteen metres, and every one that turned was twenty-three
+        /// or more. Fine adjustments are exactly where a player is most
+        /// particular about which way a regiment points.
+        /// </para>
+        /// <para>
+        /// It also caused the second half of that report — a regiment stopping
+        /// part-way round. A short order taken mid-wheel wrote the <i>current</i>
+        /// facing as the front to hold, freezing the regiment at whatever angle
+        /// it had reached.
+        /// </para>
+        /// <para>
+        /// Holding a front across a move is still there, and is now the only
+        /// thing the drag means: a fighting withdrawal facing the enemy, a line
+        /// sidling along its own front. Both are real orders and both should be
+        /// ones somebody deliberately gives.
+        /// </para>
+        /// </remarks>
+        private const float NotReallyAMoveMetres = 2f;
+
+        /// <summary>
+        /// The front to hold for an order that did not name one.
+        /// </summary>
+        private Facing FrontFor(UnitOrder order, Vec2 anchor)
+        {
+            if (order.Kind != OrderKind.Move) return Facing;
+
+            Vec2 toDestination = order.Destination - anchor;
+
+            if (toDestination.Length < NotReallyAMoveMetres) return Facing;
+
+            return Facing.FromVector(toDestination);
+        }
 
         /// <summary>Gives the unit a new instruction, clearing any current march.</summary>
         public void GiveOrder(UnitOrder order, Vec2 anchor)
         {
             Order = order;
             OrderAnchor = anchor;
+            OrderFacing = order.Bearing ?? FrontFor(order, anchor);
             Route = null;
             HeldUpBy = UnitId.None;
+            DressingBearing = null;
+
+            ForgetProgress();
+            FailedReplans = 0;
+            GoingRound = UnitId.None;
 
             if (order.StanceOverride.HasValue)
                 Stance = order.StanceOverride.Value;
@@ -189,6 +369,7 @@ namespace BattleChess.Rules
             Owner = owner;
             Position = position;
             Facing = facing;
+            OrderFacing = facing;
             _strength = strength;
             InitialStrength = strength;
             State = UnitState.Steady;

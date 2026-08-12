@@ -30,17 +30,36 @@ namespace BattleChess.Rules
     public sealed class ContactSystem : IBattleSystem
     {
         /// <summary>Organization lost per tick while riding through an enemy formation.</summary>
-        private const float EnemyBreakthroughDisorderPerTick = 0.02f;
+        /// <remarks>
+        /// Halved. At the old figure a breakthrough cost more than a point of
+        /// cohesion per turn of contact — more than the entire scale — so
+        /// anything that spent a few seconds forcing a line came out the far
+        /// side as a rabble regardless of how it went. Charged per tick because
+        /// it is the duration of the shoving that matters, which means it needs
+        /// to be small.
+        /// </remarks>
+        private const float EnemyBreakthroughDisorderPerTick = 0.01f;
 
         /// <summary>Organization lost per tick while pushing through a friendly formation.</summary>
         /// <remarks>
+        /// <para>
         /// Charged only while somebody is actually moving. The cost is for
         /// <i>passing through</i> a formation, not for standing near one — units
         /// drawn up shoulder to shoulder in a line overlap constantly, and
         /// draining them for it reduced a stationary regiment to nothing in two
         /// turns of doing absolutely nothing.
+        /// </para>
+        /// <para>
+        /// Cut to a third after a recorded game. At the old rate a regiment
+        /// overlapping a friend for one turn lost a quarter of its cohesion,
+        /// which put threading your own line on a par with fording a river —
+        /// and cavalry that manoeuvred behind its own army for three turns
+        /// arrived at the fight with a third of its cohesion and lost a matchup
+        /// it wins comfortably. Crowding your own troops should be a real cost
+        /// and a minor one.
+        /// </para>
         /// </remarks>
-        private const float FriendlyOverlapDisorderPerTick = 0.004f;
+        private const float FriendlyOverlapDisorderPerTick = 0.0012f;
 
         public string Name => "Contact";
 
@@ -72,13 +91,35 @@ namespace BattleChess.Rules
             // loose order, or shaken, are ridden straight through.
             float breakthrough = unit.EffectiveBreakthrough;
 
+            OrientedRect shape = unit.Shape;
+
+            // A regiment closing the last few metres onto the enemy it has been
+            // ordered to fight is not marching past anybody, and nobody else's
+            // zone of control has any business stopping it.
+            //
+            // This is the dead band that kept two lines from ever meeting.
+            // Melee reaches 8 m and zones of control reach ten to twenty, so a
+            // unit with a second enemy nearby was halted a metre or two short of
+            // the fight, had its route cleared, re-planned it, and was halted
+            // again — every tick, forever. The recorded game shows spearmen
+            // stopped at 9 m from the cavalry they were attacking, by the zone
+            // of control of a different regiment 14 m away, for two hundred
+            // ticks together.
+            if (IsAboutToMakeContact(battle, unit)) return;
+
             foreach (UnitInstance enemy in battle.UnitsOnField())
             {
                 if (enemy.Owner == unit.Owner) continue;
                 if (!enemy.IsFighting) continue;
 
-                float reach = enemy.ZoneOfControl;
-                if (Vec2.DistanceSquared(unit.Position, enemy.Position) > reach * reach) continue;
+                // A zone of control is a belt of ground around the formation,
+                // not a circle around its centre. Measured from the centre it
+                // was frequently narrower than the regiment itself: swordsmen
+                // stand ninety-seven metres across and reach thirty, so two
+                // thirds of their own front lay outside the ground they were
+                // supposed to be controlling, and an enemy could march straight
+                // through the end of the line without ever entering it.
+                if (!OrientedRect.Within(shape, enemy.Shape, enemy.ZoneOfControl)) continue;
 
                 // A unit already inside the zone may still back out of it. Zone
                 // of control stops an advance into or through controlled ground;
@@ -108,7 +149,7 @@ namespace BattleChess.Rules
                     if (unit.HeldUpBy != enemy.Id)
                         log.Blocked("Contact",
                             $"{unit.Def.DisplayName} halts on contact with {enemy.Def.DisplayName} at " +
-                            $"{Vec2.Distance(unit.Position, enemy.Position):0} m — standing on Defend. " +
+                            $"{OrientedRect.GapBetween(shape, enemy.Shape):0} m — standing on Defend. " +
                             "It can still be ordered to withdraw.",
                             unit.Id);
 
@@ -117,7 +158,7 @@ namespace BattleChess.Rules
                     return;
                 }
 
-                if (breakthrough > stopping)
+                if (breakthrough > stopping && CanBeRiddenThrough(enemy))
                 {
                     // Through, but not unscathed — and the line being ridden
                     // through suffers for it too.
@@ -134,21 +175,71 @@ namespace BattleChess.Rules
                     continue;
                 }
 
-                // Say which of the three levers stopped them, so the answer to
-                // "why can't I get through" is on screen rather than inferred.
-                // Once per hold-up, not once per tick.
+                // Say which of the levers stopped them, so the answer to "why
+                // can't I get through" is on screen rather than inferred. Once
+                // per hold-up, not once per tick.
                 if (unit.HeldUpBy != enemy.Id)
                     log.Blocked("Contact",
                         $"{unit.Def.DisplayName} ({unit.FormationOrder.DisplayName}) halted by {enemy.Def.DisplayName} " +
                         $"({enemy.FormationOrder.DisplayName}, organization {enemy.Organization:0.00}) " +
-                        $"at {Vec2.Distance(unit.Position, enemy.Position):0} m — " +
-                        $"breakthrough {breakthrough:0.00} against stopping power {stopping:0.00}.",
+                        $"at {OrientedRect.GapBetween(shape, enemy.Shape):0} m — " +
+                        (CanBeRiddenThrough(enemy)
+                            ? $"breakthrough {breakthrough:0.00} against stopping power {stopping:0.00}."
+                            : "horse is not ridden through, at any weight."),
                         unit.Id);
 
                 unit.Route = null;
                 unit.HeldUpBy = enemy.Id;
                 return;
             }
+        }
+
+        /// <summary>
+        /// Whether a body of men can be forced through at all, however hard the
+        /// weight of the attempt.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Horse cannot be ridden through by anybody. Breaking through works
+        /// because a formation on foot is a wall of men who must either hold or
+        /// be shouldered aside; a body of horse is neither — it gives ground,
+        /// wheels and is in your way again, and no amount of momentum resolves
+        /// that. A recorded game had cavalry riding clean through cavalry on the
+        /// numbers alone, 1.5 of breakthrough against 1.2 of stopping power,
+        /// which is arithmetic rather than anything that could happen.
+        /// </para>
+        /// <para>
+        /// A judgement about how the troops move rather than about what they are
+        /// called, so any mounted unit added later inherits it without being
+        /// told. Foot and guns are still ridden through on the numbers, which is
+        /// where the spear wall does its work: braced spears stop at 2.0 against
+        /// a charge worth 1.5, and swordsmen at 1.0 do not.
+        /// </para>
+        /// </remarks>
+        private static bool CanBeRiddenThrough(UnitInstance enemy) =>
+            enemy.Def.Movement != MovementType.Horse;
+
+        /// <summary>
+        /// How near a unit must be to its ordered target before other people's
+        /// zones of control stop applying to it, in metres.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately short — a stride or two past melee reach, not a licence
+        /// to march across a battlefield unimpeded because something on the far
+        /// side has been clicked. Wide enough to cover the gap between where a
+        /// zone of control halts a unit and where its men can actually reach.
+        /// </remarks>
+        private const float ClosingReachMetres = OrderSystem.ContactMetres * 2f;
+
+        private static bool IsAboutToMakeContact(BattleState battle, UnitInstance unit)
+        {
+            if (unit.Order.Kind != OrderKind.Attack || !unit.Order.Target.IsValid) return false;
+
+            UnitInstance target = battle.Get(unit.Order.Target);
+
+            return target.IsFighting
+                && target.Owner != unit.Owner
+                && OrientedRect.Within(unit.Shape, target.Shape, ClosingReachMetres);
         }
 
         /// <summary>
@@ -213,7 +304,31 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// Drains organization from units standing on top of one another.
+        /// How fast two friendly regiments standing in each other shoulder
+        /// apart, in metres per second each.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Movement refuses to step a regiment into one of its own, which stops
+        /// overlaps happening but cannot undo the ones that already exist —
+        /// units deployed on top of each other, a formation widened into its
+        /// neighbour by reshaping, two regiments arriving on the same ground in
+        /// the same tick. Without a way out those stay welded together for the
+        /// whole battle, and the movement rule that forbids the problem becomes
+        /// the reason it is permanent.
+        /// </para>
+        /// <para>
+        /// Deliberately a shuffle rather than a shove. Men edge sideways to make
+        /// room; they are not repelled like magnets. At this rate a badly
+        /// overlapping pair takes the better part of a turn to sort itself out,
+        /// which is roughly how long it should look like it takes.
+        /// </para>
+        /// </remarks>
+        private const float ShufflingApartSpeed = 1.5f;
+
+        /// <summary>
+        /// Drains organization from units standing on top of one another, and
+        /// eases them apart.
         /// </summary>
         /// <remarks>
         /// Uses the real footprints rather than a radius, because this is the
@@ -223,8 +338,6 @@ namespace BattleChess.Rules
         /// </remarks>
         private static void ApplyOverlapDisorder(BattleState battle, UnitInstance unit, IBattleLog log)
         {
-            OrientedRect shape = unit.Shape;
-
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 // Each pair once, in id order.
@@ -232,13 +345,55 @@ namespace BattleChess.Rules
                 if (!other.IsFighting) continue;
                 if (other.Owner != unit.Owner) continue;
 
-                if (!IsPushingThrough(unit, other)) continue;
+                // Corners clipping is not two regiments standing in the same
+                // field, and an army in line clips constantly. Below the
+                // grazing tolerance they are neighbours and are left alone —
+                // which is what lets a line be drawn up flush rather than with
+                // daylight between every pair.
+                if (OrientedRect.OverlapFraction(unit.Shape, other.Shape) <= OrderSystem.GrazingTolerance)
+                    continue;
 
-                if (!OrientedRect.Overlaps(shape, other.Shape)) continue;
+                // Read fresh each time round: the pair before this one may have
+                // just moved this unit.
+                if (!OrientedRect.TryGetSeparation(unit.Shape, other.Shape, out Vec2 apart)) continue;
 
-                unit.Organization -= FriendlyOverlapDisorderPerTick;
-                other.Organization -= FriendlyOverlapDisorderPerTick;
+                // Crowding costs order only when somebody is actually forcing a
+                // way through. Regiments drawn up shoulder to shoulder overlap
+                // constantly and should not be worn down for standing still.
+                if (IsPushingThrough(unit, other))
+                {
+                    unit.Organization -= FriendlyOverlapDisorderPerTick;
+                    other.Organization -= FriendlyOverlapDisorderPerTick;
+                }
+
+                // Men running are not making room for anybody, and holding a
+                // rout off its own reserves would dam it against them.
+                if (unit.State == UnitState.Routing || other.State == UnitState.Routing) continue;
+
+                float step = ShufflingApartSpeed * BattleClock.SecondsPerTick;
+
+                // Half the correction each, along the shortest way out. Moving
+                // one alone would let a standing regiment be walked across the
+                // field by anything that leaned on it.
+                Vec2 push = apart.Normalised() * step;
+
+                unit.Position = KeepInsideTheField(battle, unit, unit.Position + push);
+                other.Position = KeepInsideTheField(battle, other, other.Position - push);
             }
         }
+
+        /// <summary>
+        /// Holds a shuffle inside the map and off ground the unit cannot stand
+        /// on.
+        /// </summary>
+        /// <remarks>
+        /// Making room for a neighbour is not a reason to back into a river, and
+        /// a regiment against the edge of the world has nowhere to give. Both
+        /// leave it where it was, still overlapping — which is the right answer:
+        /// pinned against something with a friend on top of you is a real
+        /// position to be in, and one the player can see and fix.
+        /// </remarks>
+        private static Vec2 KeepInsideTheField(BattleState battle, UnitInstance unit, Vec2 to) =>
+            battle.FormationFits(unit, to, unit.Facing) ? to : unit.Position;
     }
 }

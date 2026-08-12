@@ -79,7 +79,22 @@ namespace BattleChess.Rules
         private const float CasualtyShockPerFraction = 2.0f;
 
         /// <summary>Shock from being taken in the flank, scaling to the rear.</summary>
-        private const float MaxFlankShock = 0.03f;
+        /// <remarks>
+        /// This is what a flank attack is <i>for</i>, now that frontage is
+        /// measured honestly. A regiment struck square in the side presents its
+        /// depth — five metres against a hundred — so only a handful of men on
+        /// either side can reach each other and almost nobody dies. What breaks
+        /// a formation taken in the flank was never the casualties; it is that
+        /// the men on that end are being killed by something they are not
+        /// facing and cannot answer, and the ones who can see it are the ones
+        /// who run first.
+        ///
+        /// Raised fourfold when the geometry stopped pretending a perpendicular
+        /// contact was a full-width battle. At the old figure a lone flanking
+        /// regiment did nothing at all: no casualties, because there was no
+        /// shared front, and no fright either.
+        /// </remarks>
+        private const float MaxFlankShock = 0.12f;
 
         /// <summary>One-off shock from a charge landing.</summary>
         private const float ChargeShock = 0.05f;
@@ -102,7 +117,29 @@ namespace BattleChess.Rules
         private const float LosingExchangeShock = 0.01f;
 
         /// <summary>Shock per enemy beyond the first in contact.</summary>
-        private const float OutnumberedShock = 0.01f;
+        /// <remarks>
+        /// Tripled, because it is carrying the whole point of concentrating two
+        /// regiments on one. Sharing a frontage means each attacker deals and
+        /// takes about half what it would alone, so the raw exchange comes out
+        /// very nearly even and sending the second regiment bought nothing.
+        /// What it actually buys is the defender's nerve: men fighting two
+        /// bodies at once are losing whether or not the casualty figures say so,
+        /// and morale is where that has to show up.
+        /// </remarks>
+        private const float OutnumberedShock = 0.03f;
+
+        /// <summary>
+        /// How much of its own fright a regiment is spared for each friendly
+        /// regiment fighting the same enemy alongside it.
+        /// </summary>
+        /// <remarks>
+        /// The other half of the same idea. Men with a friendly regiment at
+        /// their shoulder, both set on the same enemy, hold far better than the
+        /// same men alone — so two attackers should not merely hurt the defender
+        /// more, they should each be steadier for having company. At a half, a
+        /// second regiment cuts what the first feels by a third.
+        /// </remarks>
+        private const float ShoulderToShoulderRelief = 0.5f;
 
         /// <summary>
         /// Organization lost per pulse for each enemy beyond the first.
@@ -121,8 +158,35 @@ namespace BattleChess.Rules
         /// </remarks>
         private const float SurroundedDisorderPerPulse = 0.06f;
 
-        /// <summary>Units already in contact, so a charge is only spent once.</summary>
-        private readonly HashSet<long> _engaged = new HashSet<long>();
+        /// <summary>How far a regiment must get clear before it can charge the same enemy again, in metres.</summary>
+        /// <remarks>
+        /// A charge is a run-up, not a state of mind. Cavalry covers this in
+        /// about half a turn at the gallop, which is roughly what it takes to
+        /// come round, re-dress the ranks and build to speed again.
+        /// </remarks>
+        private const float ChargeReformMetres = 150f;
+
+        /// <summary>And how long it must spend out of contact before it counts as re-formed.</summary>
+        private const int ChargeReformTicks = 30;
+
+        /// <summary>
+        /// Pairs already in contact and the last tick they touched, so a charge
+        /// is spent once and re-earned rather than repeated.
+        /// </summary>
+        /// <remarks>
+        /// The tick matters as much as the pair. Forgetting a contact the
+        /// moment it broke meant a regiment that rode clean through an enemy
+        /// bought a fresh charge on the way out: cavalry overshot, wheeled a
+        /// hundred and seventy degrees, came back and landed a full charge
+        /// bonus again — four exchanges, two of them charges, and a ten-to-one
+        /// result that had nothing to do with the attacker being stronger. It
+        /// simply could not be stopped, and anything that cannot be stopped is
+        /// permanently charging.
+        /// </remarks>
+        private readonly Dictionary<long, int> _engaged = new Dictionary<long, int>();
+
+        /// <summary>Scratch list for pruning, so the dictionary is never modified while read.</summary>
+        private readonly List<long> _reformed = new List<long>();
 
         /// <summary>
         /// Pairs that have touched at any point since the last pulse.
@@ -166,7 +230,8 @@ namespace BattleChess.Rules
 
                 if (!unit.IsFighting || !other.IsFighting) continue;
 
-                bool fresh = _engaged.Add(pair);
+                bool fresh = !_engaged.ContainsKey(pair);
+                _engaged[pair] = tick;
 
                 unit.EnemiesInContact++;
                 other.EnemiesInContact++;
@@ -176,8 +241,7 @@ namespace BattleChess.Rules
 
             _touched.Clear();
 
-            // Forget contacts that have broken, so re-engaging charges again.
-            _engaged.RemoveWhere(pair => !StillTouching(battle, pair));
+            ForgetReformedPairs(battle, tick);
 
             // Once per unit per pulse, not once per exchange. Charging it per
             // exchange made the cost grow with the square of the attackers and
@@ -300,6 +364,15 @@ namespace BattleChess.Rules
             if (unit.EnemiesInContact > 1)
                 shock += OutnumberedShock * (unit.EnemiesInContact - 1);
 
+            // Everybody else in on this enemy is somebody standing with us. The
+            // count is taken from the enemy's side of the fight, which is
+            // exactly "how many of us are on them", and it is already final by
+            // the time any exchange is resolved.
+            int alongside = enemy.EnemiesInContact - 1;
+
+            if (alongside > 0)
+                shock /= 1f + ShoulderToShoulderRelief * alongside;
+
             // Reach keeps the horror at arm's length. Men killing at the end of
             // a pike are doing something less appalling than men wrestling, and
             // the ranks behind the points see less of it still.
@@ -353,21 +426,7 @@ namespace BattleChess.Rules
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
-            // Deliberately the narrower of the two fronts, not their geometric
-            // overlap. Measuring the true overlap is more honest about where
-            // men are standing and it destroys the flanking rule: a regiment
-            // taken in the side presents its depth — five metres against a
-            // hundred — so the shared front collapses and *neither* side can
-            // fight. Flank attacks did nothing at all, and a second attacker
-            // coming round the side made a fight easier for the defender.
-            //
-            // The asymmetry a flank attack needs — many engaging few who cannot
-            // answer — lives in FlankingMultiplier instead, which is an
-            // abstraction rather than a geometry, and works.
-            float share = unit.Footprint.Width / Math.Max(1, unit.EnemiesInContact);
-            float enemyShare = enemy.Footprint.Width / Math.Max(1, enemy.EnemiesInContact);
-
-            float contactWidth = MathF.Min(share, enemyShare);
+            float contactWidth = EngagedWidth(unit, enemy) / Math.Max(1, unit.EnemiesInContact);
             Formation formation = unit.Formation;
 
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
@@ -379,6 +438,78 @@ namespace BattleChess.Rules
             int canSupport = Math.Min(behind, frontRank * SupportingRanks);
 
             return frontRank + (int)MathF.Round(canSupport * SupportingRankContribution);
+        }
+
+        /// <summary>
+        /// How far off a unit's own front a threat is coming from, 0 for
+        /// straight ahead and 1 for straight behind.
+        /// </summary>
+        private static float OffFront(UnitInstance unit, UnitInstance enemy) =>
+            Facing.AbsoluteDelta(unit.Facing, Facing.Towards(unit.Position, enemy.Position)) / MathF.PI;
+
+        /// <summary>
+        /// Beyond this far off its front, a regiment has no formed line facing
+        /// the threat and can be enveloped.
+        /// </summary>
+        private const float FrontalArc = 0.25f;
+
+        /// <summary>
+        /// How much of its width a regiment loses the use of when it is taken
+        /// from directly behind.
+        /// </summary>
+        /// <remarks>
+        /// Men attacked from a quarter they are not facing cannot bring their
+        /// numbers to bear: the ranks are the wrong way round, the front rank
+        /// is at the back, and only those who can physically turn are fighting
+        /// at all. This is the "deals very little" half of being caught out of
+        /// position.
+        /// </remarks>
+        private const float OutOfArcPenalty = 0.75f;
+
+        /// <summary>
+        /// How wide a front this unit can actually bring against an enemy, in
+        /// metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two regiments that are both facing each other fight across the
+        /// ground they genuinely share, so meeting square on is a full-width
+        /// battle and clipping each other by a corner is a small one. That much
+        /// is pure geometry, and it is what stops a position a player worked
+        /// for from counting for nothing.
+        /// </para>
+        /// <para>
+        /// An enemy with no formed line toward you is a different matter. Their
+        /// flank is a five-metre face, but there is nothing to stop your men
+        /// folding round it and piling in along their whole length, so you
+        /// bring your own frontage to bear rather than theirs. Measuring the
+        /// bare overlap in that case made a flank attack do <i>nothing</i>:
+        /// no casualties, because the shared front was five metres wide, which
+        /// is not what happens to a regiment taken in the side.
+        /// </para>
+        /// <para>
+        /// The asymmetry is the whole point. The attacker fights with its full
+        /// width; the flanked regiment answers with the narrow face it actually
+        /// presents, reduced again for being caught facing the wrong way. Many
+        /// engaging few who cannot reply — which is what being outmanoeuvred
+        /// should feel like.
+        /// </para>
+        /// </remarks>
+        private static float EngagedWidth(UnitInstance unit, UnitInstance enemy)
+        {
+            float overlap = SharedFrontage(unit, enemy);
+
+            // Their front is turned away from us, so there is nothing holding
+            // our line off: we envelop as far as our own width allows, capped
+            // by how much of them there is to get at.
+            float reach = OffFront(enemy, unit) > FrontalArc
+                ? MathF.Min(unit.Footprint.Width, MathF.Max(enemy.Footprint.Width, enemy.Footprint.Depth))
+                : overlap;
+
+            // And we are under the same rule in reverse.
+            float formed = 1f - OutOfArcPenalty * OffFront(unit, enemy);
+
+            return MathF.Max(0f, reach * formed);
         }
 
         /// <summary>
@@ -455,6 +586,20 @@ namespace BattleChess.Rules
                         * attackerFighting
                         * (attack / defence)
                         * (1f - armour)
+                        // A man who costs three footmen is three times the
+                        // trouble to put down — he is better armoured, better
+                        // trained, and quite possibly on a horse.
+                        //
+                        // Without this, every regiment covering the same ground
+                        // meant expensive troops were strictly worse: a body of
+                        // three hundred and fifty riders and one of eight
+                        // hundred swordsmen took the same casualties in men, so
+                        // the riders lost twice the fraction and broke first.
+                        // Cavalry lost to a square it is supposed to be unable
+                        // to break. Costing casualties in what the men are
+                        // worth rather than in bodies makes a rectangle a
+                        // rectangle whatever is standing in it.
+                        / MathF.Max(0.1f, defender.Def.Get(UnitAttributes.CostPerMan))
                         * battle.Rng.NextVariance(charge ? ChargeVariance : CasualtyVariance);
 
             // A pulse cannot kill more men than are actually standing in the
@@ -483,15 +628,46 @@ namespace BattleChess.Rules
 
         private static long PairKey(UnitId a, UnitId b) => ((long)a.Value << 32) | (uint)b.Value;
 
-        private static bool StillTouching(BattleState battle, long pair)
+        /// <summary>
+        /// Releases pairs that have genuinely broken off and re-formed, so
+        /// their next meeting counts as a fresh charge.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Both conditions are required, and requiring both is the whole point.
+        /// Distance alone lets a fast regiment buy a charge by bouncing out and
+        /// straight back in; time alone lets two lines that have been grinding
+        /// at each other for half a turn suddenly charge without either of them
+        /// going anywhere.
+        /// </para>
+        /// <para>
+        /// The dictionary is read in hash order here, which is normally
+        /// forbidden in the rules. It is safe in this one place because the
+        /// outcome does not depend on the order: every pair is tested against
+        /// the same two conditions and the same set is removed whichever
+        /// sequence they are visited in. Nothing ordered is derived from the
+        /// walk.
+        /// </para>
+        /// </remarks>
+        private void ForgetReformedPairs(BattleState battle, int tick)
         {
-            var a = new UnitId((int)(pair >> 32));
-            var b = new UnitId((int)(pair & 0xFFFFFFFF));
+            _reformed.Clear();
 
-            UnitInstance first = battle.Get(a);
-            UnitInstance second = battle.Get(b);
+            foreach (KeyValuePair<long, int> entry in _engaged)
+            {
+                if (tick - entry.Value < ChargeReformTicks) continue;
 
-            return first.IsFighting && second.IsFighting && OrderSystem.InContactWith(first, second);
+                var first = battle.Get(new UnitId((int)(entry.Key >> 32)));
+                var second = battle.Get(new UnitId((int)(entry.Key & 0xFFFFFFFF)));
+
+                // A regiment that has left the field has plainly disengaged.
+                if (!first.IsFighting || !second.IsFighting ||
+                    OrientedRect.GapBetween(first.Shape, second.Shape) > ChargeReformMetres)
+                    _reformed.Add(entry.Key);
+            }
+
+            for (int i = 0; i < _reformed.Count; i++)
+                _engaged.Remove(_reformed[i]);
         }
     }
 }

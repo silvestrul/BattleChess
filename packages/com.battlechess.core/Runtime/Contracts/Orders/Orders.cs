@@ -73,28 +73,64 @@ namespace BattleChess.Contracts
         public readonly bool WheelFirst;
 
         /// <summary>
+        /// Which way to be facing on arrival, or null to keep the front where
+        /// it already points.
+        /// </summary>
+        /// <remarks>
+        /// The difference between moving a body of men and moving a token.
+        /// Without it, facing was purely a by-product of the march bearing and
+        /// a regiment always turned to point wherever it was going — so
+        /// sidestepping a line fifty metres pivoted its whole frontage ninety
+        /// degrees, and there was no way to ask for anything else. Keeping the
+        /// front where the player put it is the default because that is what
+        /// almost every order means; the cost of moving off your bearing is
+        /// already charged as speed.
+        /// </remarks>
+        public readonly Facing? Bearing;
+
+        /// <summary>
         /// Stance for this order only, leaving the unit's standing stance alone.
         /// Null uses whatever the unit already holds.
         /// </summary>
         public readonly Stance? StanceOverride;
 
-        private UnitOrder(OrderKind kind, Vec2 destination, UnitId target, bool wheelFirst, Stance? stanceOverride)
+        private UnitOrder(
+            OrderKind kind, Vec2 destination, UnitId target, bool wheelFirst, Stance? stanceOverride, Facing? bearing)
         {
             Kind = kind;
             Destination = destination;
             Target = target;
             WheelFirst = wheelFirst;
             StanceOverride = stanceOverride;
+            Bearing = bearing;
         }
 
         public static UnitOrder Stand(Stance? stance = null) =>
-            new UnitOrder(OrderKind.Stand, Vec2.Zero, UnitId.None, false, stance);
+            new UnitOrder(OrderKind.Stand, Vec2.Zero, UnitId.None, false, stance, null);
 
-        public static UnitOrder MoveTo(Vec2 destination, bool wheelFirst = false, Stance? stance = null) =>
-            new UnitOrder(OrderKind.Move, destination, UnitId.None, wheelFirst, stance);
+        /// <summary>
+        /// Change front where you stand, without going anywhere.
+        /// </summary>
+        /// <remarks>
+        /// The order that was missing. Facing could only ever be set as a
+        /// by-product of going somewhere, so a regiment caught in the flank had
+        /// no way to come about at all — it had to be marched off and back, and
+        /// nothing else automatically turned it. Wheeling on the spot is one of
+        /// the oldest things a body of men can be told to do.
+        /// </remarks>
+        public static UnitOrder Face(Facing bearing, Stance? stance = null) =>
+            new UnitOrder(OrderKind.Stand, Vec2.Zero, UnitId.None, false, stance, bearing);
+
+        /// <summary>
+        /// Marches to a place. Pass <paramref name="bearing"/> to say which way
+        /// to face on arrival; leave it out to keep the current front.
+        /// </summary>
+        public static UnitOrder MoveTo(
+            Vec2 destination, bool wheelFirst = false, Stance? stance = null, Facing? bearing = null) =>
+            new UnitOrder(OrderKind.Move, destination, UnitId.None, wheelFirst, stance, bearing);
 
         public static UnitOrder Attack(UnitId target, bool wheelFirst = false, Stance? stance = null) =>
-            new UnitOrder(OrderKind.Attack, Vec2.Zero, target, wheelFirst, stance);
+            new UnitOrder(OrderKind.Attack, Vec2.Zero, target, wheelFirst, stance, null);
 
         public override string ToString() => Kind switch
         {

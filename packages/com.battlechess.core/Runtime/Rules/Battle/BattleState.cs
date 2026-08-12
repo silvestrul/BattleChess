@@ -212,6 +212,198 @@ namespace BattleChess.Rules
         /// <summary>Terrain under a world position.</summary>
         public TerrainDef TerrainAt(Vec2 position) => TerrainCatalogue.Get(Terrain.At(position));
 
+        // ---- Bonds ------------------------------------------------------------
+
+        /// <summary>
+        /// The pace a whole wing keeps: the speed of whichever of its regiments
+        /// is currently moving slowest, terrain and all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Over the ground rather than on paper. A wing whose left is fording a
+        /// river and whose right is on a road is not a wing for very long if
+        /// each marches at what its own footing allows — it arrives as two
+        /// halves at two different times, which is the thing binding them was
+        /// meant to prevent. So the whole body waits for the ford.
+        /// </para>
+        /// <para>
+        /// A regiment that cannot move at all is skipped rather than allowed to
+        /// freeze everybody. Being stranded on ground you cannot cross is a
+        /// separate problem with its own message, and letting it stop the wing
+        /// would make it unrecoverable without unbinding.
+        /// </para>
+        /// </remarks>
+        public float PaceOfBond(UnitInstance unit)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+            if (unit.Bond == 0) return SpeedOf(unit);
+
+            float slowest = float.MaxValue;
+
+            for (int i = 0; i < _units.Count; i++)
+            {
+                if (_units[i].Bond != unit.Bond) continue;
+                if (!_units[i].IsFighting) continue;
+
+                float speed = SpeedOf(_units[i]);
+                if (speed <= 0f) continue;
+
+                if (speed < slowest) slowest = speed;
+            }
+
+            return slowest < float.MaxValue ? slowest : SpeedOf(unit);
+        }
+
+        /// <summary>
+        /// How far apart the sample points are when reading terrain under a
+        /// whole formation, in metres.
+        /// </summary>
+        /// <remarks>
+        /// Half a map cell, so a band of bad ground cannot slip between two
+        /// samples. The caps that follow matter more than the spacing: they
+        /// bound the work per unit per tick regardless of how wide a regiment
+        /// grows.
+        /// </remarks>
+        private const float TerrainSampleSpacing = 12.5f;
+
+        private const int MaxSamplesAcross = 16;
+        private const int MaxSamplesDeep = 8;
+
+        private const int MaxFitSamplesAcross = 9;
+        private const int MaxFitSamplesDeep = 3;
+
+        /// <summary>
+        /// The worst disorder inflicted by any ground the formation is standing
+        /// on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The worst rather than the average, and read across the whole
+        /// footprint rather than at the centre. A regiment a hundred metres
+        /// across with one flank in a river is a regiment in trouble, and
+        /// sampling the middle said it was on dry grass — the same
+        /// point-for-a-rectangle mistake that let formations march through one
+        /// another.
+        /// </para>
+        /// <para>
+        /// Taking the worst is what makes bad ground something to steer around
+        /// rather than something to clip the corner of. Averaging would let a
+        /// commander put a quarter of his line in a swamp and pay a quarter of
+        /// the price, which is precisely the move the rule exists to
+        /// discourage.
+        /// </para>
+        /// </remarks>
+        public float WorstDisorderUnder(UnitInstance unit)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            OrientedRect shape = unit.Shape;
+            Footprint footprint = shape.Footprint;
+
+            int across = SampleCount(footprint.Width, MaxSamplesAcross);
+            int deep = SampleCount(footprint.Depth, MaxSamplesDeep);
+
+            Vec2 right = shape.Right;
+            Vec2 forward = shape.Forward;
+
+            float worst = 0f;
+
+            // Fixed iteration order, as everywhere else in the rules — this
+            // feeds organization, and organization decides fights.
+            for (int d = 0; d < deep; d++)
+            {
+                float alongDepth = Offset(d, deep, footprint.HalfDepth);
+
+                for (int a = 0; a < across; a++)
+                {
+                    Vec2 point = shape.Centre
+                               + right * Offset(a, across, footprint.HalfWidth)
+                               + forward * alongDepth;
+
+                    // A regiment standing near the edge has part of its
+                    // frontage hanging over the end of the world, and there is
+                    // no ground out there to disorder anybody. Sampling it
+                    // anyway asked the catalogue about a terrain id that does
+                    // not exist, which threw — inside the movement system, on
+                    // every tick, so the whole battle stopped advancing and the
+                    // army appeared to be stuck against the border.
+                    if (!Terrain.Bounds.Contains(point)) continue;
+
+                    float disorder = TerrainAt(point).Get(TerrainAttributes.Disorder);
+
+                    if (disorder > worst) worst = disorder;
+                }
+            }
+
+            return worst;
+        }
+
+        /// <summary>
+        /// Whether every part of a formation would be standing on ground it can
+        /// cross.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Movement has always asked this of a single point at the regiment's
+        /// centre, which for a body a hundred metres wide is barely a question
+        /// at all — a line could sit with half its frontage inside a mountain
+        /// and the rules saw a centre on open grass. Bodies of men occupy
+        /// ground, and ground they cannot cross is ground they cannot be on.
+        /// </para>
+        /// <para>
+        /// Sampled on the same grid as the disorder reading, and deliberately
+        /// coarse. The question is whether a formation is broadly on passable
+        /// country, not whether one man's boot is on a rock.
+        /// </para>
+        /// </remarks>
+        public bool FormationFits(UnitInstance unit, Vec2 centre, Facing facing)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            Footprint footprint = unit.Footprint;
+            var shape = new OrientedRect(centre, facing, footprint);
+
+            // Coarser than the disorder reading on purpose. This one is asked
+            // several times a tick, including once per candidate bearing while
+            // a regiment is looking for a way through, so it has to be cheap.
+            int across = SampleCount(footprint.Width, MaxFitSamplesAcross);
+            int deep = SampleCount(footprint.Depth, MaxFitSamplesDeep);
+
+            Vec2 right = shape.Right;
+            Vec2 forward = shape.Forward;
+
+            for (int d = 0; d < deep; d++)
+            {
+                float alongDepth = Offset(d, deep, footprint.HalfDepth);
+
+                for (int a = 0; a < across; a++)
+                {
+                    Vec2 point = shape.Centre
+                               + right * Offset(a, across, footprint.HalfWidth)
+                               + forward * alongDepth;
+
+                    // Off the map counts as ground nobody can stand on, which
+                    // is also what keeps a formation from overhanging the edge.
+                    if (!Terrain.Bounds.Contains(point)) return false;
+
+                    if (Movement.SpeedMultiplier(Terrain.At(point), unit.Def.Movement) <= 0f)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static int SampleCount(float extent, int cap) =>
+            Math.Clamp((int)MathF.Ceiling(extent / TerrainSampleSpacing) + 1, 2, cap);
+
+        /// <summary>
+        /// Spreads <paramref name="count"/> samples evenly from one edge to the
+        /// other, both edges included.
+        /// </summary>
+        private static float Offset(int index, int count, float halfExtent) =>
+            count <= 1 ? 0f : -halfExtent + 2f * halfExtent * index / (count - 1);
+
         /// <summary>
         /// How fast a unit moves where it currently stands, in metres per
         /// second, after terrain. Zero means it is stuck.

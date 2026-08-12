@@ -67,15 +67,42 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void AFlankSitsBetweenTheFrontAndTheRear()
+        public void AFlankedRegimentCanBarelyFightBack()
         {
-            float front = LossesFacing(180f);
-            float flank = LossesFacing(90f);
-            float rear = LossesFacing(0f);
+            ClashResult front = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
+                                            DefenderFacingDegrees = 180f }.Run();
 
-            Assert.True(front < flank && flank < rear,
-                $"Damage should rise smoothly round the angle, with no cliff: " +
-                $"front {front:0.0}%, flank {flank:0.0}%, rear {rear:0.0}%.");
+            ClashResult flank = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
+                                            DefenderFacingDegrees = 90f }.Run();
+
+            Assert.True(front.AttackerLost > 0.5f,
+                "A frontal meeting has to cost the attacker too, or there is nothing to weigh.");
+
+            // The whole of what being caught out of position means. The men on
+            // that flank are fighting something they are not facing: the ranks
+            // are the wrong way round and only those who can physically turn
+            // are fighting at all.
+            Assert.True(flank.AttackerLost <= 0.25f * front.AttackerLost,
+                $"Taking a regiment in the side should be nearly free: the attacker lost " +
+                $"{flank.AttackerLost:0.0}% flanking against {front.AttackerLost:0.0}% head-on.");
+        }
+
+        [Fact]
+        public void AFlankIsWonBeforeItIsFought()
+        {
+            ClashResult front = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
+                                            DefenderFacingDegrees = 180f }.Run();
+
+            ClashResult flank = new Clash { Attacker = "swordsmen", Defender = "swordsmen",
+                                            DefenderFacingDegrees = 90f }.Run();
+
+            // Not chiefly a matter of casualties. A regiment struck in the side
+            // is losing men it cannot avenge, and the ones who can see that are
+            // the ones who run first — so the fright arrives long before the
+            // butcher's bill does.
+            Assert.True(flank.DefenderMorale < front.DefenderMorale - 0.15f,
+                $"Morale after a frontal fight {front.DefenderMorale:0.00}, after a flank " +
+                $"{flank.DefenderMorale:0.00}.");
         }
 
         [Fact]
@@ -233,22 +260,32 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void TwoRegimentsOnOneIsWorseThanTheNumbersSuggest()
         {
-            (float alone, _) = SetUpon(attackers: 1);
-            (float surrounded, _) = SetUpon(attackers: 2);
+            (float alone, _, float aloneMorale) = SetUpon(attackers: 1);
+            (float surrounded, _, float surroundedMorale) = SetUpon(attackers: 2);
 
-            Assert.True(surrounded >= 1.5f * alone,
-                $"Being taken by two regiments at once should be far worse than by one: " +
-                $"one enemy cost {alone:0.0}%, two cost {surrounded:0.0}%.");
+            // Measured on both counts, because concentration now pays in two
+            // different currencies. The second regiment comes in on the flank,
+            // where the shared front is a few metres and almost nobody dies —
+            // what it does is split the defender's frontage, so the men still
+            // facing the front have half as many companions, and terrify the
+            // ones who can see it.
+            Assert.True(surrounded > alone,
+                $"Two regiments must cost more than one: one enemy cost {alone:0.0}%, " +
+                $"two cost {surrounded:0.0}%.");
+
+            Assert.True(1f - surroundedMorale >= 1.5f * (1f - aloneMorale),
+                $"And the bite of being taken from two sides is in the fright, not the butcher's bill: " +
+                $"morale {aloneMorale:0.00} against one, {surroundedMorale:0.00} against two.");
         }
 
         [Fact]
         public void BeingSurroundedGetsWorseTheLongerItLasts()
         {
-            (float earlyAlone, _) = SetUpon(attackers: 1, pulses: 4);
-            (float earlySurrounded, _) = SetUpon(attackers: 2, pulses: 4);
+            (float earlyAlone, _, _) = SetUpon(attackers: 1, pulses: 4);
+            (float earlySurrounded, _, _) = SetUpon(attackers: 2, pulses: 4);
 
-            (float lateAlone, _) = SetUpon(attackers: 1, pulses: 12);
-            (float lateSurrounded, _) = SetUpon(attackers: 2, pulses: 12);
+            (float lateAlone, _, _) = SetUpon(attackers: 1, pulses: 12);
+            (float lateSurrounded, _, _) = SetUpon(attackers: 2, pulses: 12);
 
             float early = earlySurrounded / earlyAlone;
             float late = lateSurrounded / lateAlone;
@@ -262,7 +299,7 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void ConcentratingOnOneRegimentBeatsIt()
         {
-            (float defenderLost, float attackerLost) = SetUpon(attackers: 3);
+            (float defenderLost, float attackerLost, _) = SetUpon(attackers: 3);
 
             Assert.True(defenderLost > attackerLost,
                 $"Three regiments falling on one must come out ahead. A defender has one frontage and has " +
@@ -274,8 +311,8 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void ADefenderCannotFightEveryoneAtFullStrength()
         {
-            (_, float againstOne) = SetUpon(attackers: 1);
-            (_, float againstThree) = SetUpon(attackers: 3);
+            (_, float againstOne, _) = SetUpon(attackers: 1);
+            (_, float againstThree, _) = SetUpon(attackers: 3);
 
             Assert.True(againstThree < againstOne,
                 $"Splitting its frontage three ways must cost the defender its punch against any one of " +
@@ -292,7 +329,7 @@ namespace BattleChess.Tests.Battle
         /// frontage still takes heavy losses, while quietly dealing several
         /// times what it should.
         /// </remarks>
-        private static (float DefenderLost, float AttackerLost) SetUpon(int attackers, int pulses = 8)
+        private static (float DefenderLost, float AttackerLost, float DefenderMorale) SetUpon(int attackers, int pulses = 8)
         {
             var field = new Battlefield("plains", 7000, RuleSet.MeleeOnly);
 
@@ -322,7 +359,7 @@ namespace BattleChess.Tests.Battle
             float attackerLost = 0f;
             foreach (UnitInstance unit in attacking) attackerLost += Battlefield.LostPercent(unit);
 
-            return (Battlefield.LostPercent(target), attackerLost / attackers);
+            return (Battlefield.LostPercent(target), attackerLost / attackers, target.Morale);
         }
 
         // ---- Sending more troops must not make an attack weaker --------------

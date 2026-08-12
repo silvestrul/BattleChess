@@ -43,7 +43,11 @@ namespace BattleChess.Tests.Battle
 
             Assert.Equal(0, enemy.Casualties);
 
-            Assert.True(Vec2.Distance(mine.Position, enemy.Position) <= enemy.ZoneOfControl * 1.5f,
+            // Between the formations, not between their centres. A zone of
+            // control is a belt around the shape, and two eighty-metre lines
+            // halted a few metres apart still have their centres most of a
+            // frontage away from each other.
+            Assert.True(OrientedRect.GapBetween(mine.Shape, enemy.Shape) <= enemy.ZoneOfControl * 1.5f,
                 "A regiment on Defend should halt on contact rather than press on — that is the whole " +
                 "difference between telling it to hold and telling it to advance.");
         }

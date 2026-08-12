@@ -76,10 +76,481 @@ namespace BattleChess.Rules
                 // place to be cut down where they broke, which is not a rout,
                 // it is an execution.
                 if (!unit.IsFighting && unit.State != UnitState.Routing) continue;
-                if (unit.Route == null || unit.Route.IsComplete) continue;
+
+                // A halted regiment holds the front it was left on. It does not
+                // quietly come about to face whoever turns up, because being
+                // caught pointing the wrong way is a mistake the player made and
+                // ought to keep — the whole value of getting round an enemy is
+                // that they are still facing the way you left them.
+                //
+                // What replaced it is the dressing rule below: an attack ordered
+                // deliberately squares up during its final approach, so a charge
+                // arrives properly aligned without anything turning on its own
+                // after the fact.
+                if (unit.Route == null || unit.Route.IsComplete)
+                {
+                    WheelOnTheSpot(unit);
+                    continue;
+                }
 
                 StepUnit(battle, unit, tick, log);
             }
+        }
+
+        /// <summary>
+        /// Brings a halted regiment round to the front it has been told to hold.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Not the automatic turn that used to be here. This one only ever
+        /// chases the front the player asked for — a regiment given no new front
+        /// stands exactly where it was left, and one taken in the flank stays
+        /// flanked until somebody does something about it.
+        /// </para>
+        /// <para>
+        /// What it makes possible is doing something about it. Facing could
+        /// previously only be set as a by-product of going somewhere, so a
+        /// regiment caught out of position had no way to come about at all
+        /// without being marched off and back again.
+        /// </para>
+        /// <para>
+        /// Nothing but the turn rate slows it. In particular no friendly
+        /// formation does: men come about within their own frontage and do not
+        /// need anybody's permission, and gating this on collisions would mean a
+        /// regiment in a crowded line could never face the enemy that had got
+        /// round it — which is the one position where turning matters most.
+        /// </para>
+        /// </remarks>
+        private static void WheelOnTheSpot(UnitInstance unit)
+        {
+            // Men running face where they are going, and that is decided by the
+            // route they are running along.
+            if (unit.State == UnitState.Routing) return;
+
+            Facing want = unit.DressingBearing ?? unit.OrderFacing;
+            if (Facing.AbsoluteDelta(unit.Facing, want) < 0.001f) return;
+
+            float rate = unit.Def.Get(UnitAttributes.TurnRate);
+
+            // Standing troops dress ranks rather than chase them — but not with
+            // an enemy already among them, which is the hardest way there is to
+            // change front and should feel like it.
+            if (unit.EnemiesInContact == 0) rate *= PivotBonusWhileHalted;
+
+            unit.Facing = Facing.RotateTowards(
+                unit.Facing, want, rate * BattleClock.SecondsPerTick * MathF.PI / 180f);
+        }
+
+        /// <summary>
+        /// How much faster a regiment comes round while dressing onto the enemy
+        /// it is charging.
+        /// </summary>
+        /// <remarks>
+        /// The final approach is the one moment a body of men is genuinely
+        /// hurrying to change front — officers dressing ranks on the run, with
+        /// the enemy a minute away. At the ordinary rate a spear block needs the
+        /// better part of that minute to come round ninety degrees, which is the
+        /// whole approach spent wheeling and none of it spent closing.
+        /// </remarks>
+        private const float DressingTurnBonus = 5f;
+
+        /// <summary>What a regiment must do about the ground in front of it.</summary>
+        private enum Fit
+        {
+            /// <summary>It fits as it is.</summary>
+            Fine,
+
+            /// <summary>It fits at some other bearing, so come round to that.</summary>
+            ComeRound,
+
+            /// <summary>It fits at no bearing at all.</summary>
+            Blocked
+        }
+
+        /// <summary>How far either way a regiment will look for a bearing that fits, in degrees.</summary>
+        /// <remarks>
+        /// Ninety is the whole of the useful range: at a right angle a line is
+        /// presenting its depth instead of its frontage, which for a body a
+        /// hundred metres wide and five deep is the narrowest it can possibly
+        /// be. Anything beyond that is the same shapes again.
+        /// </remarks>
+        private const float SqueezeSearchDegrees = 90f;
+
+        /// <summary>Steps the search takes, in degrees.</summary>
+        private const float SqueezeStepDegrees = 6f;
+
+        /// <summary>
+        /// Decides whether a regiment can carry on as it is, has to turn to get
+        /// through, or cannot get through at all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The nearest fitting bearing wins, so a unit turns as little as it
+        /// must. It searches outward in both directions at once and takes the
+        /// first success, which means a wide line squeezing between two woods
+        /// comes round just far enough to clear them and no further.
+        /// </para>
+        /// <para>
+        /// A regiment already standing somewhere it does not fit is exempt
+        /// entirely. That happens — deployed onto bad ground, or left there by
+        /// an older rule — and a unit that cannot legally be where it is must
+        /// still be able to walk off it, or it is stuck for the whole battle.
+        /// </para>
+        /// </remarks>
+        private static Fit ChooseBearingToFit(
+            BattleState battle, UnitInstance unit, MovementRoute route, out Facing bearing)
+        {
+            bearing = unit.Facing;
+
+            if (!battle.FormationFits(unit, unit.Position, unit.Facing)) return Fit.Fine;
+
+            float reach = battle.SpeedOf(unit) * BattleClock.SecondsPerTick;
+            Vec2 probe = KeepOnTheField(battle, unit, Vec2.MoveTowards(unit.Position, route.Target, reach));
+
+            if (battle.FormationFits(unit, probe, unit.Facing)) return Fit.Fine;
+
+            for (float off = SqueezeStepDegrees; off <= SqueezeSearchDegrees; off += SqueezeStepDegrees)
+            {
+                float radians = off * MathF.PI / 180f;
+
+                Facing left = unit.Facing.RotatedBy(radians);
+                if (battle.FormationFits(unit, probe, left))
+                {
+                    bearing = left;
+                    return Fit.ComeRound;
+                }
+
+                Facing right = unit.Facing.RotatedBy(-radians);
+                if (battle.FormationFits(unit, probe, right))
+                {
+                    bearing = right;
+                    return Fit.ComeRound;
+                }
+            }
+
+            return Fit.Blocked;
+        }
+
+        /// <summary>
+        /// Holds a formed regiment inside the map, footprint and all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Positions are a point and regiments are rectangles, so a centre
+        /// legally inside the bounds still leaves half a frontage — fifty
+        /// metres of cavalry — hanging over the edge of the world. Inset by
+        /// however much of the shape actually points that way, which is exact
+        /// for any bearing and costs nothing.
+        /// </para>
+        /// <para>
+        /// Routers are exempt on purpose. Leaving the field is precisely what
+        /// they are doing, and holding them on it would trap broken regiments
+        /// against the border forever instead of letting them scatter.
+        /// </para>
+        /// </remarks>
+        private static Vec2 KeepOnTheField(BattleState battle, UnitInstance unit, Vec2 position)
+        {
+            if (unit.State == UnitState.Routing) return position;
+
+            MapBounds bounds = battle.Terrain.Bounds;
+            var shape = new OrientedRect(position, unit.Facing, unit.Footprint);
+
+            float halfWidth = shape.ProjectedRadius(new Vec2(1f, 0f));
+            float halfHeight = shape.ProjectedRadius(new Vec2(0f, 1f));
+
+            // A regiment wider than the field can only be centred on it.
+            return new Vec2(
+                Squeeze(position.X, bounds.Min.X, bounds.Max.X, halfWidth),
+                Squeeze(position.Y, bounds.Min.Y, bounds.Max.Y, halfHeight));
+        }
+
+        private static float Squeeze(float value, float min, float max, float halfExtent)
+        {
+            if (max - min <= 2f * halfExtent) return (min + max) * 0.5f;
+
+            return Math.Clamp(value, min + halfExtent, max - halfExtent);
+        }
+
+        /// <summary>
+        /// Keeps a regiment out of its own side, edging it along a friendly
+        /// formation rather than through it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two bodies of men cannot stand in the same field, and until now
+        /// nothing said so — friendly formations interpenetrated freely and paid
+        /// only a trickle of cohesion for it. So a line was never really a line:
+        /// regiments ordered along the same axis slid into one another and the
+        /// front the player had drawn stopped meaning anything.
+        /// </para>
+        /// <para>
+        /// Refusing the step outright would be worse than the disease. An army
+        /// is a crowd, and regiments brush past each other constantly at glancing
+        /// angles; a hard stop on every touch would jam a line solid the first
+        /// time two units converged. So only the part of the step that pushes
+        /// into the friend is taken away, and whatever is left along their flank
+        /// is kept — which is how men actually get past each other.
+        /// </para>
+        /// <para>
+        /// Marching squarely into somebody's back leaves nothing to slide along,
+        /// and that is correct: it stops, and says so. Getting round is then the
+        /// player's problem, which is the whole point of the rule.
+        /// </para>
+        /// </remarks>
+        private static Vec2 MakeRoomForFriends(
+            BattleState battle, UnitInstance unit, Vec2 next, int tick, IBattleLog log)
+        {
+            // Men running do not form up and do not politely go round, and
+            // damming a rout against its own reserves would turn a withdrawal
+            // into a massacre.
+            if (unit.State == UnitState.Routing) return next;
+
+            UnitInstance? blocker = FriendInTheWay(battle, unit, next);
+
+            if (blocker == null)
+            {
+                unit.GoingRound = UnitId.None;
+                return next;
+            }
+
+            // Whoever has to give way. A regiment already standing where it
+            // means to stand is not shoved off it to make room for one still
+            // walking, and one at grips with an enemy is not pulled out of the
+            // fight — so the mover goes round, and between two movers the higher
+            // number yields. Arbitrary, total, and reproducible from the seed,
+            // which is what matters: without a rule they either both give way
+            // and drift, or neither does and they jam.
+            if (!MustGiveWayTo(unit, blocker)) return next;
+
+            var stepped = new OrientedRect(next, unit.Facing, unit.Footprint);
+
+            // Which way is "off them". Overlapping, the shortest way out of the
+            // overlap; merely too close, the line from their nearest point to
+            // our centre — because a regiment keeping its distance has no
+            // overlap to be pushed out of, and asking for one gives no answer
+            // at all. That was why the berth found its blocker and then failed
+            // to do anything about it.
+            Vec2 away = OrientedRect.TryGetSeparation(stepped, blocker.Shape, out Vec2 apart)
+                ? apart
+                : stepped.Centre - blocker.Shape.ClosestPointTo(stepped.Centre);
+
+            if (away.IsNearZero) away = unit.Position - blocker.Position;
+            if (away.IsNearZero) return next;
+
+            away = away.Normalised();
+
+            Vec2 intended = next - unit.Position;
+            Vec2 alongside = intended - away * Vec2.Dot(intended, away);
+
+            float reach = intended.Length;
+            if (reach <= 0f) return unit.Position;
+
+            // A regiment that cannot legally stand where it already is may go
+            // anywhere that gets it out, exactly as with impassable ground.
+            bool stuckAlready = !battle.FormationFits(unit, unit.Position, unit.Facing);
+
+            // Glancing contact: keep whatever part of the step runs along their
+            // flank and drop the part that pushes into them.
+            //
+            // Judged as a real fraction of the step rather than merely non-zero.
+            // A regiment marching dead into somebody's back leaves a tangential
+            // component of about a ten-thousandth of a metre, which is not zero
+            // and is not movement either — it took this branch, edged forward by
+            // nothing, and did it again every tick forever. From the player's
+            // chair that is indistinguishable from the hard stop this was
+            // written to avoid.
+            if (alongside.Length > reach * SlideIsWorthTaking)
+            {
+                Vec2 sidestep = KeepOnTheField(battle, unit, unit.Position + alongside);
+
+                if (FriendInTheWay(battle, unit, sidestep) == null &&
+                    (stuckAlready || battle.FormationFits(unit, sidestep, unit.Facing)))
+                    return sidestep;
+            }
+
+            // Squarely into their back, so there is nothing worth sliding along.
+            // Go round instead of standing there — a regiment that has been
+            // ordered somewhere and simply stops because one of its own is in
+            // the way is a regiment that has stopped taking orders, whatever the
+            // log says about why.
+            //
+            // Across the line of march, toward the nearer end of the formation
+            // in the way, so the detour is the short way round and gets shorter
+            // every tick.
+            //
+            // Measured against the march rather than against the shortest way
+            // out of the overlap, which is the version that did not work. The
+            // shortest way out swings between the blocker's faces as the two
+            // rectangles slide past each other, so the detour reversed itself
+            // every few ticks: a recorded run had cavalry cover thirty-eight
+            // metres in its first turn and then rock between two positions eight
+            // metres apart for the next seven. The line of march does not swing.
+            Vec2 pastTheirFlank;
+
+            // Which way round is settled once and then kept until this blocker
+            // is behind us. Deciding it afresh every tick is what produced the
+            // seizure: a regiment sitting on the blocker's centreline gets a
+            // different answer each time it asks, and thrashes between the two.
+            if (unit.GoingRound == blocker.Id)
+            {
+                pastTheirFlank = unit.GoingRoundBearing.ToVector();
+            }
+            else
+            {
+                Vec2 heading = intended / reach;
+                pastTheirFlank = new Vec2(-heading.Y, heading.X);
+
+                // Toward whichever end of them we are already nearer, so the
+                // detour is the short way round.
+                if (Vec2.Dot(unit.Position - blocker.Position, pastTheirFlank) < 0f)
+                    pastTheirFlank = -pastTheirFlank;
+
+                unit.GoingRound = blocker.Id;
+                unit.GoingRoundBearing = Facing.FromVector(pastTheirFlank);
+            }
+
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                // The committed side first; the other only if that way is
+                // blocked as well, which is what happens threading a packed
+                // line.
+                Vec2 thisWay = attempt == 0 ? pastTheirFlank : -pastTheirFlank;
+
+                Vec2 round = KeepOnTheField(battle, unit, unit.Position + thisWay * reach);
+
+                if (FriendInTheWay(battle, unit, round) != null) continue;
+                if (!stuckAlready && !battle.FormationFits(unit, round, unit.Facing)) continue;
+
+                // If the far side was the one that worked, that is the new
+                // commitment — otherwise the next tick starts from the blocked
+                // side again and nothing has been learned.
+                unit.GoingRoundBearing = Facing.FromVector(thisWay);
+
+                if (tick % 30 == 0)
+                    log.Decision("Move",
+                        $"{unit.Def.DisplayName} is working round its own {blocker.Def.DisplayName} " +
+                        "rather than through it.",
+                        unit.Id);
+
+                return round;
+            }
+
+            // Boxed in on both sides as well as in front. Said on a counter
+            // rather than every tick: it persists for as long as they all stand
+            // there, and a line of it every second would bury everything else.
+            if (tick % 20 == 0)
+                log.Blocked("Move",
+                    $"{unit.Def.DisplayName} is hemmed in by its own {blocker.Def.DisplayName} with no way " +
+                    "round either flank — move one of them.",
+                    unit.Id);
+
+            return unit.Position;
+        }
+
+        /// <summary>
+        /// How much of a step must survive along a friend's flank before edging
+        /// past them counts as movement rather than as being stuck.
+        /// </summary>
+        private const float SlideIsWorthTaking = 0.5f;
+
+        /// <summary>
+        /// Whether this regiment is the one that has to make way.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Read top to bottom: a regiment that has arrived is not shoved off its
+        /// ground by one still walking; a regiment at grips with an enemy is not
+        /// pulled out of the fight to let somebody past; and between two that
+        /// are both merely marching, the higher number gives way.
+        /// </para>
+        /// <para>
+        /// The last is arbitrary, and that is the point — it is total and it is
+        /// reproducible from the seed, which any rule about who moves has to be.
+        /// Without one, two regiments converging on the same ground either both
+        /// give way and drift, or neither does and they jam.
+        /// </para>
+        /// </remarks>
+        private static bool MustGiveWayTo(UnitInstance unit, UnitInstance other)
+        {
+            if (!other.IsMarching) return true;
+            if (!unit.IsMarching) return false;
+
+            if (other.EnemiesInContact > 0 && unit.EnemiesInContact == 0) return true;
+            if (unit.EnemiesInContact > 0 && other.EnemiesInContact == 0) return false;
+
+            return unit.Id.Value > other.Id.Value;
+        }
+
+        /// <summary>
+        /// How much clear ground a regiment leaves when it passes one of its
+        /// own, in metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Charged against passing, never against standing. Regiments drawn up
+        /// in line stand flush against each other — that is what a line is, and
+        /// it is the whole point of being able to handle a big army regiment by
+        /// regiment and then move the result as one body. A berth applied
+        /// everywhere would put daylight between every pair of neighbours and
+        /// make a proper line impossible to form.
+        /// </para>
+        /// <para>
+        /// While actually going past somebody it is different. Without it a
+        /// regiment grazes along its neighbour's flank at under two metres for
+        /// the length of the manoeuvre, which is what "they stick to the
+        /// infantry" was.
+        /// </para>
+        /// </remarks>
+        private const float BerthWhilePassingMetres = 6f;
+
+        /// <summary>
+        /// A friendly formation this step would newly crowd, if there is one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Corners clipping is not a collision. An army in line brushes
+        /// constantly, so anything under a twentieth of a regiment is ignored
+        /// outright — the same tolerance the placement search uses, so that
+        /// where a regiment is willing to stand and what it is willing to walk
+        /// through are one decision rather than two that can disagree.
+        /// </para>
+        /// <para>
+        /// A unit already lapping somebody is exempt for that pair. That happens
+        /// — deployed overlapping, or widened into a neighbour by reshaping —
+        /// and a regiment that cannot legally be where it is must still be able
+        /// to walk off it, or it is stuck for the whole battle. The shuffle in
+        /// <see cref="ContactSystem"/> is what resolves those.
+        /// </para>
+        /// </remarks>
+        private static UnitInstance? FriendInTheWay(BattleState battle, UnitInstance unit, Vec2 next)
+        {
+            var stepped = new OrientedRect(next, unit.Facing, unit.Footprint);
+            OrientedRect here = unit.Shape;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id) continue;
+                if (other.Owner != unit.Owner) continue;
+                if (!other.IsFighting) continue;
+                if (other.State == UnitState.Routing) continue;
+
+                // Already lapping them, so this step cannot be what did it.
+                if (OrientedRect.OverlapFraction(here, other.Shape) > OrderSystem.GrazingTolerance) continue;
+
+                if (OrientedRect.OverlapFraction(stepped, other.Shape) > OrderSystem.GrazingTolerance)
+                    return other;
+
+                // Not touching them, but closing to within a hand's breadth
+                // while going somewhere — which is gluing itself to them rather
+                // than passing them. Only while marching: a regiment that has
+                // arrived beside a neighbour stands flush.
+                if (unit.IsMarching &&
+                    OrientedRect.GapBetween(stepped, other.Shape) < BerthWhilePassingMetres &&
+                    OrientedRect.GapBetween(here, other.Shape) >= BerthWhilePassingMetres)
+                    return other;
+            }
+
+            return null;
         }
 
         private static void StepUnit(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
@@ -118,6 +589,51 @@ namespace BattleChess.Rules
                 return;
             }
 
+            // Where it is going and where it is looking are two different
+            // questions, and conflating them was what pivoted a line ninety
+            // degrees for a fifty-metre sidestep. A march order leaves the
+            // front where the player put it unless asked for otherwise; an
+            // attack faces what it is charging, which is never in doubt.
+            Facing marchBearing = desired;
+
+            desired = unit.Order.Kind == OrderKind.Move ? unit.OrderFacing : marchBearing;
+
+            // The last hundred metres of a charge. The order system has already
+            // aimed this march at a slot squarely off one of the enemy's faces;
+            // this is the other half of the same manoeuvre, bringing the front
+            // round to match so the two rectangles meet flush rather than at
+            // whatever angle the approach happened to run.
+            Facing? dressOn = unit.DressingBearing;
+            bool dressing = dressOn.HasValue;
+            if (dressOn.HasValue) desired = dressOn.Value;
+
+            // A regiment is a shape, and ground it cannot cross is ground it
+            // cannot be on. Carrying on as it is may put part of the formation
+            // in a wood or a river that the centre misses entirely, so before
+            // anything else it asks whether it still fits — and if not, whether
+            // there is a bearing it could come round to that does.
+            switch (ChooseBearingToFit(battle, unit, route, out Facing threading))
+            {
+                case Fit.ComeRound:
+                    desired = threading;
+                    break;
+
+                case Fit.Blocked:
+                    // Said every time, not on a tick counter. The march is
+                    // abandoned on this same tick, so a throttled message is
+                    // one that usually never appears at all — and a regiment
+                    // that has silently stopped is indistinguishable from one
+                    // that has stopped taking orders.
+                    log.Blocked("Move",
+                        $"{unit.Def.DisplayName} cannot get its whole frontage past " +
+                        $"{battle.TerrainAt(unit.Position).DisplayName} — " +
+                        $"{unit.Footprint.Width:0} m of front and no way through at any bearing.",
+                        unit.Id);
+
+                    unit.Route = null;
+                    return;
+            }
+
             // Decide whether this unit is halting to come round before it turns,
             // so a halted pivot gets the faster rate it has earned.
             float offBefore = Facing.AbsoluteDelta(unit.Facing, desired) * 180f / MathF.PI;
@@ -125,6 +641,7 @@ namespace BattleChess.Rules
 
             float turnRate = unit.Def.Get(UnitAttributes.TurnRate);
             if (pivotingHalted) turnRate *= PivotBonusWhileHalted;
+            if (dressing) turnRate *= DressingTurnBonus;
 
             float turnThisTick = turnRate * BattleClock.SecondsPerTick;
             unit.Facing = Facing.RotateTowards(unit.Facing, desired, turnThisTick * MathF.PI / 180f);
@@ -139,7 +656,12 @@ namespace BattleChess.Rules
                 return;
             }
 
-            float terrainSpeed = battle.SpeedOf(unit);
+            // The pace of the slowest regiment in this one's wing, over the
+            // ground it is actually standing on — so a wing whose left is
+            // fording a river waits for it rather than arriving in two halves at
+            // two different times. For a unit on its own this is just its own
+            // speed here.
+            float terrainSpeed = battle.PaceOfBond(unit);
 
             if (terrainSpeed <= 0f)
             {
@@ -151,7 +673,14 @@ namespace BattleChess.Rules
                 return;
             }
 
-            float speed = terrainSpeed * AlignmentPenalty(offByDegrees);
+            // Charged against the line of march, not against whatever the unit
+            // is trying to face. A regiment holding its front while it
+            // sidesteps is edging along at a fifth of its pace, and that price
+            // is what makes keeping your facing a decision rather than a free
+            // option.
+            float offTheLineOfMarch = Facing.AbsoluteDelta(unit.Facing, marchBearing) * 180f / MathF.PI;
+
+            float speed = terrainSpeed * AlignmentPenalty(offTheLineOfMarch);
             float step = speed * BattleClock.SecondsPerTick;
 
             // Bad ground pulls a formation apart as it is crossed. Charged per
@@ -160,12 +689,26 @@ namespace BattleChess.Rules
             // the same mud, and a long march through open woods would end in a
             // rabble. Crossing a river costs what the river is wide, whether
             // you wade it quickly or slowly.
-            float disorder = battle.TerrainAt(unit.Position).Get(TerrainAttributes.Disorder);
+            //
+            // Read under the whole formation and charged at its worst, not
+            // sampled at the centre. A hundred-metre line with one flank in a
+            // river is in trouble across its whole front, and the man in the
+            // middle standing on dry grass does not change that.
+            float disorder = battle.WorstDisorderUnder(unit);
 
             if (disorder > 0f)
                 unit.Organization -= disorder * step;
 
-            unit.Position = Vec2.MoveTowards(unit.Position, route.Target, step);
+            Vec2 next = KeepOnTheField(battle, unit, Vec2.MoveTowards(unit.Position, route.Target, step));
+
+            // The last word. A regiment part-way through coming round has a
+            // bearing that does not fit yet, and stepping forward on it would
+            // put the leading flank into exactly the wood it is turning to
+            // avoid. It wheels on the spot until the shape clears, which is
+            // what threading a gap actually looks like.
+            if (battle.FormationFits(unit, next, unit.Facing) ||
+                !battle.FormationFits(unit, unit.Position, unit.Facing))
+                unit.Position = MakeRoomForFriends(battle, unit, next, tick, log);
 
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
             {

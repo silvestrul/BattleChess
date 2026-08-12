@@ -16,9 +16,27 @@ namespace BattleChess.Unity
     /// </remarks>
     public sealed class UnitView : MonoBehaviour
     {
-        private static Sprite _blockSprite;
+        /// <summary>
+        /// How much of a regiment's depth the type symbol may take up.
+        /// </summary>
+        /// <remarks>
+        /// The symbol is drawn square and at a constant size while the plate
+        /// beneath it stretches, which is the whole arrangement: a regiment in
+        /// line is a hundred metres wide and eight deep, so anything stretched
+        /// to fill that is a smear. Held square it stays readable, and it stays
+        /// the same size as the regiment is fought down — the narrowing plate
+        /// is what tells you it is dying, not a shrinking badge.
+        /// </remarks>
+        private const float SymbolFillsDepth = 0.8f;
+
+        /// <summary>Never drawn smaller than this, in metres, or it vanishes when zoomed out.</summary>
+        private const float MinSymbolMetres = 7f;
+
+        /// <summary>Nor larger, or a deep column wears a badge wider than itself.</summary>
+        private const float MaxSymbolMetres = 22f;
 
         private SpriteRenderer _body;
+        private SpriteRenderer _symbol;
         private SpriteRenderer _frontEdge;
         private Color _armyColour;
 
@@ -43,11 +61,20 @@ namespace BattleChess.Unity
             view.Unit = unit;
             view._armyColour = armyColour;
 
-            view._body = CreateQuad(go.transform, armyColour, sortingOrder: 10);
+            view._body = CreateQuad(go.transform, armyColour, sortingOrder: 10, UnitArt.Plate());
 
             // A thin bar along the front edge. Facing decides everything about
             // flanking, so it needs to be readable at a glance.
             view._frontEdge = CreateQuad(go.transform, Color.white, sortingOrder: 11);
+
+            // What kind of troops these are, drawn over the plate and above the
+            // front bar so a narrow regiment does not have its badge hidden by
+            // its own facing marker. Absent until there is artwork for the type,
+            // which is not an error — the plate alone plays exactly as before.
+            Sprite symbol = UnitArt.SymbolFor(unit.Def);
+
+            if (symbol != null)
+                view._symbol = CreateQuad(go.transform, Color.white, sortingOrder: 12, symbol);
 
             view.SnapToUnit();
             view.Render(1f);
@@ -98,6 +125,7 @@ namespace BattleChess.Unity
             bool visible = Unit.IsOnField && (Spotted || GhostWhenHidden);
             _body.enabled = visible;
             _frontEdge.enabled = visible;
+            if (_symbol != null) _symbol.enabled = visible;
             if (!visible) return;
 
             Footprint footprint = Unit.Footprint;
@@ -116,14 +144,14 @@ namespace BattleChess.Unity
             // Z rotation.
             transform.rotation = Quaternion.Euler(0f, 0f, facing.Degrees);
 
-            // Drawn no thinner than a shape you can actually see and click. A
-            // regiment in line is a hundred metres wide and four deep, which at
-            // any sensible zoom is a hairline. Cosmetic only — every rule still
-            // uses the true footprint, so nothing fights or collides differently
-            // for being drawn thicker.
-            float drawnDepth = Mathf.Max(footprint.Depth, BattlefieldController.ClickableDepthMetres);
+            // The true frontage, and a deliberately chunky depth. Frontage is
+            // what decides how many men can reach the enemy, so the bar's length
+            // has to be honest; its thickness is only there to be seen, and a
+            // six-metre bar at any useful zoom is a hairline.
+            float drawnWidth = footprint.Width;
+            float drawnDepth = BattlefieldController.DrawnDepthOf(footprint);
 
-            _body.transform.localScale = new Vector3(drawnDepth, footprint.Width, 1f);
+            ScaleToMetres(_body, drawnDepth, drawnWidth);
 
             // Fade with losses, so a mauled regiment reads as mauled even before
             // you notice it has narrowed.
@@ -149,17 +177,88 @@ namespace BattleChess.Unity
             // Thicken and colour the front edge while coming round, so a wheel
             // reads as a deliberate manoeuvre instead of the sprite happening to
             // rotate.
+            // Scaled off the plate rather than fixed, so the bar stays a legible
+            // stripe along the front however thick the regiment is drawn.
             bool wheeling = offByDegrees > 8f;
-            float edgeThickness = wheeling ? 7f : 3f;
+            float edgeThickness = drawnDepth * (wheeling ? 0.22f : 0.1f);
 
             // Sits on the front of the drawn body, not the true one, or it floats
             // inside a regiment that is being drawn thicker than it is.
-            _frontEdge.transform.localScale = new Vector3(edgeThickness, footprint.Width, 1f);
+            _frontEdge.transform.localScale = new Vector3(edgeThickness, drawnWidth, 1f);
             _frontEdge.transform.localPosition = new Vector3((drawnDepth - edgeThickness) * 0.5f, 0f, 0f);
 
             _frontEdge.color = wheeling
                 ? Color.Lerp(new Color(1f, 0.75f, 0.2f), new Color(1f, 0.35f, 0.1f), Mathf.InverseLerp(8f, 120f, offByDegrees))
                 : _selected ? Color.yellow : Color.white;
+
+            DrawSymbol(drawnDepth, drawnWidth);
+        }
+
+        /// <summary>
+        /// Places the unit-type badge: square, upright on screen, and the same
+        /// size however the regiment is standing.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Held square</b> because the plate under it is not. A regiment in
+        /// line is a hundred metres of frontage against eight of depth, so a
+        /// badge stretched to fill it would be twelve times wider than tall.
+        /// </para>
+        /// <para>
+        /// <b>Upright on screen</b> rather than turning with the regiment. Both
+        /// armies spend a battle facing each other, so a badge that rotated
+        /// with its unit would be the right way up for one side and upside down
+        /// for the whole of the other. It reads as a label on a map, which is
+        /// what it is.
+        /// </para>
+        /// <para>
+        /// <b>The same size at any strength.</b> A regiment being fought down
+        /// is told by its plate narrowing; shrinking the badge as well would
+        /// say the same thing twice and make a battered unit hard to identify
+        /// at exactly the moment identifying it matters.
+        /// </para>
+        /// </remarks>
+        private void DrawSymbol(float drawnDepth, float drawnWidth)
+        {
+            if (_symbol == null) return;
+
+            float size = Mathf.Clamp(drawnDepth * SymbolFillsDepth, MinSymbolMetres, MaxSymbolMetres);
+
+            // Never wider than the regiment itself. A unit fought down to a
+            // stub should not wear a badge overhanging its own flanks.
+            size = Mathf.Min(size, drawnWidth * 0.9f);
+
+            ScaleToMetres(_symbol, size, size);
+
+            // Square on screen regardless of the parent's bearing.
+            _symbol.transform.rotation = Quaternion.identity;
+
+            // Follows the plate's fade, so a ghosted or mauled regiment does
+            // not show a solid badge floating over a translucent body.
+            Color tint = Color.white;
+            tint.a = _body.color.a;
+            _symbol.color = tint;
+        }
+
+        /// <summary>
+        /// Scales a renderer so its sprite covers the given size in metres,
+        /// whatever resolution or pixels-per-unit the artwork was imported at.
+        /// </summary>
+        /// <remarks>
+        /// The reason artwork can be dropped in at any size. Setting local
+        /// scale directly only gives metres for a one-unit sprite; a 256-pixel
+        /// image imported at the usual hundred pixels per unit is 2.56 units
+        /// across, and a regiment drawn with that assumption comes out two and
+        /// a half times too big.
+        /// </remarks>
+        private static void ScaleToMetres(SpriteRenderer renderer, float alongFacing, float acrossFront)
+        {
+            Vector3 spriteSize = renderer.sprite.bounds.size;
+
+            renderer.transform.localScale = new Vector3(
+                alongFacing / Mathf.Max(0.0001f, spriteSize.x),
+                acrossFront / Mathf.Max(0.0001f, spriteSize.y),
+                1f);
         }
 
         /// <summary>
@@ -182,30 +281,22 @@ namespace BattleChess.Unity
             if (!_selected) _frontEdge.color = Color.white;
         }
 
-        private static SpriteRenderer CreateQuad(Transform parent, Color colour, int sortingOrder)
+        private static SpriteRenderer CreateQuad(Transform parent, Color colour, int sortingOrder, Sprite sprite = null)
         {
             var go = new GameObject("Quad");
             go.transform.SetParent(parent, worldPositionStays: false);
 
             var renderer = go.AddComponent<SpriteRenderer>();
-            renderer.sprite = BlockSprite();
+            renderer.sprite = sprite ?? UnitArt.Blank();
             renderer.color = colour;
             renderer.sortingOrder = sortingOrder;
 
+            // Stretch the supplied image over whatever local scale it is given,
+            // rather than tiling or cropping it. A plate is one rectangle drawn
+            // once and pulled to the ground the regiment holds.
+            renderer.drawMode = SpriteDrawMode.Simple;
+
             return renderer;
-        }
-
-        /// <summary>A one-unit white square, scaled to whatever is needed.</summary>
-        private static Sprite BlockSprite()
-        {
-            if (_blockSprite != null) return _blockSprite;
-
-            var texture = new Texture2D(1, 1, TextureFormat.RGBA32, mipChain: false) { name = "Block" };
-            texture.SetPixel(0, 0, Color.white);
-            texture.Apply();
-
-            _blockSprite = Sprite.Create(texture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), pixelsPerUnit: 1f);
-            return _blockSprite;
         }
     }
 }

@@ -144,13 +144,24 @@ namespace BattleChess.Tests.Battle
             UnitInstance square = field.Add(0, "swordsmen", field.Centre, Facing.East, formation: "square");
             UnitInstance loose = field.Add(0, "swordsmen", field.Centre + new Vec2(300f, 0f), Facing.East, formation: "loose");
 
-            Assert.True(square.EffectiveStoppingPower > loose.EffectiveStoppingPower,
+            float freshGap = square.EffectiveStoppingPower - loose.EffectiveStoppingPower;
+
+            Assert.True(freshGap > 0f,
                 "Fresh, a square must hold ground far better than open order.");
 
+            // As far apart as they can now be driven. Cohesion has a floor —
+            // men who have genuinely lost all order are routing, and that is a
+            // separate rule — so a formation can be worth almost nothing but
+            // never quite nothing.
             square.Organization = 0f;
             loose.Organization = 0f;
 
-            Assert.Equal(loose.EffectiveStoppingPower, square.EffectiveStoppingPower, 3);
+            float ruinedGap = square.EffectiveStoppingPower - loose.EffectiveStoppingPower;
+
+            Assert.True(ruinedGap < freshGap * 0.5f,
+                $"Standing in a square is worth what the square is worth, and a square that has come " +
+                $"apart is a crowd of men in roughly that shape. The advantage should mostly go: it was " +
+                $"{freshGap:0.00} fresh and is {ruinedGap:0.00} once disordered.");
         }
 
         [Fact]

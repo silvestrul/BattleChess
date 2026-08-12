@@ -271,7 +271,15 @@ Attrition formula, armor, class matchups, terrain modifiers, geometric flanking 
 
 ### M4 — Fog of war
 Per-unit vision, elevation-aware LOS on the vision grid, concealment and detection, three-state knowledge, ghost markers, `PlayerView` projection, blind artillery with hit/miss feedback.
-**Gate (1, 6):** LOS tests over elevation maps; **fog leak tests**; CLI renders each player's fogged view separately.
+**Gate (1, 6):** LOS tests over elevation maps; **fog leak tests**; CLI renders each player's fogged view separately. **Gate met** — pass 4 (blind artillery) is a mechanic the gate does not depend on.
+
+**What a sighting tells you.** Body, not spirit. Position, bearing, what kind of troops, a banded headcount, and whether they have broken — all things visible from across a field. Not morale, cohesion, ammunition or orders, because *"is that line about to crack?"* is the judgement the whole game turns on, and it has to be bought by pressing the attack rather than read off a bar. The headcount is banded rather than noised: a wrong number that jitters each turn reads as the game lying, a coarse one reads as distance.
+
+**Sightings are frozen whole.** A remembered position with a live headcount attached would be fog wearing a ghost's clothes, so `VisionState` stores strength and facing alongside the place and the tick.
+
+**Still open:** unit ids are handed out across both armies, so seeing one numbered nine reveals that ten regiments took the field. A side channel rather than a leaked field, and the reflective sweep cannot catch it. Fixed by minting per-viewer opaque handles — pointless before M8, since until orders travel over a wire the client is the authority anyway. Written down as a skipped test in `FogLeakTests`.
+
+**Also still open:** Unity's asmdef references `BattleChess.Rules`, so the client holds live state and its fog is a rendering choice rather than a guarantee. That is not a fog bug — the Unity host *is* the authority today. It closes at M5 with `LocalMatchAuthority`, when the client stops running the simulation and starts asking for a view.
 
 ### M5 — Full match loop, offline playable ⭐
 Win conditions, full turn pipeline, save/load, replay playback, `LocalMatchAuthority`.
