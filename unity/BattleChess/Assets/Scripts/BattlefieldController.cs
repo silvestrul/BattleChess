@@ -436,7 +436,9 @@ namespace BattleChess.Unity
                 return;
             }
 
-            SetSelection(clicked.Bond == 0
+            // Only a wing tied by hand pulls its fellows in. A transient
+            // grouping is a product of selecting, not a reason to select.
+            SetSelection(clicked.Bond <= 0
                 ? new List<UnitInstance> { clicked }
                 : Bond(clicked.Bond));
         }
@@ -460,7 +462,7 @@ namespace BattleChess.Unity
 
         /// <summary>Whether every selected regiment already shares one bond.</summary>
         private bool SelectionIsBound =>
-            _selection.Count > 0 && Primary.Bond != 0 && _selection.TrueForAll(u => u.Bond == Primary.Bond);
+            _selection.Count > 0 && Primary.Bond > 0 && _selection.TrueForAll(u => u.Bond == Primary.Bond);
 
         /// <summary>
         /// Ties the selection into one wing, or unties it if it already is one.
@@ -537,7 +539,7 @@ namespace BattleChess.Unity
             // while its own centre walked off without it.
             for (int i = caught.Count - 1; i >= 0; i--)
             {
-                if (caught[i].Bond == 0) continue;
+                if (caught[i].Bond <= 0) continue;
 
                 foreach (UnitInstance member in Bond(caught[i].Bond))
                 {
@@ -547,9 +549,22 @@ namespace BattleChess.Unity
 
             SetSelection(caught);
 
-            _status = caught.Count == 0
-                ? "Nothing in the box."
-                : $"{caught.Count} regiment(s) selected — right-click to order them.";
+            if (caught.Count == 0)
+            {
+                _status = "Nothing in the box.";
+                return;
+            }
+
+            if (caught.Count == 1)
+            {
+                _status = $"{Primary.Def.DisplayName} selected.";
+                return;
+            }
+
+            float pace = float.MaxValue;
+            foreach (UnitInstance unit in caught) pace = Mathf.Min(pace, unit.BaseSpeed);
+
+            _status = $"{caught.Count} regiments moving as one at {pace:0.00} m/s — B to keep them together.";
         }
 
         private int CountWithin(Vec2 from, Vec2 to)
@@ -700,7 +715,7 @@ namespace BattleChess.Unity
                     : unit.Morale < MoraleSystem.WaveringThreshold ? new Color(1f, 0.87f, 0.4f)
                     : Color.white;
 
-                string wing = unit.Bond == 0 ? string.Empty : $"  [wing {unit.Bond}]";
+                string wing = unit.Bond > 0 ? $"  [wing {unit.Bond}]" : string.Empty;
 
                 string text = detailed
                     ? $"{unit.Def.DisplayName}{wing}\n" +
@@ -1292,8 +1307,56 @@ namespace BattleChess.Unity
                 new Footprint(real.Width, DrawnDepthOf(real)));
         }
 
+        /// <summary>
+        /// The bond number handed to whatever is selected, when the player has
+        /// not tied them together deliberately.
+        /// </summary>
+        /// <remarks>
+        /// Negative, so it can never collide with a wing bound by hand — those
+        /// count up from one.
+        /// </remarks>
+        private const int TransientBond = -1;
+
+        /// <summary>
+        /// Makes the current selection manoeuvre as one body, and lets the last
+        /// one go.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Picking several regiments up is already a statement that you mean to
+        /// handle them together, so they behave like a wing for as long as you
+        /// hold them: same pace, keeping their shape. Pressing B is what makes
+        /// that survive letting go of them.
+        /// </para>
+        /// <para>
+        /// It costs something and is worth saying plainly: a wing marches at
+        /// its slowest regiment, so boxing cavalry together with foot slows the
+        /// cavalry until the selection is dropped. That is what moving as one
+        /// body means, and it is why the binding is transient — let go and the
+        /// horse is quick again.
+        /// </para>
+        /// </remarks>
+        private void HoldTogether(List<UnitInstance> units)
+        {
+            foreach (UnitInstance unit in _battle.AllUnits)
+            {
+                if (unit.Bond == TransientBond) unit.Bond = 0;
+            }
+
+            if (units.Count < 2) return;
+
+            foreach (UnitInstance unit in units)
+            {
+                // Never over a wing the player tied by hand — that one is
+                // theirs, and it already moves as one.
+                if (unit.Bond == 0) unit.Bond = TransientBond;
+            }
+        }
+
         private void SetSelection(List<UnitInstance> units)
         {
+            HoldTogether(units);
+
             _selection.Clear();
             _selection.AddRange(units);
 
