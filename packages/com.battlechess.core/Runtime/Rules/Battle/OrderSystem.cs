@@ -87,6 +87,8 @@ namespace BattleChess.Rules
 
                 ReleaseIfClear(battle, unit);
 
+                KeepTheMarchHonest(battle, unit, tick, log);
+
                 switch (unit.Stance)
                 {
                     case Stance.Evade:
@@ -106,6 +108,110 @@ namespace BattleChess.Rules
                 if (unit.Order.Kind == OrderKind.Attack)
                     FollowTarget(battle, unit, tick, log);
             }
+        }
+
+        // ---- Marches that are getting nowhere ---------------------------------
+
+        /// <summary>How long a march may make no headway before it is re-planned, in ticks.</summary>
+        /// <remarks>
+        /// Fifteen seconds. Long enough to cover a regiment coming round onto
+        /// its bearing, edging along a friendly flank, or picking its way round
+        /// a wood; short enough that a genuinely stuck one is noticed before the
+        /// player is.
+        /// </remarks>
+        private const int StallTicks = 15;
+
+        /// <summary>How much closer counts as having got somewhere, in metres.</summary>
+        private const float ProgressMetres = 1f;
+
+        /// <summary>How many times a stalled march is re-planned before it is given up on.</summary>
+        private const int ReplansBeforeGivingUp = 3;
+
+        /// <summary>
+        /// Notices a march that is no longer getting anywhere, and either
+        /// re-plans it or admits it cannot be done.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The rule that makes an order always terminate. Every stall found so
+        /// far had its own cause — a destination inside a friendly regiment, a
+        /// detour that reversed itself every tick, a goal on ground nothing can
+        /// stand on — and each was fixed on its own terms. This does not care
+        /// why. A regiment that has not got closer to where it is going in
+        /// fifteen seconds is not going to, and something has to change.
+        /// </para>
+        /// <para>
+        /// A recorded game had swordsmen ordered onto ground their own spearmen
+        /// were standing on. They pressed to within a metre and then thrashed
+        /// north and south — twelve reversals of direction in twenty-five ticks
+        /// — for the rest of the battle.
+        /// </para>
+        /// <para>
+        /// Only for marches. A unit halted by a zone of control has had its
+        /// route cleared and is no longer marching at all, which is a different
+        /// rule with its own answer.
+        /// </para>
+        /// </remarks>
+        private void KeepTheMarchHonest(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
+        {
+            if (unit.Order.Kind != OrderKind.Move || !unit.IsMarching)
+            {
+                unit.ForgetProgress();
+                return;
+            }
+
+            float toGoal = Vec2.Distance(unit.Position, unit.Route!.Destination);
+
+            if (toGoal < unit.NearestApproach - ProgressMetres)
+            {
+                unit.NearestApproach = toGoal;
+                unit.TicksWithoutProgress = 0;
+                return;
+            }
+
+            if (++unit.TicksWithoutProgress < StallTicks) return;
+
+            unit.TicksWithoutProgress = 0;
+
+            if (unit.FailedReplans >= ReplansBeforeGivingUp)
+            {
+                log.Blocked("Move",
+                    $"{unit.Def.DisplayName} cannot get to where it was sent and has stopped " +
+                    $"{toGoal:0} m short of it. Something is standing on that ground.",
+                    unit.Id);
+
+                unit.Route = null;
+                return;
+            }
+
+            unit.FailedReplans++;
+
+            // Aim at the best ground near the order rather than at the order
+            // itself, which may be somewhere no regiment can be.
+            if (!TryFindPlacement(battle, unit, unit.Order.Destination, unit.OrderFacing, out Vec2 placement))
+            {
+                log.Blocked("Move",
+                    $"{unit.Def.DisplayName} can find nowhere near that point to stand.", unit.Id);
+
+                unit.Route = null;
+                return;
+            }
+
+            PathResult path = _pathfinder.FindPath(unit.Position, placement, unit.Def.Movement);
+
+            if (!path.Found || path.Waypoints.Count < 2)
+            {
+                unit.Route = null;
+                return;
+            }
+
+            unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false);
+            unit.ForgetProgress();
+
+            log.Decision("Move",
+                $"{unit.Def.DisplayName} is not getting through and is trying for ground " +
+                $"{Vec2.Distance(placement, unit.Order.Destination):0} m from where it was sent.",
+                unit.Id);
         }
 
         /// <summary>
@@ -770,6 +876,154 @@ namespace BattleChess.Rules
         /// </remarks>
         private static bool InShootingPosition(UnitInstance unit, UnitInstance quarry) =>
             Vec2.Distance(unit.Position, quarry.Position) <= ShootingReach(unit);
+
+        // ---- Finding somewhere to actually stand ------------------------------
+
+        /// <summary>
+        /// How much of a formation may lie inside another before it counts as
+        /// standing in the same field rather than merely brushing past.
+        /// </summary>
+        /// <remarks>
+        /// An army drawn up in line touches constantly — corners clip, flanks
+        /// graze, and treating every one of those as a collision is what makes a
+        /// line impossible to form. A twentieth of a regiment is a brush.
+        /// </remarks>
+        public const float GrazingTolerance = 0.05f;
+
+        /// <summary>How far apart the rings of the placement search are, in metres.</summary>
+        private const float PlacementRingMetres = 25f;
+
+        /// <summary>How many rings out it will look before giving up.</summary>
+        private const int PlacementRings = 6;
+
+        /// <summary>How many bearings are tried on each ring.</summary>
+        private const int PlacementBearings = 8;
+
+        /// <summary>
+        /// The best ground near an ordered point that this regiment could
+        /// actually stand on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// An order names a point; a regiment needs a <i>placement</i>. Those are
+        /// not the same thing once a body of men is a rectangle rather than a
+        /// token — the point may be inside a wood, inside a friendly regiment,
+        /// or half a frontage from the edge of the world, and in every one of
+        /// those cases the honest answer is "as near as I can decently get"
+        /// rather than marching at it forever.
+        /// </para>
+        /// <para>
+        /// Searched in rings outward from the ordered point, so the nearest
+        /// acceptable ground always wins and the score only decides between
+        /// candidates that are equally close. Rings and bearings are walked in a
+        /// fixed order, which is what makes the answer reproducible from the
+        /// seed.
+        /// </para>
+        /// </remarks>
+        public static bool TryFindPlacement(
+            BattleState battle, UnitInstance unit, Vec2 want, Facing front, out Vec2 placement)
+        {
+            placement = want;
+
+            float best = float.MaxValue;
+            bool found = false;
+
+            for (int ring = 0; ring <= PlacementRings; ring++)
+            {
+                float radius = ring * PlacementRingMetres;
+                int bearings = ring == 0 ? 1 : PlacementBearings;
+
+                for (int i = 0; i < bearings; i++)
+                {
+                    Facing outward = Facing.FromRadians(2f * MathF.PI * i / bearings);
+                    Vec2 candidate = want + outward.ToVector() * radius;
+
+                    if (!CanStandThere(battle, unit, candidate, front)) continue;
+
+                    // Distance from the order is a cost like any other rather
+                    // than a gate. Gating on it — taking the first ring with
+                    // anything acceptable on it — reads well but means the
+                    // preferences below can never actually move a regiment: the
+                    // ordered point itself always wins if it is merely legal,
+                    // however bad it is to stand on.
+                    float score = radius
+                                + ScorePlacement(battle, unit, candidate, front)
+                                + Vec2.Distance(candidate, unit.Position) * WalkingIsCheap;
+
+                    if (score >= best) continue;
+
+                    best = score;
+                    placement = candidate;
+                    found = true;
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// What a metre of extra walking is worth against the other preferences.
+        /// </summary>
+        /// <remarks>
+        /// Small, and it exists to break ties rather than to decide anything.
+        /// Every candidate on a ring sits the same distance from the order, so
+        /// without this the choice between them falls to whichever bearing
+        /// happened to be tried first — which put regiments on the far side of
+        /// the very thing they were going round.
+        /// </remarks>
+        private const float WalkingIsCheap = 0.1f;
+
+        /// <summary>Whether a regiment could legally stand at a placement at all.</summary>
+        private static bool CanStandThere(BattleState battle, UnitInstance unit, Vec2 where, Facing front)
+        {
+            if (!battle.FormationFits(unit, where, front)) return false;
+
+            var shape = new OrientedRect(where, front, unit.Footprint);
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id) continue;
+                if (!other.IsFighting) continue;
+
+                if (OrientedRect.OverlapFraction(shape, other.Shape) > GrazingTolerance)
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>How much this regiment would rather not stand somewhere. Lower is better.</summary>
+        /// <remarks>
+        /// Only ever compares placements at the same distance from the ordered
+        /// point, so every term here is a tie-break: bad ground, ground an enemy
+        /// commands, and ground that would need the front swung round to reach.
+        /// </remarks>
+        private static float ScorePlacement(BattleState battle, UnitInstance unit, Vec2 where, Facing front)
+        {
+            float score = 0f;
+
+            // Standing in a swamp is worse than standing beside one.
+            score += battle.TerrainAt(where).Get(TerrainAttributes.Disorder) * 100f;
+
+            // Parking inside a spear wall's reach is not a reposition, it is an
+            // attack nobody ordered. Only for marches — an attack means to be
+            // there, and that is the entire point of it.
+            if (unit.Order.Kind != OrderKind.Attack)
+            {
+                var shape = new OrientedRect(where, front, unit.Footprint);
+
+                foreach (UnitInstance enemy in battle.UnitsOnField())
+                {
+                    if (enemy.Owner == unit.Owner) continue;
+                    if (!enemy.IsFighting) continue;
+
+                    if (OrientedRect.Within(shape, enemy.Shape, enemy.ZoneOfControl))
+                        score += 40f;
+                }
+            }
+
+            return score;
+        }
 
         /// <summary>Step size when hunting back from an unreachable goal, in metres.</summary>
         private const float ReachableProbeStep = 12f;

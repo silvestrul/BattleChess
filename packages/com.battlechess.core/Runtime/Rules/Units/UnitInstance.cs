@@ -247,6 +247,24 @@ namespace BattleChess.Rules
         /// </remarks>
         public Facing? DressingBearing { get; set; }
 
+        // ---- Whether a march is getting anywhere -------------------------------
+
+        /// <summary>The closest this regiment has come to its goal on this order.</summary>
+        public float NearestApproach { get; set; } = float.MaxValue;
+
+        /// <summary>Ticks since it last got meaningfully closer.</summary>
+        public int TicksWithoutProgress { get; set; }
+
+        /// <summary>How many times this order has been re-planned after stalling.</summary>
+        public int FailedReplans { get; set; }
+
+        /// <summary>Forgets what the march had achieved, as when a fresh one begins.</summary>
+        public void ForgetProgress()
+        {
+            NearestApproach = float.MaxValue;
+            TicksWithoutProgress = 0;
+        }
+
         /// <summary>
         /// How long a march has to be, as a multiple of the regiment's own
         /// frontage, before it is worth changing front for.
@@ -307,6 +325,9 @@ namespace BattleChess.Rules
             Route = null;
             HeldUpBy = UnitId.None;
             DressingBearing = null;
+
+            ForgetProgress();
+            FailedReplans = 0;
 
             if (order.StanceOverride.HasValue)
                 Stance = order.StanceOverride.Value;

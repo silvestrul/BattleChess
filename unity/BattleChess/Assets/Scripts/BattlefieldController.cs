@@ -1377,13 +1377,29 @@ namespace BattleChess.Unity
                 ? direct.SearchLayout
                 : ((HexPathfinder)pathfinder).SearchLayout;
 
-            // Aim for the nearest ground the unit could actually stand on. Every
-            // map is ringed with impassable country, so a click near the edge —
-            // or on the mountains themselves — asked for a goal no route can
-            // ever end at. The pathfinder rightly refused, and the regiment just
-            // sat there while the player clicked at it. Ordering a march to the
-            // sea should walk to the beach, not decline to move.
-            destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
+            // Aim for the best ground near the click that the regiment could
+            // actually stand on. Every map is ringed with impassable country and
+            // half the good ground already has somebody on it, so a click asks
+            // for a goal no route can end at more often than not. The pathfinder
+            // rightly refused, and the regiment sat there while the player
+            // clicked at it. Ordering a march to the sea should walk to the
+            // beach, not decline to move.
+            //
+            // Same search the rules use when a march stalls, so a click and a
+            // re-plan agree about where "there" is.
+            if (OrderSystem.TryFindPlacement(_battle, unit, destination, bearing ?? unit.Facing, out Vec2 stand))
+            {
+                if (Vec2.Distance(stand, destination) > 1f)
+                    _console.Info("Path",
+                        $"{unit.Def.DisplayName} is aiming {Vec2.Distance(stand, destination):0} m off that " +
+                        "point — the ground there is taken or impassable.", unit.Id);
+
+                destination = stand;
+            }
+            else
+            {
+                destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
+            }
 
             PathResult path = pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
 
