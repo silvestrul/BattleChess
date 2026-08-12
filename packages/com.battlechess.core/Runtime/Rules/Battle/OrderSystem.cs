@@ -714,24 +714,32 @@ namespace BattleChess.Rules
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Judged from where the attackers were standing when they were sent,
-        /// averaged over all of them — not from where they have got to. Two
-        /// separate things go wrong otherwise, and both were seen.
+        /// Judged from where <i>this</i> regiment was standing when it was sent,
+        /// and from nowhere else. Two other versions were tried and both were
+        /// wrong in instructive ways.
         /// </para>
         /// <para>
         /// Read from a regiment's live position, the choice feeds back on
         /// itself: an attacker takes its slot beside the enemy's front, which
         /// leaves it a few metres in front and twenty to one side, and on the
         /// next re-plan that reads exactly like standing off the flank — so the
-        /// attack hauls itself round the corner one re-plan at a time. Read from
-        /// the middle of the attackers instead, it still swings while half of
-        /// them are strung out on the march.
+        /// attack hauls itself round the corner one re-plan at a time.
         /// </para>
         /// <para>
-        /// Where they set off from cannot move, so it settles both. It also
-        /// hands the player the choice without needing a control for it: the
-        /// face follows from where the regiments were standing when the order
-        /// was given, and re-ordering them from somewhere else changes it.
+        /// Averaged over every attacker, it stops feeding back but starts
+        /// outvoting people. A regiment deliberately sent round the flank while
+        /// another engaged the front was dragged to the front by its partner:
+        /// alone it took the flank at ninety degrees, and in company it came in
+        /// at a hundred and eighty. That destroyed the hammer and anvil, which
+        /// is most of the reason to have two regiments in the first place.
+        /// </para>
+        /// <para>
+        /// Where <i>you</i> set off from cannot move and cannot be outvoted.
+        /// Regiments sent from the same side reach the same answer on their own
+        /// and share a face without being made to; one sent from round the
+        /// flank keeps its own. It also hands the player the choice without
+        /// needing a control for it — the face follows from where a regiment
+        /// stood when the order was given.
         /// </para>
         /// <para>
         /// Deliberately still read against the enemy's <i>current</i> bearing.
@@ -742,23 +750,17 @@ namespace BattleChess.Rules
         /// regiments that should have held.
         /// </para>
         /// </remarks>
-        private static Vec2 ChooseFace(BattleState battle, UnitInstance unit, UnitInstance quarry)
+        private static Vec2 ChooseFace(BattleState battle, UnitInstance unit, UnitInstance quarry) =>
+            FaceFrom(quarry, unit.OrderAnchor);
+
+        /// <summary>
+        /// The outward normal of the face a regiment standing at
+        /// <paramref name="from"/> would form on.
+        /// </summary>
+        private static Vec2 FaceFrom(UnitInstance quarry, Vec2 from)
         {
-            Vec2 setOffFrom = Vec2.Zero;
-            int attackers = 0;
-
-            foreach (UnitInstance other in battle.UnitsOnField())
-            {
-                if (!IsGoingFor(other, unit, quarry)) continue;
-
-                setOffFrom += other.OrderAnchor;
-                attackers++;
-            }
-
-            setOffFrom = attackers > 0 ? setOffFrom / attackers : unit.Position;
-
             OrientedRect theirs = quarry.Shape;
-            Vec2 offset = setOffFrom - quarry.Position;
+            Vec2 offset = from - quarry.Position;
 
             float offTheFront = Vec2.Dot(offset, theirs.Forward);
             float offTheFlank = Vec2.Dot(offset, theirs.Right);
@@ -806,12 +808,21 @@ namespace BattleChess.Rules
         private static float PlaceInTheAttackingLine(
             BattleState battle, UnitInstance unit, UnitInstance quarry)
         {
+            Vec2 ourFace = ChooseFace(battle, unit, quarry);
+
             float wholeLine = 0f;
             float aheadOfUs = 0f;
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 if (!IsGoingFor(other, unit, quarry)) continue;
+
+                // Only the regiments coming in on the same face share a line
+                // with us. One sent round the flank is fighting its own battle
+                // over there and must not be given a slot in this one, or the
+                // frontal line is spaced out around a gap left for somebody who
+                // is never going to fill it.
+                if (Vec2.Dot(FaceFrom(quarry, other.OrderAnchor), ourFace) < 0.9f) continue;
 
                 float berth = other.Footprint.Width + ShoulderRoomMetres;
 

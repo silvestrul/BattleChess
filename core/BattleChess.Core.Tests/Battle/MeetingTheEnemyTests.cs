@@ -90,10 +90,12 @@ namespace BattleChess.Tests.Battle
             UnitInstance foot = field.Add(1, "spearmen", field.Centre, Facing.West);
             Battlefield.Hold(foot);
 
-            // One squarely in front, one well off to the side — which on its own
-            // would go round the flank.
-            UnitInstance left = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, 0f), Facing.East);
-            UnitInstance right = field.Add(0, "swordsmen", field.Centre - new Vec2(40f, 240f), Facing.East);
+            // Both sent from in front of it, one a little to either side of the
+            // line of approach. Neither is anywhere near round the flank, so
+            // both should square up — and having agreed on the face, they have
+            // to divide it rather than both aiming at the middle of it.
+            UnitInstance left = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, -60f), Facing.East);
+            UnitInstance right = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, 60f), Facing.East);
 
             Battlefield.Press(left, foot);
             Battlefield.Press(right, foot);
@@ -109,6 +111,31 @@ namespace BattleChess.Tests.Battle
             // Side by side rather than one behind the other.
             Assert.False(OrientedRect.Overlaps(left.Shape, right.Shape),
                 "And they should be standing beside each other, not in the same field.");
+        }
+
+        [Fact]
+        public void ARegimentSentRoundTheFlankStillFlanksWhileItsPartnerHoldsTheFront()
+        {
+            var field = new Battlefield("plains", 24500);
+
+            UnitInstance foot = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(foot);
+
+            // One squarely in front, one squarely off the southern flank. The
+            // hammer and the anvil, which is most of the reason to have two
+            // regiments at all.
+            UnitInstance front = field.Add(0, "swordsmen", field.Centre - new Vec2(260f, 0f), Facing.East);
+            UnitInstance flanker = field.Add(0, "cavalry", field.Centre - new Vec2(0f, 260f), Facing.North);
+
+            Battlefield.Press(front, foot);
+            Battlefield.Press(flanker, foot);
+
+            field.RunUntil(() => OrderSystem.InContactWith(flanker, foot), maxTurns: 10);
+
+            Assert.True(Perpendicular(flanker, foot),
+                $"Sent round the flank, it should arrive on the flank — it is {Between(flanker, foot):0}° off " +
+                "the defender's front. Judged from the middle of both attackers it was outvoted by its " +
+                "partner and dragged round to the front.");
         }
 
         [Fact]
