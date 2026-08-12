@@ -1519,7 +1519,11 @@ namespace BattleChess.Unity
                     UnitOrder.MoveTo(destination, _options.WheelBeforeMarching, bearing: bearing), unit.Position);
                 unit.Route = new MovementRoute(path.Waypoints, _options.WheelBeforeMarching);
 
-                float offBy = Facing.AbsoluteDelta(unit.Facing, Facing.Towards(unit.Position, path.Waypoints[1])) * Mathf.Rad2Deg;
+                // Against the front it will actually hold, not against the line
+                // of march. Those are different whenever a bearing was drawn,
+                // and reporting the wrong one had the console promising a wheel
+                // that was never going to happen.
+                float offBy = Facing.AbsoluteDelta(unit.Facing, unit.OrderFacing) * Mathf.Rad2Deg;
                 float turnRate = unit.Def.Get(UnitAttributes.TurnRate);
                 float wheelSeconds = offBy / Mathf.Max(1f, turnRate);
 

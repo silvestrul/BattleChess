@@ -279,22 +279,28 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void AShortShuffleBackwardsIsNotWorthTurningRoundFor()
+        public void AShortMoveTakenMidWheelDoesNotFreezeTheTurn()
         {
             var field = new Battlefield("plains", 21800);
 
             UnitInstance foot = field.Add(0, "swordsmen", field.Centre, Facing.East);
 
-            // A nudge of a few metres, backwards. Coming about for this would
-            // swing the whole line through a half circle to cover a distance
-            // shorter than the regiment is wide, which made small corrections
-            // near the front line unusable.
-            field.March(foot, field.Centre - new Vec2(foot.Footprint.Width * 0.4f, 0f));
+            // Sent north, then given a small correction while still coming
+            // round. While a short move held the current front, this wrote
+            // whatever partial angle the regiment had reached as the front to
+            // hold — and left it stopped there, half turned, for good. It was
+            // the second half of the same report as the one above.
+            field.March(foot, field.Centre + new Vec2(0f, 200f));
+            field.RunPulses(1);
 
-            field.RunTurns(1);
+            Assert.True(Facing.AbsoluteDelta(foot.Facing, Facing.North) > 0.1f,
+                "This test is worthless unless it is still part-way round when the second order lands.");
 
-            Assert.True(Facing.AbsoluteDelta(foot.Facing, Facing.East) < 0.05f,
-                $"It should have edged back holding its front, not wheeled about: facing " +
+            field.March(foot, foot.Position + new Vec2(0f, 12f));
+            field.RunTurns(3);
+
+            Assert.True(Facing.AbsoluteDelta(foot.Facing, Facing.North) < 0.15f,
+                $"Both orders pointed north and it should have finished coming round: it is facing " +
                 $"{foot.Facing.Degrees:0}°.");
         }
 

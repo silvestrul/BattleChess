@@ -28,22 +28,43 @@ namespace BattleChess.Tests.Battle
     public sealed class ArrivalFacingTests
     {
         [Fact]
-        public void AShortRepositionLeavesTheFrontWhereItWas()
+        public void EvenAShortAdjustmentFacesTheWayItIsGoing()
         {
             var field = new Battlefield("plains", 22000);
 
             UnitInstance unit = field.Add(0, "cavalry", field.Centre, Facing.East);
-            Facing before = unit.Facing;
 
-            // A nudge to its left, a fraction of the regiment's own width.
-            // Coming about for this would spin the whole frontage through a
-            // right angle to cover a few strides.
-            field.March(unit, field.Centre + new Vec2(0f, unit.Footprint.Width * 0.3f));
+            // Ten metres to its left. Three separate rules have tried to say how
+            // long a move must be before a regiment turns to face it, and every
+            // one of them was reported as a regiment ignoring an order — the
+            // last recording had nothing under eighteen metres turning at all.
+            // Fine adjustments are where a player is most particular about
+            // which way a regiment points.
+            field.March(unit, field.Centre + new Vec2(0f, 10f));
             field.RunTurns(3);
 
-            Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, before)) < 5f,
-                $"It set off facing {before.Degrees:0}° and ended facing {unit.Facing.Degrees:0}°. " +
-                "A shuffle sideways is not a change of front.");
+            Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, Facing.North)) < 10f,
+                $"Sent ten metres north, it is facing {unit.Facing.Degrees:0}°.");
+        }
+
+        [Fact]
+        public void AnOrderToStandStillDoesNotSwingTheArmyEast()
+        {
+            var field = new Battlefield("plains", 22010);
+
+            UnitInstance unit = field.Add(0, "cavalry", field.Centre, Facing.North);
+
+            // Told to go where it already is, which happens routinely in a group
+            // order where every member is displaced by the same amount and one
+            // of them is already there. There is no line of march to face along,
+            // and the bearing of a zero-length vector is due east — so without a
+            // guard the whole army would swing east the first time it happened.
+            unit.GiveOrder(UnitOrder.MoveTo(unit.Position), unit.Position);
+
+            field.RunTurns(1);
+
+            Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, Facing.North)) < 1f,
+                $"It was facing north and is now facing {unit.Facing.Degrees:0}°.");
         }
 
         [Fact]

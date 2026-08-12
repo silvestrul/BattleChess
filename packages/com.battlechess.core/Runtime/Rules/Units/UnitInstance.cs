@@ -288,41 +288,42 @@ namespace BattleChess.Rules
         public Facing GoingRoundBearing { get; set; }
 
         /// <summary>
-        /// How long a march has to be, as a multiple of the regiment's own
-        /// frontage, before it is worth changing front for.
+        /// Shorter than this and an order is not a move at all, in metres.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// The one thing that decides it. A body of men told to go somewhere
-        /// turns and marches there; the exception is the short reposition, where
-        /// swinging a whole line round to shuffle forty metres costs far more
-        /// than crabbing sideways does. So it is a question of distance, not of
-        /// angle.
+        /// A guard against a degenerate order rather than a rule about
+        /// manoeuvre. A destination on top of the regiment gives no line of
+        /// march to face along, and asking for the bearing of a zero-length
+        /// vector answers due east — which would swing an army to face east the
+        /// first time one of its regiments was told to go where it already is.
+        /// That happens routinely in a group order, where every member is
+        /// displaced by the same amount and one of them may already be there.
         /// </para>
         /// <para>
-        /// Gating it on angle instead was wrong twice over and both were
-        /// reported. At first nothing but a reversal turned a regiment, so one
-        /// ordered backwards walked backwards at a fifth of its pace. Fixing
-        /// only the reversal left every smaller correction stuck: sent off at
-        /// twenty degrees and then at fifty, a regiment kept the twenty it
-        /// started with, because neither leg was a big enough swing to qualify.
-        /// A march is a march at any bearing.
+        /// There is deliberately no larger threshold than this. Three separate
+        /// versions of one tried to say how long a move must be before a
+        /// regiment turns to face it — two frontages, then half a frontage —
+        /// and each was reported as a regiment ignoring an order. The last
+        /// recording settled it: every move that failed to turn was between
+        /// nine and eighteen metres, and every one that turned was twenty-three
+        /// or more. Fine adjustments are exactly where a player is most
+        /// particular about which way a regiment points.
         /// </para>
         /// <para>
-        /// Drawing a bearing overrides this either way. Holding a front across a
-        /// long move — a fighting withdrawal facing the enemy, a line sidling
-        /// along its own front — is a real order, and it should be one somebody
-        /// deliberately gives.
+        /// It also caused the second half of that report — a regiment stopping
+        /// part-way round. A short order taken mid-wheel wrote the <i>current</i>
+        /// facing as the front to hold, freezing the regiment at whatever angle
+        /// it had reached.
         /// </para>
         /// <para>
-        /// Half a frontage, roughly twenty metres, which is a nudge and not a
-        /// move. It was two whole frontages, a figure inherited from when a
-        /// regiment was a hundred and six metres wide; at forty it swallowed
-        /// ordinary orders, and a march of sixty metres at a fresh bearing was
-        /// carried out sideways on the old front.
+        /// Holding a front across a move is still there, and is now the only
+        /// thing the drag means: a fighting withdrawal facing the enemy, a line
+        /// sidling along its own front. Both are real orders and both should be
+        /// ones somebody deliberately gives.
         /// </para>
         /// </remarks>
-        private const float WorthChangingFrontFor = 0.5f;
+        private const float NotReallyAMoveMetres = 2f;
 
         /// <summary>
         /// The front to hold for an order that did not name one.
@@ -333,7 +334,7 @@ namespace BattleChess.Rules
 
             Vec2 toDestination = order.Destination - anchor;
 
-            if (toDestination.Length < Footprint.Width * WorthChangingFrontFor) return Facing;
+            if (toDestination.Length < NotReallyAMoveMetres) return Facing;
 
             return Facing.FromVector(toDestination);
         }
