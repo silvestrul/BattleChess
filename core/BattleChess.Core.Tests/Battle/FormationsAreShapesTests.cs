@@ -120,15 +120,60 @@ namespace BattleChess.Tests.Battle
                 "petering out.");
         }
 
-        [Fact(Skip = "Reported and deliberately left standing — cavalry breakthrough 1.5 still beats " +
-                     "cavalry stopping power 1.2, so horse rides through horse. One number in units.cfg.")]
+        [Fact]
         public void HorseIsHeldByHorse()
         {
-            // Worth keeping visible rather than fixing quietly. Riding through
-            // no longer *pays* — a charge is spent on impact and has to be
-            // re-earned — but the pass-through itself is still there, and it is
-            // the reason cavalry can reach an archer line standing behind its
-            // own horsemen.
+            // Left standing as a skipped test for a long time: cavalry
+            // breakthrough of 1.5 beat cavalry stopping power of 1.2, so horse
+            // rode clean through horse and could reach an archer line standing
+            // behind its own cavalry screen. It was never a number worth tuning
+            // — a body of horse does not stand and get shouldered aside, it
+            // gives ground and wheels and is in your way again — so the rule
+            // says so outright.
+            var field = new Battlefield("plains", 14500);
+
+            UnitInstance screen = field.Add(1, "cavalry", field.Centre, Facing.West);
+            Battlefield.Hold(screen);
+
+            Vec2 start = field.Centre - new Vec2(300f, 0f);
+            Vec2 beyond = field.Centre + new Vec2(300f, 0f);
+
+            UnitInstance charging = field.Add(0, "cavalry", start, Facing.East);
+            field.March(charging, beyond);
+
+            field.RunTurns(5);
+
+            Assert.True(charging.Position.X < screen.Position.X,
+                $"It should have been stopped on the near side of them, not ridden through: it reached " +
+                $"x={charging.Position.X:0} against the screen at x={screen.Position.X:0}.");
+
+            Assert.True(field.TimesSaid("horse is not ridden through") > 0,
+                "And the reason should be on screen rather than left to be inferred from a stalled march.");
+        }
+
+        [Fact]
+        public void HorseStillRidesThroughFootThatIsNotBracedForIt()
+        {
+            // The other half of it. Blocking horse from riding through horse
+            // must not quietly become blocking it from riding through anybody,
+            // or the whole point of cavalry goes with it.
+            var field = new Battlefield("plains", 14600);
+
+            UnitInstance foot = field.Add(1, "swordsmen", field.Centre, Facing.West);
+            Battlefield.Hold(foot);
+
+            Vec2 start = field.Centre - new Vec2(300f, 0f);
+            Vec2 beyond = field.Centre + new Vec2(300f, 0f);
+
+            UnitInstance charging = field.Add(0, "cavalry", start, Facing.East);
+            charging.Stance = Stance.Advance;
+            field.March(charging, beyond);
+
+            field.RunTurns(5);
+
+            Assert.True(charging.Position.X > foot.Position.X,
+                $"Swordsmen are not braced for horse and should be ridden through: the cavalry only reached " +
+                $"x={charging.Position.X:0} against them at x={foot.Position.X:0}.");
         }
 
         // ---- Terrain under the whole formation ----------------------------------

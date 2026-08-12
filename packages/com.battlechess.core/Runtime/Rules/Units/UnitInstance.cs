@@ -248,27 +248,34 @@ namespace BattleChess.Rules
         public Facing? DressingBearing { get; set; }
 
         /// <summary>
-        /// How far off its front a march can run before the regiment turns to
-        /// face it instead of edging along, in radians.
+        /// How long a march has to be, as a multiple of the regiment's own
+        /// frontage, before it is worth changing front for.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Holding the front through a move is right for a sidestep and absurd
-        /// for a withdrawal: told to fall back, a regiment would walk backwards
-        /// the whole way at a fifth of its pace, which is not a manoeuvre anyone
-        /// has ever ordered.
+        /// The one thing that decides it. A body of men told to go somewhere
+        /// turns and marches there; the exception is the short reposition, where
+        /// swinging a whole line round to shuffle forty metres costs far more
+        /// than crabbing sideways does. So it is a question of distance, not of
+        /// angle.
         /// </para>
         /// <para>
-        /// A right angle is where the arithmetic already turns over. Speed falls
-        /// away with the square of how far off the line of march a unit points,
-        /// so past ninety degrees a regiment is crawling badly enough that
-        /// wheeling and marching properly is quicker even counting the wheel.
-        /// Drawing a bearing overrides this either way — a fighting withdrawal
-        /// facing the enemy is a real order, and it should be one you have to
-        /// actually give.
+        /// Gating it on angle instead was wrong twice over and both were
+        /// reported. At first nothing but a reversal turned a regiment, so one
+        /// ordered backwards walked backwards at a fifth of its pace. Fixing
+        /// only the reversal left every smaller correction stuck: sent off at
+        /// twenty degrees and then at fifty, a regiment kept the twenty it
+        /// started with, because neither leg was a big enough swing to qualify.
+        /// A march is a march at any bearing.
+        /// </para>
+        /// <para>
+        /// Drawing a bearing overrides this either way. Holding a front across a
+        /// long move — a fighting withdrawal facing the enemy, a line sidling
+        /// along its own front — is a real order, and it should be one somebody
+        /// deliberately gives.
         /// </para>
         /// </remarks>
-        private const float TurnAboutBeyond = MathF.PI * 0.5f;
+        private const float WorthChangingFrontFor = 2f;
 
         /// <summary>
         /// The front to hold for an order that did not name one.
@@ -279,16 +286,9 @@ namespace BattleChess.Rules
 
             Vec2 toDestination = order.Destination - anchor;
 
-            // Nothing shorter than the regiment's own frontage is worth coming
-            // about for. A nudge of a few metres was enough to spin a whole line
-            // through a half circle if it happened to point backwards, which is
-            // an absurd answer to being asked to shuffle sideways — and it made
-            // small corrections near the front line unusable.
-            if (toDestination.Length < Footprint.Width) return Facing;
+            if (toDestination.Length < Footprint.Width * WorthChangingFrontFor) return Facing;
 
-            Facing lineOfMarch = Facing.FromVector(toDestination);
-
-            return Facing.AbsoluteDelta(Facing, lineOfMarch) > TurnAboutBeyond ? lineOfMarch : Facing;
+            return Facing.FromVector(toDestination);
         }
 
         /// <summary>Gives the unit a new instruction, clearing any current march.</summary>

@@ -33,7 +33,7 @@ namespace BattleChess.Unity
         private const float MinSymbolMetres = 7f;
 
         /// <summary>Nor larger, or a deep column wears a badge wider than itself.</summary>
-        private const float MaxSymbolMetres = 13f;
+        private const float MaxSymbolMetres = 22f;
 
         private SpriteRenderer _body;
         private SpriteRenderer _symbol;
@@ -177,8 +177,10 @@ namespace BattleChess.Unity
             // Thicken and colour the front edge while coming round, so a wheel
             // reads as a deliberate manoeuvre instead of the sprite happening to
             // rotate.
+            // Scaled off the plate rather than fixed, so the bar stays a legible
+            // stripe along the front however thick the regiment is drawn.
             bool wheeling = offByDegrees > 8f;
-            float edgeThickness = wheeling ? 4.5f : 2f;
+            float edgeThickness = drawnDepth * (wheeling ? 0.22f : 0.1f);
 
             // Sits on the front of the drawn body, not the true one, or it floats
             // inside a regiment that is being drawn thicker than it is.

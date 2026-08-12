@@ -158,7 +158,7 @@ namespace BattleChess.Rules
                     return;
                 }
 
-                if (breakthrough > stopping)
+                if (breakthrough > stopping && CanBeRiddenThrough(enemy))
                 {
                     // Through, but not unscathed — and the line being ridden
                     // through suffers for it too.
@@ -175,15 +175,17 @@ namespace BattleChess.Rules
                     continue;
                 }
 
-                // Say which of the three levers stopped them, so the answer to
-                // "why can't I get through" is on screen rather than inferred.
-                // Once per hold-up, not once per tick.
+                // Say which of the levers stopped them, so the answer to "why
+                // can't I get through" is on screen rather than inferred. Once
+                // per hold-up, not once per tick.
                 if (unit.HeldUpBy != enemy.Id)
                     log.Blocked("Contact",
                         $"{unit.Def.DisplayName} ({unit.FormationOrder.DisplayName}) halted by {enemy.Def.DisplayName} " +
                         $"({enemy.FormationOrder.DisplayName}, organization {enemy.Organization:0.00}) " +
                         $"at {OrientedRect.GapBetween(shape, enemy.Shape):0} m — " +
-                        $"breakthrough {breakthrough:0.00} against stopping power {stopping:0.00}.",
+                        (CanBeRiddenThrough(enemy)
+                            ? $"breakthrough {breakthrough:0.00} against stopping power {stopping:0.00}."
+                            : "horse is not ridden through, at any weight."),
                         unit.Id);
 
                 unit.Route = null;
@@ -191,6 +193,31 @@ namespace BattleChess.Rules
                 return;
             }
         }
+
+        /// <summary>
+        /// Whether a body of men can be forced through at all, however hard the
+        /// weight of the attempt.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Horse cannot be ridden through by anybody. Breaking through works
+        /// because a formation on foot is a wall of men who must either hold or
+        /// be shouldered aside; a body of horse is neither — it gives ground,
+        /// wheels and is in your way again, and no amount of momentum resolves
+        /// that. A recorded game had cavalry riding clean through cavalry on the
+        /// numbers alone, 1.5 of breakthrough against 1.2 of stopping power,
+        /// which is arithmetic rather than anything that could happen.
+        /// </para>
+        /// <para>
+        /// A judgement about how the troops move rather than about what they are
+        /// called, so any mounted unit added later inherits it without being
+        /// told. Foot and guns are still ridden through on the numbers, which is
+        /// where the spear wall does its work: braced spears stop at 2.0 against
+        /// a charge worth 1.5, and swordsmen at 1.0 do not.
+        /// </para>
+        /// </remarks>
+        private static bool CanBeRiddenThrough(UnitInstance enemy) =>
+            enemy.Def.Movement != MovementType.Horse;
 
         /// <summary>
         /// How near a unit must be to its ordered target before other people's

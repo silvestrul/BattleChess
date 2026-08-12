@@ -70,8 +70,15 @@ namespace BattleChess.Unity
         /// thing the player is reading it for — which is what the earlier
         /// half-scale drawing got wrong in the other direction.
         /// </para>
+        /// <para>
+        /// Nothing in the rules reads this. The men are still ten ranks at a
+        /// metre apart holding six metres of depth; contact, zones of control,
+        /// terrain under the formation and whether two bodies can share ground
+        /// all use the real footprint, so the only thing a thicker bar changes
+        /// is how easy it is to see.
+        /// </para>
         /// </remarks>
-        public const float DrawnDepthExaggeration = 2f;
+        public const float DrawnDepthExaggeration = 4f;
 
         /// <summary>The depth a regiment is drawn and hit-tested at, in metres.</summary>
         public static float DrawnDepthOf(Footprint footprint) =>
