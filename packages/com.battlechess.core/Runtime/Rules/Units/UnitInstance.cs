@@ -265,6 +265,28 @@ namespace BattleChess.Rules
             TicksWithoutProgress = 0;
         }
 
+        /// <summary>The friendly regiment this one is currently working its way round.</summary>
+        /// <remarks>
+        /// Kept so the choice of side is made once and then held. Deciding it
+        /// afresh every tick is what produced the thrashing: a regiment sitting
+        /// on the line that separates the two answers gets a different one each
+        /// time it asks.
+        /// </remarks>
+        public UnitId GoingRound { get; set; } = UnitId.None;
+
+        /// <summary>
+        /// The bearing it committed to stepping off along, to get round
+        /// <see cref="GoingRound"/>.
+        /// </summary>
+        /// <remarks>
+        /// A bearing on the world and not a side of the line of march. Storing
+        /// it as a side does not work: the perpendicular is taken from the
+        /// current heading, and the heading is itself being turned by the
+        /// deflection — so "the same side" quietly means a different direction
+        /// every tick, and the commitment holds nothing.
+        /// </remarks>
+        public Facing GoingRoundBearing { get; set; }
+
         /// <summary>
         /// How long a march has to be, as a multiple of the regiment's own
         /// frontage, before it is worth changing front for.
@@ -328,6 +350,7 @@ namespace BattleChess.Rules
 
             ForgetProgress();
             FailedReplans = 0;
+            GoingRound = UnitId.None;
 
             if (order.StanceOverride.HasValue)
                 Stance = order.StanceOverride.Value;

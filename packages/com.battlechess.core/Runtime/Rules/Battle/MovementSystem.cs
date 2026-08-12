@@ -306,13 +306,39 @@ namespace BattleChess.Rules
             if (unit.State == UnitState.Routing) return next;
 
             UnitInstance? blocker = FriendInTheWay(battle, unit, next);
-            if (blocker == null) return next;
 
-            if (!OrientedRect.TryGetSeparation(
-                    new OrientedRect(next, unit.Facing, unit.Footprint), blocker.Shape, out Vec2 apart))
+            if (blocker == null)
+            {
+                unit.GoingRound = UnitId.None;
                 return next;
+            }
 
-            Vec2 away = apart.Normalised();
+            // Whoever has to give way. A regiment already standing where it
+            // means to stand is not shoved off it to make room for one still
+            // walking, and one at grips with an enemy is not pulled out of the
+            // fight — so the mover goes round, and between two movers the higher
+            // number yields. Arbitrary, total, and reproducible from the seed,
+            // which is what matters: without a rule they either both give way
+            // and drift, or neither does and they jam.
+            if (!MustGiveWayTo(unit, blocker)) return next;
+
+            var stepped = new OrientedRect(next, unit.Facing, unit.Footprint);
+
+            // Which way is "off them". Overlapping, the shortest way out of the
+            // overlap; merely too close, the line from their nearest point to
+            // our centre — because a regiment keeping its distance has no
+            // overlap to be pushed out of, and asking for one gives no answer
+            // at all. That was why the berth found its blocker and then failed
+            // to do anything about it.
+            Vec2 away = OrientedRect.TryGetSeparation(stepped, blocker.Shape, out Vec2 apart)
+                ? apart
+                : stepped.Centre - blocker.Shape.ClosestPointTo(stepped.Centre);
+
+            if (away.IsNearZero) away = unit.Position - blocker.Position;
+            if (away.IsNearZero) return next;
+
+            away = away.Normalised();
+
             Vec2 intended = next - unit.Position;
             Vec2 alongside = intended - away * Vec2.Dot(intended, away);
 
@@ -359,22 +385,46 @@ namespace BattleChess.Rules
             // every few ticks: a recorded run had cavalry cover thirty-eight
             // metres in its first turn and then rock between two positions eight
             // metres apart for the next seven. The line of march does not swing.
-            Vec2 heading = intended / reach;
-            Vec2 pastTheirFlank = new Vec2(-heading.Y, heading.X);
+            Vec2 pastTheirFlank;
 
-            if (Vec2.Dot(unit.Position - blocker.Position, pastTheirFlank) < 0f)
-                pastTheirFlank = -pastTheirFlank;
+            // Which way round is settled once and then kept until this blocker
+            // is behind us. Deciding it afresh every tick is what produced the
+            // seizure: a regiment sitting on the blocker's centreline gets a
+            // different answer each time it asks, and thrashes between the two.
+            if (unit.GoingRound == blocker.Id)
+            {
+                pastTheirFlank = unit.GoingRoundBearing.ToVector();
+            }
+            else
+            {
+                Vec2 heading = intended / reach;
+                pastTheirFlank = new Vec2(-heading.Y, heading.X);
+
+                // Toward whichever end of them we are already nearer, so the
+                // detour is the short way round.
+                if (Vec2.Dot(unit.Position - blocker.Position, pastTheirFlank) < 0f)
+                    pastTheirFlank = -pastTheirFlank;
+
+                unit.GoingRound = blocker.Id;
+                unit.GoingRoundBearing = Facing.FromVector(pastTheirFlank);
+            }
 
             for (int attempt = 0; attempt < 2; attempt++)
             {
-                // The nearer end first; the far one only if that way is blocked
-                // as well, which is what happens threading a packed line.
+                // The committed side first; the other only if that way is
+                // blocked as well, which is what happens threading a packed
+                // line.
                 Vec2 thisWay = attempt == 0 ? pastTheirFlank : -pastTheirFlank;
 
                 Vec2 round = KeepOnTheField(battle, unit, unit.Position + thisWay * reach);
 
                 if (FriendInTheWay(battle, unit, round) != null) continue;
                 if (!stuckAlready && !battle.FormationFits(unit, round, unit.Facing)) continue;
+
+                // If the far side was the one that worked, that is the new
+                // commitment — otherwise the next tick starts from the blocked
+                // side again and nothing has been learned.
+                unit.GoingRoundBearing = Facing.FromVector(thisWay);
 
                 if (tick % 30 == 0)
                     log.Decision("Move",
@@ -404,15 +454,73 @@ namespace BattleChess.Rules
         private const float SlideIsWorthTaking = 0.5f;
 
         /// <summary>
-        /// A friendly formation this step would newly stand inside, if there is
-        /// one.
+        /// Whether this regiment is the one that has to make way.
         /// </summary>
         /// <remarks>
-        /// A unit already inside somebody is exempt for that pair. That happens
+        /// <para>
+        /// Read top to bottom: a regiment that has arrived is not shoved off its
+        /// ground by one still walking; a regiment at grips with an enemy is not
+        /// pulled out of the fight to let somebody past; and between two that
+        /// are both merely marching, the higher number gives way.
+        /// </para>
+        /// <para>
+        /// The last is arbitrary, and that is the point — it is total and it is
+        /// reproducible from the seed, which any rule about who moves has to be.
+        /// Without one, two regiments converging on the same ground either both
+        /// give way and drift, or neither does and they jam.
+        /// </para>
+        /// </remarks>
+        private static bool MustGiveWayTo(UnitInstance unit, UnitInstance other)
+        {
+            if (!other.IsMarching) return true;
+            if (!unit.IsMarching) return false;
+
+            if (other.EnemiesInContact > 0 && unit.EnemiesInContact == 0) return true;
+            if (unit.EnemiesInContact > 0 && other.EnemiesInContact == 0) return false;
+
+            return unit.Id.Value > other.Id.Value;
+        }
+
+        /// <summary>
+        /// How much clear ground a regiment leaves when it passes one of its
+        /// own, in metres.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Charged against passing, never against standing. Regiments drawn up
+        /// in line stand flush against each other — that is what a line is, and
+        /// it is the whole point of being able to handle a big army regiment by
+        /// regiment and then move the result as one body. A berth applied
+        /// everywhere would put daylight between every pair of neighbours and
+        /// make a proper line impossible to form.
+        /// </para>
+        /// <para>
+        /// While actually going past somebody it is different. Without it a
+        /// regiment grazes along its neighbour's flank at under two metres for
+        /// the length of the manoeuvre, which is what "they stick to the
+        /// infantry" was.
+        /// </para>
+        /// </remarks>
+        private const float BerthWhilePassingMetres = 6f;
+
+        /// <summary>
+        /// A friendly formation this step would newly crowd, if there is one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Corners clipping is not a collision. An army in line brushes
+        /// constantly, so anything under a twentieth of a regiment is ignored
+        /// outright — the same tolerance the placement search uses, so that
+        /// where a regiment is willing to stand and what it is willing to walk
+        /// through are one decision rather than two that can disagree.
+        /// </para>
+        /// <para>
+        /// A unit already lapping somebody is exempt for that pair. That happens
         /// — deployed overlapping, or widened into a neighbour by reshaping —
         /// and a regiment that cannot legally be where it is must still be able
         /// to walk off it, or it is stuck for the whole battle. The shuffle in
         /// <see cref="ContactSystem"/> is what resolves those.
+        /// </para>
         /// </remarks>
         private static UnitInstance? FriendInTheWay(BattleState battle, UnitInstance unit, Vec2 next)
         {
@@ -426,10 +534,20 @@ namespace BattleChess.Rules
                 if (!other.IsFighting) continue;
                 if (other.State == UnitState.Routing) continue;
 
-                if (!OrientedRect.Overlaps(stepped, other.Shape)) continue;
-                if (OrientedRect.Overlaps(here, other.Shape)) continue;
+                // Already lapping them, so this step cannot be what did it.
+                if (OrientedRect.OverlapFraction(here, other.Shape) > OrderSystem.GrazingTolerance) continue;
 
-                return other;
+                if (OrientedRect.OverlapFraction(stepped, other.Shape) > OrderSystem.GrazingTolerance)
+                    return other;
+
+                // Not touching them, but closing to within a hand's breadth
+                // while going somewhere — which is gluing itself to them rather
+                // than passing them. Only while marching: a regiment that has
+                // arrived beside a neighbour stands flush.
+                if (unit.IsMarching &&
+                    OrientedRect.GapBetween(stepped, other.Shape) < BerthWhilePassingMetres &&
+                    OrientedRect.GapBetween(here, other.Shape) >= BerthWhilePassingMetres)
+                    return other;
             }
 
             return null;

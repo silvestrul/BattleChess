@@ -110,6 +110,87 @@ namespace BattleChess.Tests.Battle
                 $"The wing should keep the pace of the slowest of it. They are {apart:0} m apart.");
         }
 
+        // ---- Standing together, passing apart ---------------------------------
+
+        [Fact]
+        public void RegimentsDrawnUpInLineStandFlushAgainstEachOther()
+        {
+            var field = new Battlefield("plains", 21900);
+
+            UnitInstance left = field.Add(0, "swordsmen", field.Centre, Facing.East);
+            Battlefield.Hold(left);
+
+            // Ordered into the gap immediately beside it — the ordinary act of
+            // forming a line. A berth applied everywhere would push it away and
+            // leave daylight between every pair of neighbours.
+            UnitInstance right = field.Add(0, "swordsmen",
+                field.Centre + new Vec2(0f, left.Footprint.Width * 2f), Facing.East);
+
+            field.March(right, field.Centre + new Vec2(0f, left.Footprint.Width + 1f), bearing: Facing.East);
+            field.RunTurns(4);
+
+            float gap = OrientedRect.GapBetween(left.Shape, right.Shape);
+
+            Assert.True(gap < 8f,
+                $"Two regiments drawn up side by side should be shoulder to shoulder, not {gap:0} m apart. " +
+                "A line with gaps in it is not a line.");
+        }
+
+        [Fact]
+        public void ARegimentPassingAnotherDoesNotGrazeAlongIt()
+        {
+            var field = new Battlefield("plains", 21950);
+
+            UnitInstance standing = field.Add(0, "spearmen", field.Centre, Facing.East);
+            Battlefield.Hold(standing);
+
+            // Marching north across their front and just clear of it — close
+            // enough that without a berth it would slide along them at about
+            // two metres for the whole manoeuvre.
+            float alongside = standing.Footprint.HalfDepth + 22f;
+
+            UnitInstance passing = field.Add(0, "cavalry",
+                field.Centre + new Vec2(alongside, -220f), Facing.North);
+
+            field.March(passing, field.Centre + new Vec2(alongside, 220f));
+
+            float closest = float.MaxValue;
+
+            for (int t = 0; t < 240; t++)
+            {
+                field.Clock.Advance(field.State, field.Transcript);
+                closest = MathF.Min(closest, OrientedRect.GapBetween(passing.Shape, standing.Shape));
+            }
+
+            Assert.True(closest > 2f,
+                $"It came within {closest:0.0} m while going past. Passing troops give them room; only " +
+                "troops that have arrived stand flush.");
+        }
+
+        [Fact]
+        public void TwoRegimentsConvergingOnTheSameGroundDoNotBothGiveWay()
+        {
+            var field = new Battlefield("plains", 21960);
+
+            // Sent at each other's ground from opposite sides. Without a rule
+            // saying who yields they either both deflect and drift, or neither
+            // does and they jam.
+            UnitInstance west = field.Add(0, "swordsmen", field.Centre - new Vec2(160f, 0f), Facing.East);
+            UnitInstance east = field.Add(0, "swordsmen", field.Centre + new Vec2(160f, 0f), Facing.West);
+
+            field.March(west, field.Centre + new Vec2(60f, 0f));
+            field.March(east, field.Centre - new Vec2(60f, 0f));
+
+            field.RunTurns(8);
+
+            Assert.True(OrientedRect.OverlapFraction(west.Shape, east.Shape) <= OrderSystem.GrazingTolerance,
+                "They should have sorted themselves out rather than ending up in the same field.");
+
+            // The lower-numbered one holds its line; the other goes round it.
+            Assert.True(MathF.Abs(west.Position.Y - field.Centre.Y) < 20f,
+                $"The regiment with priority should have kept its line: it is {MathF.Abs(west.Position.Y - field.Centre.Y):0} m off it.");
+        }
+
         // ---- Changing front ---------------------------------------------------
 
         [Fact]

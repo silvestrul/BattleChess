@@ -345,6 +345,14 @@ namespace BattleChess.Rules
                 if (!other.IsFighting) continue;
                 if (other.Owner != unit.Owner) continue;
 
+                // Corners clipping is not two regiments standing in the same
+                // field, and an army in line clips constantly. Below the
+                // grazing tolerance they are neighbours and are left alone —
+                // which is what lets a line be drawn up flush rather than with
+                // daylight between every pair.
+                if (OrientedRect.OverlapFraction(unit.Shape, other.Shape) <= OrderSystem.GrazingTolerance)
+                    continue;
+
                 // Read fresh each time round: the pair before this one may have
                 // just moved this unit.
                 if (!OrientedRect.TryGetSeparation(unit.Shape, other.Shape, out Vec2 apart)) continue;
