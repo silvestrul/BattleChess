@@ -209,13 +209,7 @@ namespace BattleChess.Tests.Battle
             Assert.True(losses > 0, "And it should be losing men.");
         }
 
-        [Fact(Skip = "Bug, found by this suite and not yet fixed. A third regiment makes the attack strictly " +
-                     "worse: the attacking line divides the defender's forty metres of front into three slots " +
-                     "of about thirteen, every regiment needs all forty, so they shove each other back and the " +
-                     "outer two settle six to nine metres short — just outside the four-metre contact range — " +
-                     "and stand there for the whole battle. Two attackers break the defender; three kill 326 " +
-                     "where one alone kills 325, so the second and third contribute nothing. Task 41, splitting " +
-                     "the collision block from the fighting frontage, is where this gets unpicked.")]
+        [Fact]
         public void AThirdRegimentSentAtTheSameEnemyMustNotMakeTheAttackWorse()
         {
             (int gripTwo, int lostTwo) = SendAtOne(new[] { 60f, -60f });
@@ -291,6 +285,216 @@ namespace BattleChess.Tests.Battle
             }
 
             return field.RunUntil(() => quarry.State == UnitState.Routing || !quarry.IsOnField, 25);
+        }
+
+        // ---- Two to a face, and a queue behind it ------------------------------
+
+        [Fact]
+        public void AThirdRegimentWaitsBehindTheLineRatherThanShovingIntoIt()
+        {
+            var field = new Battlefield("plains", 30660);
+
+            UnitInstance quarry = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            var attackers = new UnitInstance[3];
+            float[] offsets = { 80f, 0f, -80f };
+
+            for (int i = 0; i < 3; i++)
+            {
+                attackers[i] = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, offsets[i]), Facing.East);
+                Battlefield.Press(attackers[i], quarry);
+            }
+
+            // Caught at the moment the line forms. Left to run, the defender
+            // breaks under two regiments and everything afterwards is a pursuit.
+            field.RunUntil(() => quarry.EnemiesInContact >= OrderSystem.MostOnOneFace, maxTurns: 8);
+
+            // Two in the line, and the third formed up behind them — not jammed
+            // against the enemy's corner, and not standing on one of its own.
+            for (int i = 0; i < 3; i++)
+            for (int j = i + 1; j < 3; j++)
+            {
+                Assert.False(OrientedRect.Overlaps(attackers[i].Shape, attackers[j].Shape),
+                    $"{attackers[i].Id} and {attackers[j].Id} are standing in the same field.");
+            }
+
+            int inTheLine = 0;
+            foreach (UnitInstance unit in attackers)
+                if (OrderSystem.InContactWith(unit, quarry)) inTheLine++;
+
+            Assert.Equal(OrderSystem.MostOnOneFace, inTheLine);
+        }
+
+        [Fact(Skip = "Half built. The queue is rebuilt from whoever is still fighting, so a reserve's slot does " +
+                     "move up the moment a place opens — but the regiment does not walk into it. It sits about " +
+                     "thirty metres out and stays there, because a unit that is neither marching nor in contact " +
+                     "has nothing that triggers a fresh approach. Scoping the held-up guard in FollowTarget was " +
+                     "tried and is not the blocker. Wants its own pass rather than a guess.")]
+        public void AReserveStepsIntoTheLineWhenTheRegimentInFrontOfItIsGone()
+        {
+            var field = new Battlefield("plains", 30670);
+
+            UnitInstance quarry = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            var attackers = new UnitInstance[3];
+            float[] offsets = { 80f, 0f, -80f };
+
+            for (int i = 0; i < 3; i++)
+            {
+                attackers[i] = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, offsets[i]), Facing.East);
+                Battlefield.Press(attackers[i], quarry);
+            }
+
+            field.RunTurns(4);
+
+            UnitInstance? waiting = null;
+            foreach (UnitInstance unit in attackers)
+                if (!OrderSystem.InContactWith(unit, quarry)) waiting = unit;
+
+            Assert.NotNull(waiting);
+
+            // One of the two in the line is destroyed. Nothing hands the vacancy
+            // on: the queue is rebuilt out of whoever is still fighting, so the
+            // reserve finds itself at the front on its own next re-plan.
+            foreach (UnitInstance unit in attackers)
+            {
+                if (unit.Id != waiting!.Id && OrderSystem.InContactWith(unit, quarry))
+                {
+                    unit.TakeCasualties(unit.Strength);
+                    break;
+                }
+            }
+
+            field.RunTurns(6);
+
+            Assert.True(OrderSystem.InContactWith(waiting!, quarry),
+                $"{waiting!.Id} was waiting its turn and a place opened up in front of it. It is " +
+                $"{OrientedRect.GapBetween(waiting.Shape, quarry.Shape):0} m off and still waiting.");
+        }
+
+        [Fact]
+        public void ARegimentOrderedAtAFullFrontDoesNotWanderRoundToTheFlankByItself()
+        {
+            var field = new Battlefield("plains", 30680);
+
+            UnitInstance quarry = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            var attackers = new UnitInstance[3];
+            float[] offsets = { 80f, 0f, -80f };
+
+            for (int i = 0; i < 3; i++)
+            {
+                attackers[i] = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, offsets[i]), Facing.East);
+                Battlefield.Press(attackers[i], quarry);
+            }
+
+            // Watched while the enemy is still standing. Once it breaks and runs
+            // the attackers chase it past where it stood, and "behind the enemy"
+            // stops meaning anything.
+            for (int turn = 0; turn < 8 && quarry.State != UnitState.Routing && quarry.IsOnField; turn++)
+            {
+                field.RunTurns(1);
+
+                if (quarry.State == UnitState.Routing) break;
+
+                // All three were sent at the front and all three stay in front
+                // of it. Sending the spare one round is an order the player
+                // gives — the game marching it across a formed enemy's face to
+                // find room is how regiments get cut up on their own side's
+                // initiative.
+                foreach (UnitInstance unit in attackers)
+                {
+                    float offTheFront = Vec2.Dot(unit.Position - quarry.Position, quarry.Shape.Forward);
+
+                    Assert.True(offTheFront > -unit.Footprint.Width,
+                        $"{unit.Id} was ordered at the front and has worked its way {-offTheFront:0} m behind " +
+                        "the enemy's bearing — it took itself round.");
+                }
+            }
+        }
+
+        [Fact(Skip = "Task 41. Two of the four get in, not three: with every regiment forty metres wide and the " +
+                     "defender only six deep, the pair on its front and rear span its whole width and cover the " +
+                     "very corners a flanker needs to stand on, so the two flankers are blocked out by their own " +
+                     "side. Four faces is the right rule; the block has to get deeper before the flanks are real " +
+                     "ground. The two-per-face cap and the reserve behind it are in and working.")]
+        public void RegimentsSentFromFourSidesEachTakeTheirOwnFace()
+        {
+            var field = new Battlefield("plains", 30690);
+
+            UnitInstance quarry = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            // One from each quarter. The face follows from where each was
+            // standing when the order was given, so nobody has to be told.
+            var fromTheFront = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, 0f), Facing.East);
+            var fromBehind = field.Add(0, "swordsmen", field.Centre + new Vec2(240f, 0f), Facing.West);
+            var fromTheLeft = field.Add(0, "swordsmen", field.Centre + new Vec2(0f, 240f), Facing.South);
+            var fromTheRight = field.Add(0, "swordsmen", field.Centre - new Vec2(0f, 240f), Facing.North);
+
+            var all = new[] { fromTheFront, fromBehind, fromTheLeft, fromTheRight };
+
+            foreach (UnitInstance unit in all)
+                Battlefield.Press(unit, quarry);
+
+            int mostAtOnce = 0;
+
+            for (int turn = 0; turn < 12; turn++)
+            {
+                field.RunTurns(1);
+
+                int gripping = 0;
+                foreach (UnitInstance unit in all)
+                    if (OrderSystem.InContactWith(unit, quarry)) gripping++;
+
+                mostAtOnce = Math.Max(mostAtOnce, gripping);
+            }
+
+            Assert.True(mostAtOnce >= 3,
+                $"Four regiments sent from four quarters and only {mostAtOnce} ever had hold of it at once. " +
+                "Each has a face of its own and nobody is queueing.");
+        }
+
+        [Fact]
+        public void AFaceDoesNotStopHoldingTwoJustBecauseTheDefenderHasLostMen()
+        {
+            var field = new Battlefield("plains", 30695);
+
+            UnitInstance quarry = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            // A handful of men lost before anybody closes, which narrows its
+            // frontage very slightly. An earlier version of the capacity rule
+            // sat exactly on the boundary for two full-width regiments, so the
+            // defender's first casualty dropped the face from holding two to
+            // holding one and put a regiment that was already fighting into the
+            // reserve for good. Measured: swordsmen halted ten metres short
+            // while their own archers shot the enemy they were closing with.
+            quarry.TakeCasualties(20);
+
+            var left = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, 60f), Facing.East);
+            var right = field.Add(0, "swordsmen", field.Centre - new Vec2(240f, -60f), Facing.East);
+
+            Battlefield.Press(left, quarry);
+            Battlefield.Press(right, quarry);
+
+            int mostAtOnce = 0;
+
+            for (int turn = 0; turn < 10; turn++)
+            {
+                field.RunTurns(1);
+
+                int gripping = 0;
+                if (OrderSystem.InContactWith(left, quarry)) gripping++;
+                if (OrderSystem.InContactWith(right, quarry)) gripping++;
+
+                mostAtOnce = Math.Max(mostAtOnce, gripping);
+            }
+
+            Assert.Equal(2, mostAtOnce);
         }
 
         // ---- Getting to the enemy at all ---------------------------------------

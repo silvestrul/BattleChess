@@ -357,16 +357,26 @@ namespace BattleChess.Tests.Battle
                 Battlefield.Press(unit, quarry);
             }
 
-            field.RunTurns(10);
+            // Counted turn by turn. Judged at the end it reads as nobody having
+            // arrived, because the defender breaks under three regiments and the
+            // whole wing is strung out chasing it by then.
+            int mostArrived = 0;
 
-            int arrived = 0;
-            foreach (UnitInstance unit in wing)
-                if (unit.EnemiesInContact > 0 || OrientedRect.GapBetween(unit.Shape, quarry.Shape) < 20f)
-                    arrived++;
+            for (int turn = 0; turn < 10; turn++)
+            {
+                field.RunTurns(1);
 
-            Assert.True(arrived >= 2,
-                $"Only {arrived} of the three got to the enemy they were all sent at. A wing ordered onto one " +
-                "regiment should bring what will fit against it, not queue up behind itself.");
+                int arrived = 0;
+                foreach (UnitInstance unit in wing)
+                    if (unit.EnemiesInContact > 0 || OrientedRect.GapBetween(unit.Shape, quarry.Shape) < 20f)
+                        arrived++;
+
+                mostArrived = Math.Max(mostArrived, arrived);
+            }
+
+            Assert.True(mostArrived >= 2,
+                $"Only {mostArrived} of the three got to the enemy they were all sent at. A wing ordered onto " +
+                "one regiment should bring what will fit against it, not queue up behind itself.");
 
             Assert.True(quarry.Casualties > 0, "And the enemy should be taking losses from it.");
         }

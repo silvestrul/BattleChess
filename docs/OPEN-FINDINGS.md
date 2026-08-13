@@ -11,41 +11,85 @@ over movement, rotation, grouping and attack orders.
 
 ---
 
-## 1. A third regiment sent at one enemy does nothing — and costs the attack
+## ~~1. A third regiment sent at one enemy does nothing~~ — FIXED
 
-**Severity:** high. It inverts the point of concentrating force, and it
-contradicts the design decision that several regiments ordered onto one should
-share its front.
+Closed by the two-per-face rule. Kept here only until the two leftovers below
+are closed too, because they are the same piece of ground.
 
-**Pinned by:** `AttackOrderScenarioTests.AThirdRegimentSentAtTheSameEnemyMustNotMakeTheAttackWorse`
-(skipped). Its live counterpart `TwoRegimentsSentAtOneBothGetAHoldOfIt` passes.
+**The rule, as decided.** A face is worth **one full frontage of fighting**
+however many regiments are pushed onto it, because damage is dealt across the
+ground two bodies genuinely share and two attackers divide that ground between
+them. So a pair on the front deal together what one deals alone, each taking
+half — and buy the defender's nerve rather than his blood. Four faces at two
+apiece is six or eight regiments landing four frontages of damage.
 
-**Measured**, three swordsmen regiments sent at one body of spearmen from 240 m,
-fourteen turns, seed 30650:
+Capacity is capped at two **and limited by what the face can physically hold**:
+the 40 m front and rear take a pair, the 6 m flanks take one. A lone flanker
+already fights across the enemy's whole width — nothing holds it off, so it
+folds round — which is exactly the full frontage that face is worth.
 
-| Attackers | Most ever in contact at once | Defender losses |
-|---|---|---|
-| 1 | 1 | 325 |
-| 2 | 2 | broke and ran early |
-| 3 | **1** | **326** |
+Overflow is **never reassigned to another face**. It forms up behind the
+attacking line on the face it was ordered at. Going round is an order somebody
+gives; the game marching a regiment across a formed enemy's front to find room
+is how regiments get cut up on their own side's initiative.
 
-**Mechanism.** `PlaceInTheAttackingLine` divides the defender's 40 m of front
-among the attackers that agreed on the same face — three slots of about 13 m.
-Every regiment in the game is 40 m wide, so each needs the whole front. The
-friend-avoidance rules then push them apart, and the outer two settle 6–9 m from
-the defender: past the slot they were given, but outside the 4 m contact range.
-They stand there for the rest of the battle. Only the middle regiment fights, so
-three attackers produce what one produces.
+**Two things fell out of building it, both worth remembering.**
 
-**Why it is not fixed here.** This is the uniform-rectangle problem, not an
-attack-rules problem, and task **#41 (split the collision block from the fighting
-frontage)** restructures exactly this ground. A patch to the slot spacing now
-would be thrown away by it, and would probably do it by letting regiments
-overlap — which is the thing the crowding rules exist to prevent.
+- Slots were handed out in **id order**, so three regiments abreast crossed each
+  other to reach them, shoved, and arrived as one. They now queue in the order
+  they already stand along the face. Men take the place nearest them.
+- The first capacity rule asked whether the face was at least twice a regiment's
+  half-width — a dead heat for two 40 m bodies. A defender's frontage narrows as
+  its men are killed, so **the first casualty tipped the answer from two to one**
+  and dropped a regiment that was already fighting into the reserve for the rest
+  of the battle. This is the third time a threshold placed exactly on its own
+  common case has caused a bug in this project. Put them well clear.
 
-**What the fix has to satisfy.** Reinforcing an attack must never reduce how many
-regiments are in contact. That is the assertion in the skipped test; un-skip it
-when #41 lands.
+Now pinned live by `AThirdRegimentSentAtTheSameEnemyMustNotMakeTheAttackWorse`,
+`AThirdRegimentWaitsBehindTheLineRatherThanShovingIntoIt`,
+`ARegimentOrderedAtAFullFrontDoesNotWanderRoundToTheFlankByItself` and
+`AFaceDoesNotStopHoldingTwoJustBecauseTheDefenderHasLostMen`.
+
+---
+
+## 1a. A reserve does not walk into the place that opens for it
+
+**Severity:** medium. The queue is right; the regiment does not act on it.
+
+**Pinned by:** `AttackOrderScenarioTests.AReserveStepsIntoTheLineWhenTheRegimentInFrontOfItIsGone`
+(skipped).
+
+The queue is rebuilt every re-plan out of the regiments still fighting, so when
+one of the two in the line is destroyed the reserve's slot genuinely moves up.
+The regiment does not follow it. It sits about thirty metres out and stays there,
+because a unit that is neither marching nor in contact has nothing that triggers
+a fresh approach.
+
+Scoping the `HeldUpBy` guard in `FollowTarget` so a halted, non-fighting regiment
+re-plans on the interval was tried and is **not** the blocker — the behaviour was
+unchanged, so that change was reverted rather than shipped on spec. Wants its own
+pass and a trace, not another guess.
+
+---
+
+## 1b. A four-sided attack gets two regiments in, not four
+
+**Severity:** medium, and it is the uniform rectangle again rather than the
+attack rules.
+
+**Pinned by:** `AttackOrderScenarioTests.RegimentsSentFromFourSidesEachTakeTheirOwnFace`
+(skipped).
+
+Four regiments sent from four quarters: the pair on the front and rear span the
+defender's whole 40 m width and cover the very corners a flanker needs to stand
+on, so the two flankers are blocked out by their own side. The defender is only
+6 m deep, so its flanks are barely ground at all.
+
+Four faces is the right rule and the face-choosing machinery already does it —
+`ChooseFace` picks one of four from where the attacker was ordered. What is
+missing is depth. **Task #41** exaggerating the block to 2.5× makes the flank a
+real face to stand against; nothing else needs to change for this to start
+working.
 
 ---
 
