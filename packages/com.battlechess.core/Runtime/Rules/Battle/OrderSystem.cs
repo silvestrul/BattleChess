@@ -286,6 +286,10 @@ namespace BattleChess.Rules
             // attack pressed home.
             unit.GiveOrder(UnitOrder.Attack(blocker.Id), unit.Position);
 
+            // It fell into this fight rather than being sent to it, which is
+            // what decides whether it chases when the other side breaks.
+            unit.ForcedIntoThisFight = true;
+
             log.Decision("Orders",
                 $"{unit.Def.DisplayName} cannot get past {blocker.Def.DisplayName} and is going through it.",
                 unit.Id);
@@ -478,6 +482,22 @@ namespace BattleChess.Rules
                 return;
             }
 
+            // Unless nobody sent it. A regiment that was marching somewhere and
+            // had to fight its way past has done what the situation asked of it;
+            // running down the survivors is a separate decision, and so is
+            // whether the march it was on still makes any sense. It holds the
+            // ground it won and waits to be told.
+            if (unit.ForcedIntoThisFight && target.State == UnitState.Routing)
+            {
+                log.Decision("Order",
+                    $"{unit.Def.DisplayName} has driven off {target.Def.DisplayName} and holds its ground — " +
+                    "it was marching, not attacking, and will not pursue unless told to.",
+                    unit.Id);
+
+                unit.GiveOrder(UnitOrder.Stand(), unit.Position);
+                return;
+            }
+
             // Bowmen told to attack are being told to shoot, not to charge. Far
             // enough in that the volleys land is where the order has been
             // carried out — walking the last hundred and eighty metres to cross
@@ -644,18 +664,16 @@ namespace BattleChess.Rules
         /// near the 45° boundary commits rather than dithering between two.
         /// </para>
         /// <para>
-        /// Everybody attacking the same regiment forms on the same face and
-        /// stands beside each other along it, rather than each picking its own
-        /// and one of them wandering round the back. Two regiments sent at one
-        /// enemy should hit it together — which halves what each of them deals
-        /// and takes, because they are sharing a frontage, and is worth doing
-        /// anyway for what it does to the defender's nerve.
+        /// Each attacker chooses its own face, from where it was standing when
+        /// the order was given — see <see cref="ChooseFace"/>. Regiments sent
+        /// from the same quarter therefore agree on a face without being made
+        /// to and stand beside each other along it, while one deliberately sent
+        /// round the flank keeps its own and is not dragged back into line.
         /// </para>
         /// <para>
-        /// The lowest-numbered attacker decides the face for all of them, which
-        /// is arbitrary but reproducible — and it hands the player the choice
-        /// without needing a control for it, since the face follows from where
-        /// that regiment is standing when the order is given.
+        /// Those sharing a face divide it: see
+        /// <see cref="PlaceInTheAttackingLine"/> for how many fit and where the
+        /// rest wait.
         /// </para>
         /// </remarks>
         private static Vec2 DressingSlot(
@@ -678,9 +696,16 @@ namespace BattleChess.Rules
 
             Vec2 alongTheFace = new Vec2(-outward.Y, outward.X);
 
+            float along = PlaceInTheAttackingLine(battle, unit, quarry, out int rank);
+
+            // Ranks past the first are the reserve. They form up in the
+            // attacking line's own rear and wait for a place rather than
+            // shoving into one that does not exist.
+            standOff += rank * (unit.Footprint.Depth + ReserveRankGapMetres);
+
             return quarry.Position
                  + outward * standOff
-                 + alongTheFace * PlaceInTheAttackingLine(battle, unit, quarry);
+                 + alongTheFace * along;
         }
 
         /// <summary>
@@ -793,25 +818,130 @@ namespace BattleChess.Rules
         /// <summary>Elbow room left between two regiments drawn up side by side.</summary>
         private const float ShoulderRoomMetres = 4f;
 
+        /// <summary>The most regiments that may press one face of an enemy at once.</summary>
+        /// <remarks>
+        /// <para>
+        /// Two, and two is not double: a face is worth one full frontage of
+        /// fighting however many regiments are pushed onto it, because damage is
+        /// dealt across the ground two bodies genuinely share and two attackers
+        /// divide that ground between them. So a pair on the front deal together
+        /// what one would deal alone, each taking half — and buy the defender's
+        /// nerve rather than his blood, which is what concentrating force is
+        /// actually for.
+        /// </para>
+        /// <para>
+        /// Four faces at two apiece is therefore six or eight regiments landing
+        /// four frontages of damage. What it is <b>not</b> is a third regiment
+        /// added to a face that already holds two, which was measured doing
+        /// worse than nothing: three attackers were given thirteen metres of
+        /// slot each on a forty-metre front, every one of them needed forty, and
+        /// the outer two shoved each other to six metres short of contact and
+        /// stood there for the whole battle. Three killed 326 where one alone
+        /// killed 325.
+        /// </para>
+        /// </remarks>
+        public const int MostOnOneFace = 2;
+
         /// <summary>
-        /// How far along the enemy's face this regiment stands, measured from
-        /// the middle of everybody attacking it.
+        /// The least share of its own frontage a regiment will take a place in
+        /// the line for.
         /// </summary>
         /// <remarks>
-        /// Each attacker gets its own stretch of the face, packed in id order
-        /// and centred as a body on the target's centre. Two regiments sent at
-        /// one enemy therefore arrive shoulder to shoulder against its front
-        /// rather than both aiming at the same spot and jamming behind whichever
-        /// arrived first — which, now that friendly formations cannot share
-        /// ground, is what would otherwise happen every time.
+        /// <para>
+        /// What stops the cap of two being applied to a face too narrow to hold
+        /// two. A regiment's front and rear are its full forty metres and hold a
+        /// pair; its flanks are six metres of end-on file, and a second regiment
+        /// sent at one would be standing in mid-air beside the first, touching
+        /// nothing. One flanker already fights across the enemy's whole width —
+        /// there is no formed line to hold it off, so it folds round — which is
+        /// exactly the full frontage that face is worth.
+        /// </para>
+        /// <para>
+        /// Measured against the ground both regiments covered when they were
+        /// mustered, never against what is left of them. A live frontage
+        /// narrows as men are killed, and a yes-or-no answer fed by a sliding
+        /// number crosses its own threshold sooner or later: the first version
+        /// tipped from two to one at the defender's first casualty, and raising
+        /// the margin only moved the cliff to about seventy per cent — an
+        /// ordinary mid-fight regiment, at which point one of the two attackers
+        /// already in contact was recomputed into the reserve and walked
+        /// backwards out of a fight it was winning.
+        /// </para>
+        /// <para>
+        /// A face that held two at the start holds two at the end.
+        /// </para>
+        /// </remarks>
+        private const float MinimumUsefulShare = 0.35f;
+
+        /// <summary>Ground left between the attacking line and the rank behind it.</summary>
+        private const float ReserveRankGapMetres = 6f;
+
+        /// <summary>
+        /// How many regiments can usefully stand against one face of an enemy.
+        /// </summary>
+        /// <remarks>
+        /// Two abreast take half the face each, so they are only worth placing
+        /// if that half still engages a fair share of a regiment's own frontage.
+        /// </remarks>
+        private static int FaceCapacity(UnitInstance unit, UnitInstance quarry, Vec2 alongTheFace)
+        {
+            var block = new OrientedRect(quarry.Position, quarry.Facing, quarry.FootprintAtFullStrength);
+
+            float faceWidth = block.ProjectedRadius(alongTheFace) * 2f;
+            float eachWouldGet = faceWidth / MostOnOneFace;
+
+            return eachWouldGet >= unit.FootprintAtFullStrength.Width * MinimumUsefulShare
+                ? MostOnOneFace
+                : 1;
+        }
+
+        /// <summary>
+        /// How far along the enemy's face this regiment stands, and how many
+        /// ranks back it waits if the face is already full.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Attackers on the same face queue in the order they already stand
+        /// along it, so every regiment works out the same arrangement without
+        /// being told. The first <see cref="MostOnOneFace"/> take the face
+        /// shoulder to shoulder, centred as a body on the target; the rest form
+        /// up behind them.
+        /// </para>
+        /// <para>
+        /// Queuing by id instead looks tidier and is wrong. It hands the
+        /// left-hand slot to whichever regiment was raised first rather than to
+        /// the one already on the left, so three regiments abreast cross each
+        /// other on the way in, shove, and arrive as one — measured at a single
+        /// regiment in contact where two had managed it. Men take the place
+        /// nearest them.
+        /// </para>
+        /// <para>
+        /// The queue is rebuilt on every re-plan out of the regiments still
+        /// fighting, so a reserve steps into the line of its own accord the
+        /// moment the regiment in front of it breaks, dies or is called away.
+        /// Nothing has to notice the vacancy and hand it on.
+        /// </para>
+        /// <para>
+        /// A regiment is never moved to a different face to find room. The face
+        /// follows from where it was standing when the order was given and from
+        /// nowhere else, which is what hands the player the choice without a
+        /// control for it — and what stops the game marching a regiment across a
+        /// formed enemy's front to reach the far side, which the tests show gets
+        /// it cut up and broken. Going round is an order somebody gives.
+        /// </para>
         /// </remarks>
         private static float PlaceInTheAttackingLine(
-            BattleState battle, UnitInstance unit, UnitInstance quarry)
+            BattleState battle, UnitInstance unit, UnitInstance quarry, out int rank)
         {
             Vec2 ourFace = ChooseFace(battle, unit, quarry);
+            Vec2 alongTheFace = new Vec2(-ourFace.Y, ourFace.X);
 
-            float wholeLine = 0f;
-            float aheadOfUs = 0f;
+            int capacity = FaceCapacity(unit, quarry, alongTheFace);
+
+            float ourStation = Vec2.Dot(unit.OrderAnchor - quarry.Position, alongTheFace);
+
+            int aheadOfUs = 0;
+            int allOfUs = 0;
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
@@ -824,18 +954,31 @@ namespace BattleChess.Rules
                 // is never going to fill it.
                 if (Vec2.Dot(FaceFrom(quarry, other.OrderAnchor), ourFace) < 0.9f) continue;
 
-                float berth = other.Footprint.Width + ShoulderRoomMetres;
+                allOfUs++;
 
-                if (other.Id.Value < unit.Id.Value) aheadOfUs += berth;
+                if (other.Id == unit.Id) continue;
 
-                wholeLine += berth;
+                float theirStation = Vec2.Dot(other.OrderAnchor - quarry.Position, alongTheFace);
+
+                // Id breaks the tie, so two regiments ordered from exactly the
+                // same spot still reach one answer between them.
+                bool theirsFirst = theirStation != ourStation
+                    ? theirStation < ourStation
+                    : other.Id.Value < unit.Id.Value;
+
+                if (theirsFirst) aheadOfUs++;
             }
 
-            float ours = unit.Footprint.Width + ShoulderRoomMetres;
+            rank = aheadOfUs / capacity;
 
-            // The middle of our own stretch, against the middle of the whole
-            // line. Alone, this is exactly zero.
-            return aheadOfUs + ours * 0.5f - wholeLine * 0.5f;
+            int place = aheadOfUs % capacity;
+            int besideUs = Math.Min(capacity, allOfUs - rank * capacity);
+
+            float berth = unit.Footprint.Width + ShoulderRoomMetres;
+
+            // The middle of our own stretch, against the middle of our rank.
+            // Alone, this is exactly zero.
+            return (place - (besideUs - 1) * 0.5f) * berth;
         }
 
         /// <summary>Whether this unit would be dressing on that one if it re-planned now.</summary>

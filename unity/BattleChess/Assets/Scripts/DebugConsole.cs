@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using BattleChess.Contracts;
 using UnityEngine;
 
@@ -79,7 +80,16 @@ namespace BattleChess.Unity
 
                 RecordingPath = Path.Combine(directory, $"battle-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 
-                _file = new StreamWriter(RecordingPath, append: false) { AutoFlush = true };
+                // UTF-8 with a byte-order mark. The rules talk in em-dashes and
+                // degree signs, and a log without a mark is guessed at by
+                // whatever opens it — on Windows that guess is usually the ANSI
+                // codepage, which turns "87°" into "87Â°" and makes a recording
+                // harder to read at exactly the moment somebody is trying to
+                // work out what went wrong from it.
+                _file = new StreamWriter(RecordingPath, append: false, new UTF8Encoding(true))
+                {
+                    AutoFlush = true,
+                };
                 _written = 0;
 
                 _file.WriteLine($"# Battle Chess log, started {DateTime.Now:yyyy-MM-dd HH:mm:ss}");

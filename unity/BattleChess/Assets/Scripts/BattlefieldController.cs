@@ -51,7 +51,7 @@ namespace BattleChess.Unity
         public const float ClickableDepthMetres = 9f;
 
         /// <summary>
-        /// How much thicker than life a regiment's bar is drawn.
+        /// How many times longer than deep a regiment is drawn.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -64,25 +64,32 @@ namespace BattleChess.Unity
         /// part that has to be true.
         /// </para>
         /// <para>
-        /// Deliberately exaggerating the <i>short</i> side only. Frontage is the
-        /// number that decides how many men can reach the enemy, so a plate
-        /// claiming more of it than the regiment holds would lie about the one
-        /// thing the player is reading it for — which is what the earlier
-        /// half-scale drawing got wrong in the other direction.
+        /// Stated as a <b>shape</b> rather than as a multiplier on the real
+        /// depth, which is what it was through three revisions — "double the
+        /// thickness", then double again, then two and a half times life. Each
+        /// of those left the drawn proportions hostage to a number the rules own
+        /// and may change: the day a regiment is ten times shallower than it is
+        /// wide rather than eight, a multiplier silently redraws the whole army.
+        /// Two to one is two to one whatever the ground underneath does.
         /// </para>
         /// <para>
-        /// Nothing in the rules reads this. The men are still ten ranks at a
-        /// metre apart holding six metres of depth; contact, zones of control,
-        /// terrain under the formation and whether two bodies can share ground
-        /// all use the real footprint, so the only thing a thicker bar changes
-        /// is how easy it is to see.
+        /// Deliberately derived from the frontage, and never from the depth.
+        /// Frontage is the number that decides how many men can reach the enemy,
+        /// so a plate claiming more of it than the regiment holds would lie
+        /// about the one thing the player is reading it for.
+        /// </para>
+        /// <para>
+        /// Nothing in the rules reads this. Contact, zones of control, terrain
+        /// under the formation and whether two bodies can share ground all use
+        /// the real footprint, so the only thing a chunkier bar changes is how
+        /// easy it is to see.
         /// </para>
         /// </remarks>
-        public const float DrawnDepthExaggeration = 4f;
+        public const float DrawnLengthToDepth = 2f;
 
         /// <summary>The depth a regiment is drawn and hit-tested at, in metres.</summary>
         public static float DrawnDepthOf(Footprint footprint) =>
-            Mathf.Max(footprint.Depth * DrawnDepthExaggeration, ClickableDepthMetres);
+            Mathf.Max(footprint.Width / DrawnLengthToDepth, ClickableDepthMetres);
 
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
@@ -267,24 +274,83 @@ namespace BattleChess.Unity
                 view.Render(alpha);
 
             RefreshOverlayUnits();
+            ForgetAFinishedRoute();
 
             TrackSelection();
             TrackOrders();
         }
 
+        /// <summary>
+        /// Takes the planned-route line down once the march it describes is
+        /// over.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The line is a picture of an order <i>in progress</i>. It was only
+        /// ever cleared when the selection changed, so a regiment that arrived
+        /// went on trailing a six-metre amber bar, drawn above everything else,
+        /// pointing at ground it was already standing on.
+        /// </para>
+        /// <para>
+        /// This hid itself for as long as orders kept coming: each new march
+        /// replaced the line, so it always looked current. Only the <i>last</i>
+        /// order of a session was left showing — which is exactly how it was
+        /// reported, as every manoeuvre looking right except the final one. The
+        /// regiment had come round correctly and was sitting under a stale
+        /// drawing of where it had been sent.
+        /// </para>
+        /// </remarks>
+        private void ForgetAFinishedRoute()
+        {
+            if (_pathLine.positionCount == 0) return;
+
+            foreach (UnitInstance unit in _selection)
+            {
+                if (unit.IsMarching) return;
+            }
+
+            _pathLine.positionCount = 0;
+            _hasDestination = false;
+        }
+
         // ---- Mouse ------------------------------------------------------------
 
-        /// <summary>How far the mouse must be dragged before it counts as setting a facing, in metres.</summary>
-        private const float BearingDragMetres = 15f;
+        /// <summary>
+        /// How far the mouse must be dragged before it counts as setting a
+        /// facing, in screen pixels.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Pixels, not metres.</b> This was fifteen metres of ground, which
+        /// is not a gesture — it is a gesture divided by the zoom. At the
+        /// default view of a thousand-metre field in a small window the ground
+        /// runs about a metre and a half to the pixel, so fifteen metres is a
+        /// ten-pixel wobble: an ordinary unsteady click became an order to
+        /// form line on a bearing perpendicular to the wobble, which is to say
+        /// a facing chosen at random. Zoom out and it took less still.
+        /// </para>
+        /// <para>
+        /// What the player is doing is a hand movement on a screen, so the
+        /// threshold belongs in the units the hand works in. Twenty-four pixels
+        /// is a deliberate drag at any zoom and on any window.
+        /// </para>
+        /// </remarks>
+        private const float BearingDragPixels = 24f;
 
-        /// <summary>How far a left drag must run before it counts as a box rather than a click, in metres.</summary>
-        private const float BoxDragMetres = 12f;
+        /// <summary>
+        /// How far a left drag must run before it counts as a box rather than a
+        /// click, in screen pixels. Same reasoning as
+        /// <see cref="BearingDragPixels"/>, and it was the same fault.
+        /// </summary>
+        private const float BoxDragPixels = 20f;
 
         private bool _boxing;
         private Vec2 _boxFrom;
+        private Vector3 _boxFromScreen;
 
         private bool _ordering;
         private Vec2 _orderAt;
+        private Vector3 _orderAtScreen;
 
         private Vec2 MouseWorld() => _camera != null ? _camera.MouseWorldPosition() : default;
 
@@ -305,12 +371,13 @@ namespace BattleChess.Unity
             {
                 _boxing = true;
                 _boxFrom = MouseWorld();
+                _boxFromScreen = Input.mousePosition;
             }
 
             if (!_boxing) return;
 
             Vec2 here = MouseWorld();
-            bool dragged = Vec2.Distance(here, _boxFrom) >= BoxDragMetres;
+            bool dragged = DraggedABox();
 
             if (Input.GetMouseButton(0))
             {
@@ -325,6 +392,10 @@ namespace BattleChess.Unity
             if (dragged) SelectWithin(_boxFrom, here);
             else SelectAt(_boxFrom);
         }
+
+        /// <summary>Whether the left button has been dragged far enough to mean a box.</summary>
+        private bool DraggedABox() =>
+            (Input.mousePosition - _boxFromScreen).magnitude >= BoxDragPixels;
 
         /// <summary>
         /// Right button: click to march or attack, drag to march and arrive on
@@ -362,13 +433,14 @@ namespace BattleChess.Unity
 
                 _ordering = true;
                 _orderAt = at;
+                _orderAtScreen = Input.mousePosition;
                 return;
             }
 
             if (!_ordering) return;
 
             Vec2 drawn = MouseWorld() - _orderAt;
-            bool far = drawn.Length >= BearingDragMetres;
+            bool far = (Input.mousePosition - _orderAtScreen).magnitude >= BearingDragPixels;
 
             if (Input.GetMouseButton(1))
             {
@@ -771,7 +843,7 @@ namespace BattleChess.Unity
             if (!_boxing || Camera.main == null) return;
 
             Vec2 here = MouseWorld();
-            if (Vec2.Distance(here, _boxFrom) < BoxDragMetres) return;
+            if (!DraggedABox()) return;
 
             Vector3 a = Camera.main.WorldToScreenPoint(new Vector3(_boxFrom.X, _boxFrom.Y, 0f));
             Vector3 b = Camera.main.WorldToScreenPoint(new Vector3(here.X, here.Y, 0f));
@@ -1455,7 +1527,10 @@ namespace BattleChess.Unity
                 if (Vec2.Distance(stand, destination) > 1f)
                     _console.Info("Path",
                         $"{unit.Def.DisplayName} is aiming {Vec2.Distance(stand, destination):0} m off that " +
-                        "point — the ground there is taken or impassable.", unit.Id);
+                        $"point — the ground there is taken or impassable. It will face " +
+                        $"{Facing.Towards(unit.Position, stand).Degrees:0}° for the ground it can stand on, " +
+                        $"not {Facing.Towards(unit.Position, destination).Degrees:0}° for the point clicked.",
+                        unit.Id);
 
                 destination = stand;
             }
@@ -1534,9 +1609,25 @@ namespace BattleChess.Unity
                 }
                 else
                 {
+                    // The front it is heading for, in map degrees, as well as how
+                    // far round that is from here. Only the second was recorded,
+                    // and it is measured from wherever the regiment happens to be
+                    // pointing — so two identical orders given a moment apart
+                    // print different numbers, and a report of "it took a
+                    // different bearing" could not be checked against the log at
+                    // all.
+                    // The raw geometry as well as the conclusion. Printing only
+                    // OrderFacing meant the log was quoting the very code under
+                    // suspicion back at itself — if the front is being worked
+                    // out wrongly, a line that reports the front cannot show it.
+                    // From here, to there, and the bearing those two imply.
                     _console.Info("Move",
-                        $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")}. " +
-                        $"{offBy:0}° off the bearing at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
+                        $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")} " +
+                        $"from ({unit.Position.X:0},{unit.Position.Y:0}) to ({destination.X:0},{destination.Y:0}) — " +
+                        $"that line is {Facing.Towards(unit.Position, destination).Degrees:0}°, " +
+                        $"and it will face {unit.OrderFacing.Degrees:0}° " +
+                        $"({(bearing.HasValue ? "bearing drawn" : "the way it is going")}). " +
+                        $"{offBy:0}° off at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
                         unit.Id);
 
                     // A big wheel is the most interesting thing about to happen, and

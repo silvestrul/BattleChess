@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -564,7 +564,7 @@ namespace BattleChess.Rules
 
             if (route.IsComplete)
             {
-                Finish(unit, tick, log);
+                Finish(battle, unit, tick, log);
                 return;
             }
 
@@ -596,7 +596,9 @@ namespace BattleChess.Rules
             // attack faces what it is charging, which is never in doubt.
             Facing marchBearing = desired;
 
-            desired = unit.Order.Kind == OrderKind.Move ? unit.OrderFacing : marchBearing;
+            desired = unit.Order.Kind == OrderKind.Move
+                ? FrontWhileMarching(battle, unit, route, marchBearing)
+                : marchBearing;
 
             // The last hundred metres of a charge. The order system has already
             // aimed this march at a slot squarely off one of the enemy's faces;
@@ -715,7 +717,7 @@ namespace BattleChess.Rules
                 route.Advance();
 
                 if (route.IsComplete)
-                    Finish(unit, tick, log);
+                    Finish(battle, unit, tick, log);
             }
         }
 
@@ -737,9 +739,117 @@ namespace BattleChess.Rules
             return SpeedWhileFullyReversed + (1f - SpeedWhileFullyReversed) * alignment;
         }
 
-        private static void Finish(UnitInstance unit, int tick, IBattleLog log)
+        /// <summary>
+        /// Reports an order carried out, and says enough about how it ended to
+        /// diagnose it from the log alone.
+        /// </summary>
+        /// <remarks>
+        /// This used to record only the tick. A recorded game then turned up a
+        /// march that took two and a half times as long as three others of the
+        /// same length and the same wheel, and nothing in the log could say why
+        /// — not the ground it crossed, not the pace it kept, not which way it
+        /// finished pointing. Every one of those is a line of text, and without
+        /// them a play report can only be answered by guessing or by asking.
+        /// </remarks>
+        /// <summary>
+        /// Roughly what fraction of its pace a regiment keeps while it is coming
+        /// round, used only to judge how much room a wheel needs.
+        /// </summary>
+        private const float PaceWhileWheeling = 0.6f;
+
+        /// <summary>Ground to spare, so the wheel is finished before arrival rather than at it.</summary>
+        private const float FormingUpMarginMetres = 10f;
+
+        /// <summary>
+        /// The most of a march that may be given over to coming round onto the
+        /// front it was asked to arrive on.
+        /// </summary>
+        /// <remarks>
+        /// Reserving whatever the wheel needs is right until the wheel needs
+        /// more than the march is long, and then it quietly swallows the whole
+        /// order and the regiment crabs from the first step — which is the very
+        /// thing this was written to stop. Recorded: 70 m asked for with a 156°
+        /// change of front, which wants 74 m of run-up, so nothing was left to
+        /// march properly and it covered the ground at a fifth of its pace.
+        ///
+        /// Short orders with a big change of front are the common case, not a
+        /// corner: a regiment being nudged into position is exactly when a
+        /// player is particular about which way it ends up pointing. So most of
+        /// any march is spent marching, and the front is picked up over what is
+        /// left — finishing on the spot after arrival if there was not enough
+        /// room, which costs nothing and looks like dressing the ranks.
+        /// </remarks>
+        private const float MostOfAMarchIsMarching = 0.4f;
+
+        /// <summary>
+        /// The front to hold at this moment of a march.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A bearing drawn by the player is the front to <b>arrive on</b>, not
+        /// one to hold the whole way there. Until the regiment is close enough
+        /// to need it, it marches the way it is going, at its proper pace, and
+        /// comes round at the end — which is what an attack has always done on
+        /// its last hundred metres, and what everybody expects of the drag.
+        /// </para>
+        /// <para>
+        /// Holding it throughout was a real order that nobody wanted and was
+        /// easy to give by accident. Recorded: a body of horse sent 167 m on a
+        /// bearing of 171° while holding a front of −80° travelled rear-first
+        /// the entire way and took 122 ticks over a march worth 35, at 29% of
+        /// its pace. From outside that is not a manoeuvre, it is a regiment
+        /// that has gone wrong.
+        /// </para>
+        /// <para>
+        /// The turn is started far enough out to be finished on arrival rather
+        /// than at it, scaled by how far there is to come round — a quarter
+        /// turn needs a fraction of the room an about-face does, and reserving
+        /// the same distance for both would have a regiment crabbing most of a
+        /// short march for a bearing it could pick up in twenty metres.
+        /// </para>
+        /// </remarks>
+        private static Facing FrontWhileMarching(
+            BattleState battle, UnitInstance unit, MovementRoute route, Facing marchBearing)
         {
-            log.Info("Move", $"{unit.Def.DisplayName} reached its destination at tick {tick}.", unit.Id);
+            // No bearing was drawn, so the front already is the line of march.
+            if (!unit.Order.Bearing.HasValue) return unit.OrderFacing;
+
+            float toTurn = Facing.AbsoluteDelta(marchBearing, unit.OrderFacing) * 180f / MathF.PI;
+            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
+            float pace = MathF.Max(0.1f, battle.SpeedOf(unit));
+
+            float roomToComeRound =
+                toTurn / turnRate * pace * PaceWhileWheeling + FormingUpMarginMetres;
+
+            // Never more than a slice of the march, however long the wheel
+            // wants. What is left of the turn is finished standing still.
+            float wholeMarch = Vec2.Distance(unit.OrderAnchor, route.Destination);
+            roomToComeRound = MathF.Min(roomToComeRound, wholeMarch * MostOfAMarchIsMarching);
+
+            return Vec2.Distance(unit.Position, route.Destination) > roomToComeRound
+                ? marchBearing
+                : unit.OrderFacing;
+        }
+
+        private static void Finish(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
+        {
+            float offOrdered = Facing.AbsoluteDelta(unit.Facing, unit.OrderFacing) * 180f / MathF.PI;
+            TerrainDef ground = battle.TerrainAt(unit.Position);
+
+            // A regiment threading ground too narrow for its frontage holds
+            // whatever bearing fits rather than the one it was given, and only
+            // comes back to it once clear. Ending a march still turned is the
+            // one case where that reads as an order gone wrong rather than as
+            // an obstacle handled, so it is called out by name.
+            string front = offOrdered > 10f
+                ? $" — finished {offOrdered:0}° off the front it was given, on ground it may still be threading"
+                : string.Empty;
+
+            log.Info("Move",
+                $"{unit.Def.DisplayName} reached its destination at tick {tick}, " +
+                $"on {ground.DisplayName} at {battle.SpeedOf(unit):0.0} m/s{front}.",
+                unit.Id);
+
             unit.Route = null;
         }
     }

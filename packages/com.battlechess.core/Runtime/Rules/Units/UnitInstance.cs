@@ -151,6 +151,63 @@ namespace BattleChess.Rules
         /// <summary>Enemies in contact at the last combat pulse.</summary>
         public int EnemiesInContact { get; set; }
 
+        /// <summary>
+        /// Whether this regiment is fighting because something got in its way
+        /// rather than because it was sent to.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A regiment marching somewhere that meets an enemy on the road turns
+        /// and fights it, which is right. What it must not do is treat that as
+        /// having been ordered to attack: when the enemy breaks, the regiment
+        /// stands where the fight ended rather than streaming off after it.
+        /// </para>
+        /// <para>
+        /// Nor does it pick its march back up. The order was to go somewhere by
+        /// a road that is no longer there, through ground that now has a fight
+        /// on it and men strewn across it. Deciding whether that order still
+        /// makes sense is the player's, and a regiment that quietly resumes a
+        /// march the situation has overtaken is worse than one that waits to be
+        /// told.
+        /// </para>
+        /// <para>
+        /// Cleared by <see cref="GiveOrder"/>, so any order the player gives —
+        /// including an attack on the same enemy — restores the pursuit.
+        /// </para>
+        /// </remarks>
+        public bool ForcedIntoThisFight { get; set; }
+
+        /// <summary>
+        /// Total width, in metres, that every enemy in contact is asking of this
+        /// regiment's line — summed at the last combat pulse.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A regiment has one frontage and cannot bring more than it to bear,
+        /// however many enemies are on it. This is how much is being asked;
+        /// where it exceeds the frontage the regiment actually has, every
+        /// enemy's share is scaled down in proportion.
+        /// </para>
+        /// <para>
+        /// It replaces dividing by the number of enemies, which counted the same
+        /// thing twice. Two regiments drawn up side by side already overlap only
+        /// half a defender's front each — the geometry has divided the line
+        /// before any rule does — so halving it again for the pair of them left
+        /// the defender answering with a quarter of its strength and made a
+        /// second attacker worth far more than it should be. Proportions come
+        /// out right on their own: attackers sharing sixty and forty metres of a
+        /// hundred-metre front are answered with sixty and forty.
+        /// </para>
+        /// <para>
+        /// The cap is what the divisor was protecting, and it still holds.
+        /// Regiments stacked on the same ground each overlap the whole of it, so
+        /// the sum runs to several times the frontage and each is scaled back to
+        /// its share — three on one spot get a third apiece rather than a full
+        /// line each.
+        /// </para>
+        /// </remarks>
+        public float ClaimedFrontage { get; set; }
+
         /// <summary>Ticks left before this unit can shoot again.</summary>
         public int ReloadRemaining { get; set; }
 
@@ -352,6 +409,7 @@ namespace BattleChess.Rules
             ForgetProgress();
             FailedReplans = 0;
             GoingRound = UnitId.None;
+            ForcedIntoThisFight = false;
 
             if (order.StanceOverride.HasValue)
                 Stance = order.StanceOverride.Value;
@@ -393,6 +451,33 @@ namespace BattleChess.Rules
         /// regiment in column is a third the width it was in line.
         /// </summary>
         public Footprint Footprint => Formation.FootprintFor(Math.Max(1, _strength));
+
+        /// <summary>
+        /// The ground this unit covered when it was mustered, at full strength
+        /// in its current formation.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// For the questions that must give the same answer on the last turn of
+        /// a battle as on the first. How much room a body of men takes up should
+        /// not collapse because it has taken casualties — losing men reduces how
+        /// many can <i>fight</i>, not how much ground the regiment stands on.
+        /// </para>
+        /// <para>
+        /// Written for the rule deciding how many attackers fit on one face,
+        /// which read the live footprint and so slid all battle. Any yes-or-no
+        /// answer fed by a quantity that changes will cross its own threshold
+        /// somewhere: the first version flipped from two to one at the
+        /// defender's first casualty, and moving the constant only moved the
+        /// cliff to seventy per cent. There is no safe constant — the input has
+        /// to stop moving.
+        /// </para>
+        /// <para>
+        /// The first piece of the block, which will eventually be what collides,
+        /// blocks and is drawn.
+        /// </para>
+        /// </remarks>
+        public Footprint FootprintAtFullStrength => Formation.FootprintFor(Math.Max(1, InitialStrength));
 
         /// <summary>
         /// Redraws the unit in a different order, paying the organization it
