@@ -1,10 +1,12 @@
 # Open findings
 
-Things the test sweep turned up that are known, reproducible and **not yet
-fixed**. Each entry names the test that pins it, so the entry and the test can
-be deleted together once the fix lands.
+Things that are known, reproducible and **not yet fixed**. Each entry names the
+test that pins it, so the entry and the test can be deleted together once the fix
+lands. Struck-through entries are closed and kept only until the ground around
+them is finished.
 
-**This file is scaffolding.** When it is empty, delete it.
+**This file is scaffolding.** When it is empty, delete it. For how the game is
+*meant* to work — which is permanent — see [DECISIONS.md](DECISIONS.md).
 
 Raised by the manoeuvre sweep of 13 Aug 2026 (`c02380d`), which added 85 tests
 over movement, rotation, grouping and attack orders.
@@ -57,23 +59,28 @@ Now pinned live by `AThirdRegimentSentAtTheSameEnemyMustNotMakeTheAttackWorse`,
 
 ---
 
-## 1a. A reserve does not walk into the place that opens for it
+## ~~1a. A reserve does not walk into the place that opens for it~~ — FIXED
 
-**Severity:** medium. The queue is right; the regiment does not act on it.
+It was never a separate fault. It was finding 5 wearing a different face: the
+defender had bled below the capacity threshold, so the face was declared full at
+**one**, and with two attackers left one of them was still correctly a reserve —
+standing there because the rule said to, not because it was stuck.
 
-**Pinned by:** `AttackOrderScenarioTests.AReserveStepsIntoTheLineWhenTheRegimentInFrontOfItIsGone`
-(skipped).
+Fixing capacity to read a frontage that does not change fixed this at the same
+time, with no further code. Frontage is now genuinely refilled from reserves
+(decision F5, non-negotiable), and pinned live by
+`AttackOrderScenarioTests.AReserveStepsIntoTheLineWhenTheRegimentInFrontOfItIsGone`.
 
-The queue is rebuilt every re-plan out of the regiments still fighting, so when
-one of the two in the line is destroyed the reserve's slot genuinely moves up.
-The regiment does not follow it. It sits about thirty metres out and stays there,
-because a unit that is neither marching nor in contact has nothing that triggers
-a fresh approach.
+**Worth remembering:** two turns were spent guessing at `FollowTarget` and
+reverting, on a diagnosis built from one trace. The symptom — "it sits thirty
+metres out and does not come in" — was real; the cause was one system away from
+where it showed.
 
-Scoping the `HeldUpBy` guard in `FollowTarget` so a halted, non-fighting regiment
-re-plans on the interval was tried and is **not** the blocker — the behaviour was
-unchanged, so that change was reverted rather than shipped on spec. Wants its own
-pass and a trace, not another guess.
+The test needed the defender held to its nerve to be meaningful at all. Left
+alone it routs within four turns of meeting three regiments, and a reserve
+chasing a fleeing enemy says nothing about whether it would have stepped into a
+line. That is the fifth time in this sweep a placement question was nearly
+answered by a rout.
 
 ---
 
@@ -124,35 +131,23 @@ The withdrawal rule should put a price on this, not remove it.
 
 ---
 
-## 3. An explicit attack order has no pursuit leash
+## ~~3. An explicit attack order has no pursuit leash~~ — DECIDED, left as it is
 
-**Severity:** low, and it is a design question rather than a defect. **Needs a
-decision before it is worth changing.**
-
-**Not pinned by any test**, deliberately — asserting either behaviour would lock
-in an answer nobody has chosen yet.
-
-**Behaviour.** `PursuitLeashMetres` (200 m) is checked in `TryEngageNearby`, the
-path an Aggressive regiment takes when it goes looking for a fight on its own.
-`FollowTarget`, which carries out an attack order the player actually gave, does
-not check it. Measured: a swordsmen regiment ordered onto a scout followed it
-552 m across the field and was still going.
-
-**The argument for leaving it.** The player gave the order. A regiment that
-quietly abandons an order because it decided the chase was too long is worse
+Settled by decision **O4**: pursuit happens when, and only when, a regiment was
+ordered to attack. An ordered attack runs its enemy down with no leash, because
+the player asked for it and a regiment that quietly abandons an order is worse
 than one that obeys.
 
-**The argument for capping it.** One scout can walk any regiment out of the
-battle for free, and the order never ends — which is the one thing
-`OrdersAlwaysEndTests` exists to prevent. The player who issued it has usually
-stopped watching.
+What changed instead is the case that was actually wrong: a regiment that was
+*marching* and had to fight its way past now holds the ground it won. It neither
+chases the men it broke nor resumes a march the situation has overtaken — that
+judgement is the player's. `UnitInstance.ForcedIntoThisFight` carries the
+distinction, and any fresh order clears it.
 
-**Middle option.** Keep following, but report it: a regiment past its leash on
-an explicit order says so in the log, so the player finds out while it still
-matters.
-
-The leash that *does* work is pinned by
-`AttackOrderScenarioTests.ARegimentLookingForAFightIsNotBaitedOutOfPositionByOneItCannotCatch`.
+Pinned by `ARegimentThatFoughtItsWayPastSomebodyHoldsTheGroundItWon`,
+`ARegimentActuallySentAtAnEnemyStillRunsItDown` and `AFreshOrderRestoresThePursuit`.
+The separate leash on *unordered* engagement still applies and is pinned by
+`ARegimentLookingForAFightIsNotBaitedOutOfPositionByOneItCannotCatch`.
 
 ---
 
@@ -219,35 +214,21 @@ And after:
 
 ---
 
-## 5. Face capacity still flips mid-fight, at 70% instead of 99%
+## ~~5. Face capacity flips mid-fight~~ — FIXED
 
-**Severity:** medium. The bug that was fixed is only relocated, not removed.
+`FaceCapacity` now measures both regiments by `FootprintAtFullStrength` — the
+ground they covered when mustered — so a face that held two at the start holds
+two at the end. Also closed 1a above.
 
-**Not pinned by a test** — the fights that would show it end too fast. The
-defender in `AFaceDoesNotStopHoldingTwoJustBecauseTheDefenderHasLostMen` routs at
-91% strength, well before the threshold.
+**The lesson, restated properly.** The first version flipped from two to one at
+the defender's first casualty; raising the margin moved it to 70% and I recorded
+that as fixed. It was not. A live frontage slides from 100% to 0% over every
+fight, so a yes-or-no answer fed by it crosses whatever threshold you pick.
+**There is no safe constant — the input has to stop moving.**
 
-`FaceCapacity` compares the defender's **live** frontage against
-`MinimumUsefulShare`. Frontage is `files × fileWidth` where `files` is
-`ceil(strength / ranks)`, so it falls **linearly with casualties** — measured
-1000 men → 40.0 m, 963 → 38.8 m, 911 → 36.8 m.
-
-Capacity therefore drops from two to one when the face falls below
-`2 × 0.35 × 40 = 28 m`, which is **70% of the defender's starting strength**. A
-regiment that has lost 30% of its men is an ordinary mid-fight regiment, not an
-edge case, and at that instant one of the two attackers already fighting is
-reassigned to the reserve and walks backwards out of the line.
-
-**The lesson recorded in the commit was the weaker one.** "Put the threshold well
-clear of its common case" only buys distance. The real fault is that **a discrete
-capacity is computed from a quantity that changes during the fight**, so there is
-always some point on the curve where it flips. Raising the margin moves the
-cliff; it does not remove it.
-
-**The fix.** Compute capacity from a frontage that does not change — the
-defender's footprint at full strength. Task **#41** makes the block constant by
-design, so this closes with it provided the capacity check is pointed at the
-block rather than at the live footprint.
+This is also the first slice of decision S4: how much room a body of men takes up
+should not collapse because it has taken casualties. Collision and fighting
+frontage still read the live footprint; **#41** finishes the job.
 
 ---
 
@@ -298,7 +279,12 @@ rule to this system.
 - **Stopping at the first improvement.** Removing the divisor took two attackers
   from 2.3× to 1.4× and looked like a fix. It was half of one. Measure again
   after the change, against the number you actually wanted.
-- **Tests that measure after the battle has moved on.** Five tests in this sweep
+- **Tests that measure after the battle has moved on.** Six times now, a test has
   read a state that only exists mid-fight — how many regiments are in contact —
   after the defender had broken and the pursuit had scattered everyone. Catch the
-  moment with `RunUntil`, or watch turn by turn.
+  moment with `RunUntil`, watch turn by turn, or hold the defender's nerve so the
+  question being asked is the one you meant to ask.
+- **Diagnosing from one trace and then guessing.** Finding 1a was written up as a
+  fault in `FollowTarget` on the strength of a single run, two attempts were made
+  at it, and it turned out to be finding 5 one system away. A symptom is real
+  evidence; a cause needs more than one look.

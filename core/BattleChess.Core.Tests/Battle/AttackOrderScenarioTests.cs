@@ -326,11 +326,7 @@ namespace BattleChess.Tests.Battle
             Assert.Equal(OrderSystem.MostOnOneFace, inTheLine);
         }
 
-        [Fact(Skip = "Half built. The queue is rebuilt from whoever is still fighting, so a reserve's slot does " +
-                     "move up the moment a place opens — but the regiment does not walk into it. It sits about " +
-                     "thirty metres out and stays there, because a unit that is neither marching nor in contact " +
-                     "has nothing that triggers a fresh approach. Scoping the held-up guard in FollowTarget was " +
-                     "tried and is not the blocker. Wants its own pass rather than a guess.")]
+        [Fact]
         public void AReserveStepsIntoTheLineWhenTheRegimentInFrontOfItIsGone()
         {
             var field = new Battlefield("plains", 30670);
@@ -347,7 +343,12 @@ namespace BattleChess.Tests.Battle
                 Battlefield.Press(attackers[i], quarry);
             }
 
-            field.RunTurns(4);
+            // The defender is held to its ground and its nerve for the whole
+            // test. Left to break it routs inside four turns of meeting three
+            // regiments, and a reserve chasing a fleeing enemy tells us nothing
+            // about whether it would have stepped into a line. Morale is a
+            // different rule and is tested elsewhere.
+            StandFirm(field, quarry, 4);
 
             UnitInstance? waiting = null;
             foreach (UnitInstance unit in attackers)
@@ -367,11 +368,29 @@ namespace BattleChess.Tests.Battle
                 }
             }
 
-            field.RunTurns(6);
+            StandFirm(field, quarry, 10, () => OrderSystem.InContactWith(waiting!, quarry));
 
             Assert.True(OrderSystem.InContactWith(waiting!, quarry),
                 $"{waiting!.Id} was waiting its turn and a place opened up in front of it. It is " +
-                $"{OrientedRect.GapBetween(waiting.Shape, quarry.Shape):0} m off and still waiting.");
+                $"{OrientedRect.GapBetween(waiting.Shape, quarry.Shape):0} m off and still waiting. " +
+                "Frontage is refilled from the reserve, or a wing is only ever as strong as two regiments.");
+        }
+
+        /// <summary>
+        /// Runs turns while holding one regiment steady, so a placement question
+        /// can be asked without the answer being a rout.
+        /// </summary>
+        private static void StandFirm(Battlefield field, UnitInstance unit, int turns, Func<bool>? until = null)
+        {
+            for (int turn = 0; turn < turns; turn++)
+            {
+                unit.Morale = 1f;
+                unit.State = UnitState.Steady;
+
+                field.RunTurns(1);
+
+                if (until != null && until()) return;
+            }
         }
 
         [Fact]
@@ -495,6 +514,88 @@ namespace BattleChess.Tests.Battle
             }
 
             Assert.Equal(2, mostAtOnce);
+        }
+
+        // ---- Chasing is something you are told to do ---------------------------
+
+        [Fact]
+        public void ARegimentThatFoughtItsWayPastSomebodyHoldsTheGroundItWon()
+        {
+            var field = new Battlefield("plains", 31000);
+
+            UnitInstance blocker = field.Add(1, "archers", field.Centre, Facing.West);
+            Battlefield.Hold(blocker);
+
+            UnitInstance foot = field.Add(0, "swordsmen", field.Centre - new Vec2(220f, 0f), Facing.East);
+
+            // Marched somewhere well beyond the enemy, not sent at it. Advance
+            // means it will fight what stands in its way — and having driven the
+            // archers off, that is the whole of what it was asked to do.
+            field.March(foot, field.Centre + new Vec2(400f, 0f));
+
+            field.RunUntil(() => blocker.State == UnitState.Routing || !blocker.IsOnField, maxTurns: 14);
+
+            Assert.True(blocker.State == UnitState.Routing || !blocker.IsOnField,
+                "The test needs the fight to have been won first.");
+
+            Vec2 whereItEnded = foot.Position;
+            field.RunTurns(6);
+
+            Assert.True(Vec2.Distance(foot.Position, whereItEnded) < 40f,
+                $"It went a further {Vec2.Distance(foot.Position, whereItEnded):0} m after the fight. A regiment " +
+                "that was marching and got cut off holds the ground it won: it neither chases the men it broke " +
+                "nor picks up a march the situation has overtaken.");
+        }
+
+        [Fact]
+        public void ARegimentActuallySentAtAnEnemyStillRunsItDown()
+        {
+            var field = new Battlefield("plains", 31100);
+
+            UnitInstance quarry = field.Add(1, "archers", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            UnitInstance horse = field.Add(0, "cavalry", field.Centre - new Vec2(220f, 0f), Facing.East);
+
+            // The other half of the same rule. Told to attack, it pursues — that
+            // is what turns a defeat into a disaster, and it is the reason
+            // pursuit is worth having at all.
+            Battlefield.Press(horse, quarry);
+
+            field.RunUntil(() => quarry.State == UnitState.Routing || !quarry.IsOnField, maxTurns: 14);
+
+            Vec2 whenTheyBroke = horse.Position;
+            field.RunTurns(4);
+
+            Assert.True(Vec2.Distance(horse.Position, whenTheyBroke) > 40f || !quarry.IsOnField,
+                $"Sent at them and having broken them, it moved {Vec2.Distance(horse.Position, whenTheyBroke):0} m. " +
+                "An ordered attack runs its enemy down.");
+        }
+
+        [Fact]
+        public void AFreshOrderRestoresThePursuit()
+        {
+            var field = new Battlefield("plains", 31200);
+
+            UnitInstance blocker = field.Add(1, "archers", field.Centre, Facing.West);
+            Battlefield.Hold(blocker);
+
+            UnitInstance horse = field.Add(0, "cavalry", field.Centre - new Vec2(220f, 0f), Facing.East);
+            field.March(horse, field.Centre + new Vec2(400f, 0f));
+
+            field.RunUntil(() => blocker.State == UnitState.Routing || !blocker.IsOnField, maxTurns: 14);
+
+            if (!blocker.IsOnField) return;
+
+            // Told to go after them, it goes. Falling into a fight suppresses the
+            // chase; it does not disable it.
+            Battlefield.Press(horse, blocker);
+
+            Vec2 whenOrdered = horse.Position;
+            field.RunTurns(4);
+
+            Assert.True(Vec2.Distance(horse.Position, whenOrdered) > 30f || !blocker.IsOnField,
+                $"Ordered after the men it had just driven off, it moved {Vec2.Distance(horse.Position, whenOrdered):0} m.");
         }
 
         // ---- Getting to the enemy at all ---------------------------------------

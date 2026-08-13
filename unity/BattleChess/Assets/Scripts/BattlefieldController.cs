@@ -51,7 +51,7 @@ namespace BattleChess.Unity
         public const float ClickableDepthMetres = 9f;
 
         /// <summary>
-        /// How much thicker than life a regiment's bar is drawn.
+        /// How many times longer than deep a regiment is drawn.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -64,25 +64,32 @@ namespace BattleChess.Unity
         /// part that has to be true.
         /// </para>
         /// <para>
-        /// Deliberately exaggerating the <i>short</i> side only. Frontage is the
-        /// number that decides how many men can reach the enemy, so a plate
-        /// claiming more of it than the regiment holds would lie about the one
-        /// thing the player is reading it for — which is what the earlier
-        /// half-scale drawing got wrong in the other direction.
+        /// Stated as a <b>shape</b> rather than as a multiplier on the real
+        /// depth, which is what it was through three revisions — "double the
+        /// thickness", then double again, then two and a half times life. Each
+        /// of those left the drawn proportions hostage to a number the rules own
+        /// and may change: the day a regiment is ten times shallower than it is
+        /// wide rather than eight, a multiplier silently redraws the whole army.
+        /// Two to one is two to one whatever the ground underneath does.
         /// </para>
         /// <para>
-        /// Nothing in the rules reads this. The men are still ten ranks at a
-        /// metre apart holding six metres of depth; contact, zones of control,
-        /// terrain under the formation and whether two bodies can share ground
-        /// all use the real footprint, so the only thing a thicker bar changes
-        /// is how easy it is to see.
+        /// Deliberately derived from the frontage, and never from the depth.
+        /// Frontage is the number that decides how many men can reach the enemy,
+        /// so a plate claiming more of it than the regiment holds would lie
+        /// about the one thing the player is reading it for.
+        /// </para>
+        /// <para>
+        /// Nothing in the rules reads this. Contact, zones of control, terrain
+        /// under the formation and whether two bodies can share ground all use
+        /// the real footprint, so the only thing a chunkier bar changes is how
+        /// easy it is to see.
         /// </para>
         /// </remarks>
-        public const float DrawnDepthExaggeration = 4f;
+        public const float DrawnLengthToDepth = 2f;
 
         /// <summary>The depth a regiment is drawn and hit-tested at, in metres.</summary>
         public static float DrawnDepthOf(Footprint footprint) =>
-            Mathf.Max(footprint.Depth * DrawnDepthExaggeration, ClickableDepthMetres);
+            Mathf.Max(footprint.Width / DrawnLengthToDepth, ClickableDepthMetres);
 
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";

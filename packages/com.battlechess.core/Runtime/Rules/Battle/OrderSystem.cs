@@ -286,6 +286,10 @@ namespace BattleChess.Rules
             // attack pressed home.
             unit.GiveOrder(UnitOrder.Attack(blocker.Id), unit.Position);
 
+            // It fell into this fight rather than being sent to it, which is
+            // what decides whether it chases when the other side breaks.
+            unit.ForcedIntoThisFight = true;
+
             log.Decision("Orders",
                 $"{unit.Def.DisplayName} cannot get past {blocker.Def.DisplayName} and is going through it.",
                 unit.Id);
@@ -474,6 +478,22 @@ namespace BattleChess.Rules
             if (!target.IsOnField)
             {
                 log.Info("Order", $"{unit.Def.DisplayName} has no target left to attack.", unit.Id);
+                unit.GiveOrder(UnitOrder.Stand(), unit.Position);
+                return;
+            }
+
+            // Unless nobody sent it. A regiment that was marching somewhere and
+            // had to fight its way past has done what the situation asked of it;
+            // running down the survivors is a separate decision, and so is
+            // whether the march it was on still makes any sense. It holds the
+            // ground it won and waits to be told.
+            if (unit.ForcedIntoThisFight && target.State == UnitState.Routing)
+            {
+                log.Decision("Order",
+                    $"{unit.Def.DisplayName} has driven off {target.Def.DisplayName} and holds its ground — " +
+                    "it was marching, not attacking, and will not pursue unless told to.",
+                    unit.Id);
+
                 unit.GiveOrder(UnitOrder.Stand(), unit.Position);
                 return;
             }
@@ -837,14 +857,18 @@ namespace BattleChess.Rules
         /// exactly the full frontage that face is worth.
         /// </para>
         /// <para>
-        /// Set well clear of the case it decides rather than on top of it. The
-        /// first version asked whether the face was at least twice a regiment's
-        /// half-width, which for two forty-metre bodies is a dead heat — and a
-        /// defender's frontage narrows as its men are killed, so the first
-        /// casualty tipped the answer from two to one and dropped a regiment
-        /// that was already fighting into the reserve for the rest of the
-        /// battle. Measured: swordsmen halted ten metres short while their own
-        /// archers shot the enemy they were supposed to be closing with.
+        /// Measured against the ground both regiments covered when they were
+        /// mustered, never against what is left of them. A live frontage
+        /// narrows as men are killed, and a yes-or-no answer fed by a sliding
+        /// number crosses its own threshold sooner or later: the first version
+        /// tipped from two to one at the defender's first casualty, and raising
+        /// the margin only moved the cliff to about seventy per cent — an
+        /// ordinary mid-fight regiment, at which point one of the two attackers
+        /// already in contact was recomputed into the reserve and walked
+        /// backwards out of a fight it was winning.
+        /// </para>
+        /// <para>
+        /// A face that held two at the start holds two at the end.
         /// </para>
         /// </remarks>
         private const float MinimumUsefulShare = 0.35f;
@@ -861,10 +885,12 @@ namespace BattleChess.Rules
         /// </remarks>
         private static int FaceCapacity(UnitInstance unit, UnitInstance quarry, Vec2 alongTheFace)
         {
-            float faceWidth = quarry.Shape.ProjectedRadius(alongTheFace) * 2f;
+            var block = new OrientedRect(quarry.Position, quarry.Facing, quarry.FootprintAtFullStrength);
+
+            float faceWidth = block.ProjectedRadius(alongTheFace) * 2f;
             float eachWouldGet = faceWidth / MostOnOneFace;
 
-            return eachWouldGet >= unit.Footprint.Width * MinimumUsefulShare
+            return eachWouldGet >= unit.FootprintAtFullStrength.Width * MinimumUsefulShare
                 ? MostOnOneFace
                 : 1;
         }
