@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -9,14 +9,14 @@ namespace BattleChess.Rules
     /// <remarks>
     /// <para>
     /// Units set off immediately and come round onto their bearing as they go,
-    /// but a formation facing the wrong way cannot march properly — speed falls
+    /// but a formation facing the wrong way cannot march properly â€” speed falls
     /// away the further off it is pointing, down to a shuffle when fully
     /// reversed. So turning is never free, without a unit ever looking like it
     /// ignored an order.
     /// </para>
     /// <para>
-    /// This is what gives <c>turnRate</c> its meaning. Spearmen at 20°/s spend
-    /// nine seconds wheeling about, crawling the whole time; scouts at 60°/s do
+    /// This is what gives <c>turnRate</c> its meaning. Spearmen at 20Â°/s spend
+    /// nine seconds wheeling about, crawling the whole time; scouts at 60Â°/s do
     /// it in three. That difference is precisely why cavalry goes looking for a
     /// pike block's flank rather than its front.
     /// </para>
@@ -41,7 +41,7 @@ namespace BattleChess.Rules
         /// </summary>
         /// <remarks>
         /// Troops standing still manoeuvre better than troops trying to march
-        /// and change front at once — the officers can dress the ranks rather
+        /// and change front at once â€” the officers can dress the ranks rather
         /// than chase them. This is what makes "wheel first" worth ordering:
         /// otherwise it is strictly worse, since turning under way at least
         /// covers a little ground while it happens.
@@ -67,11 +67,11 @@ namespace BattleChess.Rules
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
-            // Ascending unit id, always — the ordering guarantee the whole
+            // Ascending unit id, always â€” the ordering guarantee the whole
             // simulation's reproducibility rests on.
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
-                // Broken units move too — arguably they are the ones most
+                // Broken units move too â€” arguably they are the ones most
                 // committed to moving. Skipping them left routers standing in
                 // place to be cut down where they broke, which is not a rout,
                 // it is an execution.
@@ -80,7 +80,7 @@ namespace BattleChess.Rules
                 // A halted regiment holds the front it was left on. It does not
                 // quietly come about to face whoever turns up, because being
                 // caught pointing the wrong way is a mistake the player made and
-                // ought to keep — the whole value of getting round an enemy is
+                // ought to keep â€” the whole value of getting round an enemy is
                 // that they are still facing the way you left them.
                 //
                 // What replaced it is the dressing rule below: an attack ordered
@@ -103,7 +103,7 @@ namespace BattleChess.Rules
         /// <remarks>
         /// <para>
         /// Not the automatic turn that used to be here. This one only ever
-        /// chases the front the player asked for — a regiment given no new front
+        /// chases the front the player asked for â€” a regiment given no new front
         /// stands exactly where it was left, and one taken in the flank stays
         /// flanked until somebody does something about it.
         /// </para>
@@ -118,7 +118,7 @@ namespace BattleChess.Rules
         /// formation does: men come about within their own frontage and do not
         /// need anybody's permission, and gating this on collisions would mean a
         /// regiment in a crowded line could never face the enemy that had got
-        /// round it — which is the one position where turning matters most.
+        /// round it â€” which is the one position where turning matters most.
         /// </para>
         /// </remarks>
         private static void WheelOnTheSpot(UnitInstance unit)
@@ -132,7 +132,7 @@ namespace BattleChess.Rules
 
             float rate = unit.Def.Get(UnitAttributes.TurnRate);
 
-            // Standing troops dress ranks rather than chase them — but not with
+            // Standing troops dress ranks rather than chase them â€” but not with
             // an enemy already among them, which is the hardest way there is to
             // change front and should feel like it.
             if (unit.EnemiesInContact == 0) rate *= PivotBonusWhileHalted;
@@ -147,7 +147,7 @@ namespace BattleChess.Rules
         /// </summary>
         /// <remarks>
         /// The final approach is the one moment a body of men is genuinely
-        /// hurrying to change front — officers dressing ranks on the run, with
+        /// hurrying to change front â€” officers dressing ranks on the run, with
         /// the enemy a minute away. At the ordinary rate a spear block needs the
         /// better part of that minute to come round ninety degrees, which is the
         /// whole approach spent wheeling and none of it spent closing.
@@ -192,8 +192,8 @@ namespace BattleChess.Rules
         /// </para>
         /// <para>
         /// A regiment already standing somewhere it does not fit is exempt
-        /// entirely. That happens — deployed onto bad ground, or left there by
-        /// an older rule — and a unit that cannot legally be where it is must
+        /// entirely. That happens â€” deployed onto bad ground, or left there by
+        /// an older rule â€” and a unit that cannot legally be where it is must
         /// still be able to walk off it, or it is stuck for the whole battle.
         /// </para>
         /// </remarks>
@@ -237,8 +237,8 @@ namespace BattleChess.Rules
         /// <remarks>
         /// <para>
         /// Positions are a point and regiments are rectangles, so a centre
-        /// legally inside the bounds still leaves half a frontage — fifty
-        /// metres of cavalry — hanging over the edge of the world. Inset by
+        /// legally inside the bounds still leaves half a frontage â€” fifty
+        /// metres of cavalry â€” hanging over the edge of the world. Inset by
         /// however much of the shape actually points that way, which is exact
         /// for any bearing and costs nothing.
         /// </para>
@@ -278,7 +278,7 @@ namespace BattleChess.Rules
         /// <remarks>
         /// <para>
         /// Two bodies of men cannot stand in the same field, and until now
-        /// nothing said so — friendly formations interpenetrated freely and paid
+        /// nothing said so â€” friendly formations interpenetrated freely and paid
         /// only a trickle of cohesion for it. So a line was never really a line:
         /// regiments ordered along the same axis slid into one another and the
         /// front the player had drawn stopped meaning anything.
@@ -289,7 +289,7 @@ namespace BattleChess.Rules
         /// angles; a hard stop on every touch would jam a line solid the first
         /// time two units converged. So only the part of the step that pushes
         /// into the friend is taken away, and whatever is left along their flank
-        /// is kept — which is how men actually get past each other.
+        /// is kept â€” which is how men actually get past each other.
         /// </para>
         /// <para>
         /// Marching squarely into somebody's back leaves nothing to slide along,
@@ -316,7 +316,7 @@ namespace BattleChess.Rules
             // Whoever has to give way. A regiment already standing where it
             // means to stand is not shoved off it to make room for one still
             // walking, and one at grips with an enemy is not pulled out of the
-            // fight — so the mover goes round, and between two movers the higher
+            // fight â€” so the mover goes round, and between two movers the higher
             // number yields. Arbitrary, total, and reproducible from the seed,
             // which is what matters: without a rule they either both give way
             // and drift, or neither does and they jam.
@@ -326,7 +326,7 @@ namespace BattleChess.Rules
 
             // Which way is "off them". Overlapping, the shortest way out of the
             // overlap; merely too close, the line from their nearest point to
-            // our centre — because a regiment keeping its distance has no
+            // our centre â€” because a regiment keeping its distance has no
             // overlap to be pushed out of, and asking for one gives no answer
             // at all. That was why the berth found its blocker and then failed
             // to do anything about it.
@@ -355,7 +355,7 @@ namespace BattleChess.Rules
             // Judged as a real fraction of the step rather than merely non-zero.
             // A regiment marching dead into somebody's back leaves a tangential
             // component of about a ten-thousandth of a metre, which is not zero
-            // and is not movement either — it took this branch, edged forward by
+            // and is not movement either â€” it took this branch, edged forward by
             // nothing, and did it again every tick forever. From the player's
             // chair that is indistinguishable from the hard stop this was
             // written to avoid.
@@ -369,7 +369,7 @@ namespace BattleChess.Rules
             }
 
             // Squarely into their back, so there is nothing worth sliding along.
-            // Go round instead of standing there — a regiment that has been
+            // Go round instead of standing there â€” a regiment that has been
             // ordered somewhere and simply stops because one of its own is in
             // the way is a regiment that has stopped taking orders, whatever the
             // log says about why.
@@ -422,7 +422,7 @@ namespace BattleChess.Rules
                 if (!stuckAlready && !battle.FormationFits(unit, round, unit.Facing)) continue;
 
                 // If the far side was the one that worked, that is the new
-                // commitment — otherwise the next tick starts from the blocked
+                // commitment â€” otherwise the next tick starts from the blocked
                 // side again and nothing has been learned.
                 unit.GoingRoundBearing = Facing.FromVector(thisWay);
 
@@ -441,7 +441,7 @@ namespace BattleChess.Rules
             if (tick % 20 == 0)
                 log.Blocked("Move",
                     $"{unit.Def.DisplayName} is hemmed in by its own {blocker.Def.DisplayName} with no way " +
-                    "round either flank — move one of them.",
+                    "round either flank â€” move one of them.",
                     unit.Id);
 
             return unit.Position;
@@ -464,7 +464,7 @@ namespace BattleChess.Rules
         /// are both merely marching, the higher number gives way.
         /// </para>
         /// <para>
-        /// The last is arbitrary, and that is the point — it is total and it is
+        /// The last is arbitrary, and that is the point â€” it is total and it is
         /// reproducible from the seed, which any rule about who moves has to be.
         /// Without one, two regiments converging on the same ground either both
         /// give way and drift, or neither does and they jam.
@@ -488,7 +488,7 @@ namespace BattleChess.Rules
         /// <remarks>
         /// <para>
         /// Charged against passing, never against standing. Regiments drawn up
-        /// in line stand flush against each other — that is what a line is, and
+        /// in line stand flush against each other â€” that is what a line is, and
         /// it is the whole point of being able to handle a big army regiment by
         /// regiment and then move the result as one body. A berth applied
         /// everywhere would put daylight between every pair of neighbours and
@@ -510,13 +510,13 @@ namespace BattleChess.Rules
         /// <para>
         /// Corners clipping is not a collision. An army in line brushes
         /// constantly, so anything under a twentieth of a regiment is ignored
-        /// outright — the same tolerance the placement search uses, so that
+        /// outright â€” the same tolerance the placement search uses, so that
         /// where a regiment is willing to stand and what it is willing to walk
         /// through are one decision rather than two that can disagree.
         /// </para>
         /// <para>
         /// A unit already lapping somebody is exempt for that pair. That happens
-        /// — deployed overlapping, or widened into a neighbour by reshaping —
+        /// â€” deployed overlapping, or widened into a neighbour by reshaping â€”
         /// and a regiment that cannot legally be where it is must still be able
         /// to walk off it, or it is stuck for the whole battle. The shuffle in
         /// <see cref="ContactSystem"/> is what resolves those.
@@ -541,7 +541,7 @@ namespace BattleChess.Rules
                     return other;
 
                 // Not touching them, but closing to within a hand's breadth
-                // while going somewhere — which is gluing itself to them rather
+                // while going somewhere â€” which is gluing itself to them rather
                 // than passing them. Only while marching: a regiment that has
                 // arrived beside a neighbour stands flush.
                 if (unit.IsMarching &&
@@ -612,7 +612,7 @@ namespace BattleChess.Rules
             // A regiment is a shape, and ground it cannot cross is ground it
             // cannot be on. Carrying on as it is may put part of the formation
             // in a wood or a river that the centre misses entirely, so before
-            // anything else it asks whether it still fits — and if not, whether
+            // anything else it asks whether it still fits â€” and if not, whether
             // there is a bearing it could come round to that does.
             switch (ChooseBearingToFit(battle, unit, route, out Facing threading))
             {
@@ -623,12 +623,12 @@ namespace BattleChess.Rules
                 case Fit.Blocked:
                     // Said every time, not on a tick counter. The march is
                     // abandoned on this same tick, so a throttled message is
-                    // one that usually never appears at all — and a regiment
+                    // one that usually never appears at all â€” and a regiment
                     // that has silently stopped is indistinguishable from one
                     // that has stopped taking orders.
                     log.Blocked("Move",
                         $"{unit.Def.DisplayName} cannot get its whole frontage past " +
-                        $"{battle.TerrainAt(unit.Position).DisplayName} — " +
+                        $"{battle.TerrainAt(unit.Position).DisplayName} â€” " +
                         $"{unit.Footprint.Width:0} m of front and no way through at any bearing.",
                         unit.Id);
 
@@ -653,13 +653,13 @@ namespace BattleChess.Rules
             if (pivotingHalted && offByDegrees > WheelToleranceDegrees)
             {
                 if (tick % 5 == 0)
-                    log.Info("Move", $"{unit.Def.DisplayName} is wheeling — {offByDegrees:0}° to come round.", unit.Id);
+                    log.Info("Move", $"{unit.Def.DisplayName} is wheeling â€” {offByDegrees:0}Â° to come round.", unit.Id);
 
                 return;
             }
 
             // The pace of the slowest regiment in this one's wing, over the
-            // ground it is actually standing on — so a wing whose left is
+            // ground it is actually standing on â€” so a wing whose left is
             // fording a river waits for it rather than arriving in two halves at
             // two different times. For a unit on its own this is just its own
             // speed here.
@@ -687,7 +687,7 @@ namespace BattleChess.Rules
 
             // Bad ground pulls a formation apart as it is crossed. Charged per
             // metre rather than per second, because rough country is already
-            // slow — billing by the second would make a regiment pay twice for
+            // slow â€” billing by the second would make a regiment pay twice for
             // the same mud, and a long march through open woods would end in a
             // rabble. Crossing a river costs what the river is wide, whether
             // you wade it quickly or slowly.
@@ -727,7 +727,7 @@ namespace BattleChess.Rules
         /// </summary>
         /// <remarks>
         /// Squared cosine falloff: full pace when aligned, about three quarters
-        /// at 45°, two fifths at a right angle, and a shuffle when reversed. The
+        /// at 45Â°, two fifths at a right angle, and a shuffle when reversed. The
         /// square is what makes small corrections nearly free while a genuine
         /// change of front is expensive.
         /// </remarks>
@@ -747,7 +747,7 @@ namespace BattleChess.Rules
         /// This used to record only the tick. A recorded game then turned up a
         /// march that took two and a half times as long as three others of the
         /// same length and the same wheel, and nothing in the log could say why
-        /// — not the ground it crossed, not the pace it kept, not which way it
+        /// â€” not the ground it crossed, not the pace it kept, not which way it
         /// finished pointing. Every one of those is a line of text, and without
         /// them a play report can only be answered by guessing or by asking.
         /// </remarks>
@@ -761,6 +761,27 @@ namespace BattleChess.Rules
         private const float FormingUpMarginMetres = 10f;
 
         /// <summary>
+        /// The most of a march that may be given over to coming round onto the
+        /// front it was asked to arrive on.
+        /// </summary>
+        /// <remarks>
+        /// Reserving whatever the wheel needs is right until the wheel needs
+        /// more than the march is long, and then it quietly swallows the whole
+        /// order and the regiment crabs from the first step â€” which is the very
+        /// thing this was written to stop. Recorded: 70 m asked for with a 156Â°
+        /// change of front, which wants 74 m of run-up, so nothing was left to
+        /// march properly and it covered the ground at a fifth of its pace.
+        ///
+        /// Short orders with a big change of front are the common case, not a
+        /// corner: a regiment being nudged into position is exactly when a
+        /// player is particular about which way it ends up pointing. So most of
+        /// any march is spent marching, and the front is picked up over what is
+        /// left â€” finishing on the spot after arrival if there was not enough
+        /// room, which costs nothing and looks like dressing the ranks.
+        /// </remarks>
+        private const float MostOfAMarchIsMarching = 0.4f;
+
+        /// <summary>
         /// The front to hold at this moment of a march.
         /// </summary>
         /// <remarks>
@@ -768,20 +789,20 @@ namespace BattleChess.Rules
         /// A bearing drawn by the player is the front to <b>arrive on</b>, not
         /// one to hold the whole way there. Until the regiment is close enough
         /// to need it, it marches the way it is going, at its proper pace, and
-        /// comes round at the end — which is what an attack has always done on
+        /// comes round at the end â€” which is what an attack has always done on
         /// its last hundred metres, and what everybody expects of the drag.
         /// </para>
         /// <para>
         /// Holding it throughout was a real order that nobody wanted and was
         /// easy to give by accident. Recorded: a body of horse sent 167 m on a
-        /// bearing of 171° while holding a front of −80° travelled rear-first
+        /// bearing of 171Â° while holding a front of âˆ’80Â° travelled rear-first
         /// the entire way and took 122 ticks over a march worth 35, at 29% of
         /// its pace. From outside that is not a manoeuvre, it is a regiment
         /// that has gone wrong.
         /// </para>
         /// <para>
         /// The turn is started far enough out to be finished on arrival rather
-        /// than at it, scaled by how far there is to come round — a quarter
+        /// than at it, scaled by how far there is to come round â€” a quarter
         /// turn needs a fraction of the room an about-face does, and reserving
         /// the same distance for both would have a regiment crabbing most of a
         /// short march for a bearing it could pick up in twenty metres.
@@ -800,6 +821,11 @@ namespace BattleChess.Rules
             float roomToComeRound =
                 toTurn / turnRate * pace * PaceWhileWheeling + FormingUpMarginMetres;
 
+            // Never more than a slice of the march, however long the wheel
+            // wants. What is left of the turn is finished standing still.
+            float wholeMarch = Vec2.Distance(unit.OrderAnchor, route.Destination);
+            roomToComeRound = MathF.Min(roomToComeRound, wholeMarch * MostOfAMarchIsMarching);
+
             return Vec2.Distance(unit.Position, route.Destination) > roomToComeRound
                 ? marchBearing
                 : unit.OrderFacing;
@@ -816,7 +842,7 @@ namespace BattleChess.Rules
             // one case where that reads as an order gone wrong rather than as
             // an obstacle handled, so it is called out by name.
             string front = offOrdered > 10f
-                ? $" — finished {offOrdered:0}° off the front it was given, on ground it may still be threading"
+                ? $" â€” finished {offOrdered:0}Â° off the front it was given, on ground it may still be threading"
                 : string.Empty;
 
             log.Info("Move",

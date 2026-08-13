@@ -164,6 +164,68 @@ namespace BattleChess.Tests.Battle
                 $"It was asked to arrive facing east and arrived facing {unit.Facing.Degrees:0}°.");
         }
 
+        [Fact]
+        public void AShortMoveWithABigChangeOfFrontStillMarchesMostOfTheWay()
+        {
+            var field = new Battlefield("plains", 22280);
+
+            UnitInstance unit = field.Add(0, "cavalry", field.Centre, Facing.East);
+
+            // Seventy metres, and a front a hundred and fifty-six degrees round
+            // from the line of march. The wheel wants more run-up than the whole
+            // order is long, so reserving room for it swallowed the march
+            // entirely and the regiment crabbed the lot at a fifth of its pace.
+            // This is the ordinary case, not a corner: a regiment being nudged
+            // into position is exactly when the player cares which way it faces.
+            int plain = PulsesToCover(70f, null);
+            int asked = PulsesToCover(70f, Facing.FromDegrees(-72f));
+
+            // Measured in pulses, not turns. The whole march is about a turn and
+            // a half even when crabbed, so counting turns cannot tell the two
+            // apart — the first version of this test passed with the fix taken
+            // out, which is worth more than the test itself.
+            Assert.True(asked <= plain + 2,
+                $"Seventy metres took {asked} pulses with a front asked for and {plain} without. The bearing is " +
+                "for arriving on; it should not be walked there sideways.");
+        }
+
+        /// <summary>
+        /// How many combat pulses a regiment takes to cover a short march at
+        /// 132°, optionally asked to arrive on a given front. Also checks it
+        /// ends up on that front.
+        /// </summary>
+        private static int PulsesToCover(float metres, Facing? arriveOn)
+        {
+            var field = new Battlefield("plains", 22280);
+
+            UnitInstance unit = field.Add(0, "cavalry", field.Centre, Facing.East);
+            Vec2 destination = field.Centre + Facing.FromDegrees(132f).ToVector() * metres;
+
+            field.March(unit, destination, bearing: arriveOn);
+
+            int pulses = 0;
+
+            while (pulses < 20 && Vec2.Distance(unit.Position, destination) > 12f)
+            {
+                field.RunPulses(1);
+                pulses++;
+            }
+
+            Assert.True(Vec2.Distance(unit.Position, destination) < 12f,
+                $"It never got there — {Vec2.Distance(unit.Position, destination):0} m short.");
+
+            if (arriveOn.HasValue)
+            {
+                field.RunTurns(2);
+
+                Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, arriveOn.Value)) < 15f,
+                    $"And it should still finish on the front it was asked for, standing still to do it if " +
+                    $"need be. It is facing {unit.Facing.Degrees:0}°.");
+            }
+
+            return pulses;
+        }
+
         /// <summary>
         /// Marches a regiment due north for a number of turns, asked to arrive
         /// on a given front.
