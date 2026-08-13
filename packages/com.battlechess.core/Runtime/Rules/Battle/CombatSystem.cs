@@ -268,8 +268,6 @@ namespace BattleChess.Rules
                 {
                     fight = new Engagement { Began = tick };
                     _engaged[pair] = fight;
-
-                    ReportTheMeeting(unit, other, tick, log);
                 }
 
                 fight!.LastTick = tick;
@@ -289,6 +287,21 @@ namespace BattleChess.Rules
             }
 
             _touched.Clear();
+
+            // Announced only once every pair has added its claim above. How many
+            // men a regiment brings depends on how crowded its frontage is, and
+            // that is not known until the whole loop has run — so reporting a
+            // meeting as it was found printed figures worked out from a half
+            // built picture, and the line said one thing while the exchange four
+            // lines later did another. A log that quietly disagrees with the
+            // rules it is describing is worse than no log, because it is
+            // believed.
+            for (int i = 0; i < exchanges.Count; i++)
+            {
+                (UnitInstance a, UnitInstance b, bool fresh, _) = exchanges[i];
+
+                if (fresh) ReportTheMeeting(a, b, tick, log);
+            }
 
             ForgetReformedPairs(battle, tick, log);
 
@@ -404,7 +417,16 @@ namespace BattleChess.Rules
         /// out of hundreds, so anything at this scale is a charge, a flank, or a
         /// fight that has gone badly wrong for somebody — all worth a line.
         /// </remarks>
-        private static bool BitOffAWhat(int lost, int had) => had > 0 && lost >= had / 20;
+        /// <remarks>
+        /// The comparison is multiplied out rather than divided. Written as
+        /// <c>lost >= had / 20</c> it is integer division, so for a regiment
+        /// under twenty men the right-hand side is zero and a pulse in which
+        /// <i>nobody died</i> counted as a heavy one. A regiment ground down to
+        /// a handful is how most long fights end, so that is not a corner — it
+        /// would have put the per-exchange chatter back exactly where the fight
+        /// is most drawn out.
+        /// </remarks>
+        private static bool BitOffAWhat(int lost, int had) => lost > 0 && lost * 20 >= had;
 
         /// <summary>
         /// Which quarter one regiment is fighting another from, in words.

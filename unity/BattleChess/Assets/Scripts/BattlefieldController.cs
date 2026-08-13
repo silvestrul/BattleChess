@@ -93,9 +93,13 @@ namespace BattleChess.Unity
         /// directly, because a line the player caused is an event by definition
         /// and should never be swallowed as a repeat.
         /// </remarks>
-        private readonly SteadyStateLog _quietened;
-
-        public BattlefieldController() => _quietened = new SteadyStateLog(_console);
+        /// <remarks>
+        /// Built in <c>Start</c>. Not a field initializer, which cannot
+        /// reference another instance field, and not a constructor: Unity builds
+        /// a MonoBehaviour through its parameterless constructor during
+        /// deserialization, off the main thread, and this class had none before.
+        /// </remarks>
+        private SteadyStateLog _quietened;
 
         private BattleClock _clock;
         private float _tickAccumulator;
@@ -129,6 +133,8 @@ namespace BattleChess.Unity
 
         private void Start()
         {
+            _quietened = new SteadyStateLog(_console);
+
             try
             {
                 LoadBattle();
@@ -1138,7 +1144,7 @@ namespace BattleChess.Unity
             // Anything still going when the recording stops is closed out first,
             // or the last thing that happened — which is very often the thing
             // being investigated — is left with no end and no duration.
-            _quietened.Flush();
+            _quietened?.Flush();
             _console.StopRecording();
         }
 

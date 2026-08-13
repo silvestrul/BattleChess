@@ -271,6 +271,41 @@ being reasoned about together anyway.
 
 ---
 
+## 7. An attacking regiment arrives at its destination every tick
+
+Found by the collapsed logging on the run after finding 6, from the number in a
+closing line rather than from anything anybody was looking for:
+
+```
+Move U0  Swordsmen reached its destination on Plains at 1,6 m/s.
+Move U0  — and that held for 217 ticks (217 times over), ticks 115 to 331.
+```
+
+**Two hundred and seventeen arrivals in two hundred and seventeen ticks.** Every
+tick, for three and a half turns.
+
+**What is happening.** `MovementSystem.Finish` runs when a route is complete and
+clears the route. For an attack order `FollowTarget` then lays a new one on the
+next tick; if the quarry is already in contact that route is complete the moment
+it is built, so it is finished, cleared, and built again — for as long as the
+fight lasts.
+
+**Why it matters beyond the log.** Route-building is the most expensive thing in
+the rules and `RepathIntervalTicks = 5` exists specifically to keep it off the
+per-tick path. This slips past that guard entirely. It also means `unit.Route`
+churns between null and a one-step route every tick, which anything reading
+`IsMarching` sees flickering.
+
+**Harmless to the outcome as far as anything shows** — the suite and the sweep
+are unchanged either side of the logging work. This is waste and noise rather
+than a wrong answer, which is why it is recorded rather than rushed.
+
+The fix is presumably to leave a completed route alone when the order is an
+attack on somebody already in contact, but that is movement work and wants its
+own pass.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
