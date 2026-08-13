@@ -229,14 +229,42 @@ namespace BattleChess.Rules
 
             target.PendingMoraleShock += shock;
 
+            // One line saying who is shooting whom, not one per volley. A
+            // battery firing across a battle produced a line every eleven ticks
+            // with a different casualty figure in it each time, so it never
+            // collapsed and drowned everything else — the same complaint as
+            // melee narrating every exchange, in a different rule.
+            //
+            // Range and formation are the part worth repeating: they are what
+            // the player can do something about, and a target that closes or
+            // spreads out crosses into a different line of its own accord.
             log.Decision("Shooting",
-                $"{shooter.Def.DisplayName} volleys {target.Def.DisplayName} at {distance:0} m " +
-                $"({target.FormationOrder.DisplayName}): {casualties} down, {target.Strength} left.",
+                $"{shooter.Def.DisplayName} is shooting at {target.Def.DisplayName} " +
+                $"({target.FormationOrder.DisplayName}) at {RoughRange(distance)}.",
                 shooter.Id);
+
+            // A volley that takes a real bite is an event inside the shooting
+            // rather than the shooting going on, and says so.
+            if (casualties * 20 >= before)
+            {
+                log.Decision("Shooting",
+                    $"{shooter.Def.DisplayName} lands a heavy volley on {target.Def.DisplayName}: " +
+                    $"{casualties} down, {target.Strength} left.",
+                    shooter.Id);
+            }
 
             if (target.State == UnitState.Destroyed)
                 log.Warning("Shooting", $"{target.Def.DisplayName} has been shot to pieces.", target.Id);
         }
+
+        /// <summary>
+        /// A range in words, so that a target closing steadily says so once per
+        /// band rather than once per volley.
+        /// </summary>
+        private static string RoughRange(float metres) =>
+            metres < 50f ? "point blank" :
+            metres < 100f ? "close range" :
+            metres < 160f ? "long range" : "the edge of its range";
 
         private static float ConditionOf(UnitInstance unit) => 0.35f + 0.65f * unit.Organization;
     }

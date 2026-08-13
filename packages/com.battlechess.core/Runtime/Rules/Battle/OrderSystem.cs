@@ -410,10 +410,9 @@ namespace BattleChess.Rules
 
             if (!path.Found || path.Waypoints.Count < 2)
             {
-                if (tick % 20 == 0)
-                    log.Blocked("Order",
-                        $"{unit.Def.DisplayName} is trying to evade {threat.Def.DisplayName} but has nowhere to go.",
-                        unit.Id);
+                log.Blocked("Order",
+                    $"{unit.Def.DisplayName} is trying to evade {threat.Def.DisplayName} but has nowhere to go.",
+                    unit.Id);
 
                 return true;
             }
@@ -421,11 +420,9 @@ namespace BattleChess.Rules
             unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false);
             unit.HeldUpBy = UnitId.None;
 
-            if (tick % 20 == 0)
-                log.Decision("Order",
-                    $"{unit.Def.DisplayName} is evading {threat.Def.DisplayName} at " +
-                    $"{Vec2.Distance(unit.Position, threat.Position):0} m.",
-                    unit.Id);
+            log.Decision("Order",
+                $"{unit.Def.DisplayName} is evading {threat.Def.DisplayName}.",
+                unit.Id);
 
             return true;
         }
@@ -447,10 +444,9 @@ namespace BattleChess.Rules
             // Do not be baited away from where the order was given.
             if (Vec2.Distance(unit.OrderAnchor, quarry.Position) > PursuitLeashMetres)
             {
-                if (tick % 30 == 0)
-                    log.Decision("Order",
-                        $"{unit.Def.DisplayName} is holding — {quarry.Def.DisplayName} is beyond its pursuit leash.",
-                        unit.Id);
+                log.Decision("Order",
+                    $"{unit.Def.DisplayName} is holding — {quarry.Def.DisplayName} is beyond its pursuit leash.",
+                    unit.Id);
 
                 return false;
             }
@@ -589,21 +585,18 @@ namespace BattleChess.Rules
 
             if (!path.Found || path.Waypoints.Count < 2)
             {
-                if (tick % 30 == 0)
-                    log.Blocked("Order",
-                        $"{unit.Def.DisplayName} cannot reach {quarry.Def.DisplayName}: {path.FailureDetail}",
-                        unit.Id);
+                log.Blocked("Order",
+                    $"{unit.Def.DisplayName} cannot reach {quarry.Def.DisplayName}: {path.FailureDetail}",
+                    unit.Id);
 
                 return false;
             }
 
             unit.Route = new MovementRoute(path.Waypoints, unit.Order.WheelFirst);
 
-            if (tick % 20 == 0)
-                log.Decision("Order",
-                    $"{unit.Def.DisplayName} is {verb} {quarry.Def.DisplayName} at " +
-                    $"{Vec2.Distance(unit.Position, quarry.Position):0} m.",
-                    unit.Id);
+            log.Decision("Order",
+                $"{unit.Def.DisplayName} is {verb} {quarry.Def.DisplayName}.",
+                unit.Id);
 
             return true;
         }

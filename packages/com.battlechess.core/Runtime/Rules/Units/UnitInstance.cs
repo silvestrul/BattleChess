@@ -543,6 +543,18 @@ namespace BattleChess.Rules
         /// </remarks>
         public float CasualtyDebt { get; set; }
 
+        /// <summary>Melee exchanges this regiment has taken part in.</summary>
+        /// <remarks>
+        /// Counted because "has this regiment actually got into the fight?" is
+        /// one of the most useful questions to ask of a battle, and there was no
+        /// way to ask it except by counting the word "exchange" in the log. That
+        /// works until the log stops narrating every exchange — which it now
+        /// does, because six lines a turn per pair of regiments is what made a
+        /// recording unreadable. A fact worth asserting on deserves to be a
+        /// fact, not a turn of phrase that a rewording can silently break.
+        /// </remarks>
+        public int MeleePulses { get; set; }
+
         /// <summary>
         /// How many ranks deep this regiment actually stands right now, holding
         /// the frontage it is holding.

@@ -75,6 +75,11 @@ namespace BattleChess.Rules
 
             IBattleLog sink = log ?? NullBattleLog.Instance;
 
+            // A log that tells a moment from a condition needs to know time is
+            // passing, because a state that stops being renewed has ended and
+            // nothing else is going to say so.
+            (sink as ITickedLog)?.Ticked(Tick);
+
             // Fixed order, every tick, so the same seed produces the same battle.
             for (int i = 0; i < _systems.Count; i++)
             {

@@ -135,7 +135,7 @@ namespace BattleChess.Tests.Battle
 
             field.RunTurns(8);
 
-            Assert.True(field.TimesSaid("exchange") > 0,
+            Assert.True(ours.MeleePulses > 0,
                 "A line ordered forward onto an enemy line must end up fighting it. Halting at the edge " +
                 "of a zone of control and stopping there is the whole failure this guards.");
         }

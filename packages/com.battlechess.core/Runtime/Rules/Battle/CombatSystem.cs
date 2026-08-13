@@ -183,7 +183,35 @@ namespace BattleChess.Rules
         /// simply could not be stopped, and anything that cannot be stopped is
         /// permanently charging.
         /// </remarks>
-        private readonly Dictionary<long, int> _engaged = new Dictionary<long, int>();
+        private readonly Dictionary<long, Engagement> _engaged = new Dictionary<long, Engagement>();
+
+        /// <summary>
+        /// A fight between two regiments, from the moment they met to the moment
+        /// they came apart.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Kept so that a fight can be reported as a fight, rather than as one
+        /// line per exchange for as long as it lasts. Six pulses a turn for
+        /// every pair in contact is where a recording of a battle went from
+        /// readable to four thousand lines, and the per-pulse figures were the
+        /// least informative part of it: what a reader wants is who met whom,
+        /// from which quarter, and what it cost by the end.
+        /// </para>
+        /// <para>
+        /// The exchanges themselves are not silent — a charge landing and a
+        /// pulse that takes a fifth of a regiment still speak, because those are
+        /// events inside the fight rather than the fight going on.
+        /// </para>
+        /// </remarks>
+        private sealed class Engagement
+        {
+            public int LastTick;
+            public int Began;
+            public int Pulses;
+            public int LostByFirst;
+            public int LostBySecond;
+        }
 
         /// <summary>Scratch list for pruning, so the dictionary is never modified while read.</summary>
         private readonly List<long> _reformed = new List<long>();
@@ -217,7 +245,7 @@ namespace BattleChess.Rules
             // Gather the pairs first, then resolve. Both sides of an exchange
             // must be worked out from the same starting strengths, or whoever
             // happens to be resolved first gets a free advantage.
-            var exchanges = new List<(UnitInstance A, UnitInstance B, bool Charge)>();
+            var exchanges = new List<(UnitInstance A, UnitInstance B, bool Charge, Engagement Fight)>();
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
@@ -234,8 +262,18 @@ namespace BattleChess.Rules
 
                 if (!unit.IsFighting || !other.IsFighting) continue;
 
-                bool fresh = !_engaged.ContainsKey(pair);
-                _engaged[pair] = tick;
+                bool fresh = !_engaged.TryGetValue(pair, out Engagement? fight);
+
+                if (fresh)
+                {
+                    fight = new Engagement { Began = tick };
+                    _engaged[pair] = fight;
+
+                    ReportTheMeeting(unit, other, tick, log);
+                }
+
+                fight!.LastTick = tick;
+                fight.Pulses++;
 
                 unit.EnemiesInContact++;
                 other.EnemiesInContact++;
@@ -247,12 +285,12 @@ namespace BattleChess.Rules
                 unit.ClaimedFrontage += EngagedWidth(unit, other);
                 other.ClaimedFrontage += EngagedWidth(other, unit);
 
-                exchanges.Add((unit, other, fresh));
+                exchanges.Add((unit, other, fresh, fight));
             }
 
             _touched.Clear();
 
-            ForgetReformedPairs(battle, tick);
+            ForgetReformedPairs(battle, tick, log);
 
             // Once per unit per pulse, not once per exchange. Charging it per
             // exchange made the cost grow with the square of the attackers and
@@ -263,8 +301,8 @@ namespace BattleChess.Rules
                     unit.Organization -= SurroundedDisorderPerPulse * (unit.EnemiesInContact - 1);
             }
 
-            foreach ((UnitInstance a, UnitInstance b, bool charge) in exchanges)
-                Resolve(battle, a, b, charge, log);
+            foreach ((UnitInstance a, UnitInstance b, bool charge, Engagement fight) in exchanges)
+                Resolve(battle, a, b, charge, fight, log);
         }
 
         /// <summary>
@@ -293,7 +331,8 @@ namespace BattleChess.Rules
             }
         }
 
-        private void Resolve(BattleState battle, UnitInstance a, UnitInstance b, bool charge, IBattleLog log)
+        private void Resolve(
+            BattleState battle, UnitInstance a, UnitInstance b, bool charge, Engagement fight, IBattleLog log)
         {
             int aFighting = FightingMen(a, b);
             int bFighting = FightingMen(b, a);
@@ -329,14 +368,99 @@ namespace BattleChess.Rules
             if (aCharges) b.Organization -= ChargeDisorder * a.Def.Get(UnitAttributes.ChargeBonus);
             if (bCharges) a.Organization -= ChargeDisorder * b.Def.Get(UnitAttributes.ChargeBonus);
 
-            log.Decision("Combat",
-                $"{a.Def.DisplayName} ({aFighting} fighting) and {b.Def.DisplayName} ({bFighting} fighting) " +
-                $"exchange: {a.Def.DisplayName} loses {lossesToA}, {b.Def.DisplayName} loses {lossesToB}." +
-                (charge ? " Charge lands." : string.Empty),
-                a.Id);
+            fight.LostByFirst += lossesToA;
+            fight.LostBySecond += lossesToB;
+
+            a.MeleePulses++;
+            b.MeleePulses++;
+
+            // The fight itself was announced when it began and is tallied when
+            // it ends. What is left to say here is only what an ordinary
+            // exchange does not do: a charge landing, or a pulse that takes a
+            // real bite out of somebody. Reporting every exchange filled a
+            // recording with six lines a turn per pair, all of them saying that
+            // two regiments were still fighting.
+            bool worthSaying =
+                aCharges || bCharges ||
+                BitOffAWhat(lossesToA, strengthA) || BitOffAWhat(lossesToB, strengthB);
+
+            if (worthSaying)
+            {
+                log.Decision("Combat",
+                    $"{a.Def.DisplayName} ({aFighting} fighting) and {b.Def.DisplayName} ({bFighting} fighting) " +
+                    $"exchange: {a.Def.DisplayName} loses {lossesToA}, {b.Def.DisplayName} loses {lossesToB}." +
+                    (aCharges ? $" Charge lands: {a.Def.DisplayName} rides in." : string.Empty) +
+                    (bCharges ? $" Charge lands: {b.Def.DisplayName} rides in." : string.Empty),
+                    a.Id);
+            }
 
             ReportDestruction(a, log);
             ReportDestruction(b, log);
+        }
+
+        /// <summary>A pulse that took a real bite out of a regiment.</summary>
+        /// <remarks>
+        /// A twentieth in one exchange. Ordinary line fighting costs a few men
+        /// out of hundreds, so anything at this scale is a charge, a flank, or a
+        /// fight that has gone badly wrong for somebody — all worth a line.
+        /// </remarks>
+        private static bool BitOffAWhat(int lost, int had) => had > 0 && lost >= had / 20;
+
+        /// <summary>
+        /// Which quarter one regiment is fighting another from, in words.
+        /// </summary>
+        private static string Quarter(UnitInstance defender, UnitInstance attacker)
+        {
+            float off = OffFront(defender, attacker);
+
+            if (off <= FrontalArc) return "square on to its front";
+            return off >= 0.75f ? "into its rear" : "into its flank";
+        }
+
+        /// <summary>
+        /// Says that two regiments have met, and from which quarter.
+        /// </summary>
+        /// <remarks>
+        /// The line a reader actually wants out of a battle, and the one that
+        /// was missing: whether a fight is a frontal grind or somebody being
+        /// taken in the side is the single fact that decides how it will go, and
+        /// it was nowhere in a recording. It had to be inferred from casualty
+        /// figures several lines later, by which point the manoeuvre that earned
+        /// it has scrolled past.
+        /// </remarks>
+        private static void ReportTheMeeting(UnitInstance a, UnitInstance b, int tick, IBattleLog log)
+        {
+            string aOn = Quarter(b, a);
+            string bOn = Quarter(a, b);
+
+            // Both square on to each other is the ordinary case and needs no
+            // remarking beyond the fact of it. Anything else is a manoeuvre that
+            // somebody earned, and says so.
+            bool plain = aOn == "square on to its front" && bOn == "square on to its front";
+
+            string how = plain
+                ? "front to front"
+                : $"{a.Def.DisplayName} {aOn}, {b.Def.DisplayName} {bOn}";
+
+            log.Info("Combat",
+                $"{a.Def.DisplayName} ({a.Strength} men) meets {b.Def.DisplayName} ({b.Strength} men) " +
+                $"at tick {tick} — {how}. Bringing {FightingMen(a, b)} against {FightingMen(b, a)}.",
+                a.Id);
+        }
+
+        /// <summary>
+        /// Says what a fight cost, once it is over.
+        /// </summary>
+        private static void ReportTheTally(
+            UnitInstance a, UnitInstance b, Engagement fight, int tick, IBattleLog log)
+        {
+            if (fight.LostByFirst == 0 && fight.LostBySecond == 0) return;
+
+            log.Info("Combat",
+                $"{a.Def.DisplayName} and {b.Def.DisplayName} are out of contact after " +
+                $"{tick - fight.Began} ticks and {fight.Pulses} exchanges — " +
+                $"{a.Def.DisplayName} lost {fight.LostByFirst}, {b.Def.DisplayName} lost {fight.LostBySecond}.",
+                a.Id);
         }
 
         /// <summary>
@@ -907,13 +1031,13 @@ namespace BattleChess.Rules
         /// walk.
         /// </para>
         /// </remarks>
-        private void ForgetReformedPairs(BattleState battle, int tick)
+        private void ForgetReformedPairs(BattleState battle, int tick, IBattleLog log)
         {
             _reformed.Clear();
 
-            foreach (KeyValuePair<long, int> entry in _engaged)
+            foreach (KeyValuePair<long, Engagement> entry in _engaged)
             {
-                if (tick - entry.Value < ChargeReformTicks) continue;
+                if (tick - entry.Value.LastTick < ChargeReformTicks) continue;
 
                 var first = battle.Get(new UnitId((int)(entry.Key >> 32)));
                 var second = battle.Get(new UnitId((int)(entry.Key & 0xFFFFFFFF)));
@@ -924,8 +1048,28 @@ namespace BattleChess.Rules
                     _reformed.Add(entry.Key);
             }
 
+            // Sorted before anything is said. The walk above is in hash order,
+            // which was harmless while this method only removed entries — the
+            // same set goes whatever sequence they are visited in. Reporting a
+            // fight as it closes changes that: log lines are ordered output, and
+            // two fights ending on the same tick would be written in whichever
+            // order the dictionary felt like. A recording of a deterministic
+            // battle has to be deterministic too, or comparing two runs of the
+            // same seed turns up differences that are not there.
+            _reformed.Sort();
+
             for (int i = 0; i < _reformed.Count; i++)
-                _engaged.Remove(_reformed[i]);
+            {
+                long key = _reformed[i];
+                Engagement fight = _engaged[key];
+
+                ReportTheTally(
+                    battle.Get(new UnitId((int)(key >> 32))),
+                    battle.Get(new UnitId((int)(key & 0xFFFFFFFF))),
+                    fight, tick, log);
+
+                _engaged.Remove(key);
+            }
         }
     }
 }

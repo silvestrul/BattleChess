@@ -82,6 +82,21 @@ namespace BattleChess.Unity
         private readonly DebugOptions _options = new DebugOptions();
         private readonly DebugConsole _console = new DebugConsole();
 
+        /// <summary>
+        /// What the simulation actually writes to: the console, with repeated
+        /// lines collapsed into the stretch of time they covered.
+        /// </summary>
+        /// <remarks>
+        /// Wrapped here rather than inside the console so that the console stays
+        /// a plain sink and the collapsing can be reasoned about — and tested —
+        /// on its own. Everything the player types goes to <c>_console</c>
+        /// directly, because a line the player caused is an event by definition
+        /// and should never be swallowed as a repeat.
+        /// </remarks>
+        private readonly SteadyStateLog _quietened;
+
+        public BattlefieldController() => _quietened = new SteadyStateLog(_console);
+
         private BattleClock _clock;
         private float _tickAccumulator;
 
@@ -706,6 +721,18 @@ namespace BattleChess.Unity
             foreach (UnitInstance unit in _selection) origin += unit.Position;
             origin /= _selection.Count;
 
+            // One line for the wing rather than one per regiment, and the
+            // regiments themselves go quiet — but the wing has to say something,
+            // or a group order is the one kind of order that leaves no trace in
+            // a recording at all. Which is unfortunate, because a wing walking
+            // into itself is the failure most worth catching and the hardest to
+            // reconstruct after the fact.
+            _console.Info("Group",
+                $"{_selection.Count} regiments ordered together from ({origin.X:0},{origin.Y:0}) to " +
+                $"({destination.X:0},{destination.Y:0}) — {Vec2.Distance(origin, destination):0} m, " +
+                $"keeping their shape" +
+                (bearing.HasValue ? $", to arrive facing {bearing.Value.Degrees:0}°." : "."));
+
             foreach (UnitInstance unit in _selection)
                 PlanRoute(unit, destination + (unit.Position - origin), bearing, quiet: true);
 
@@ -1106,7 +1133,14 @@ namespace BattleChess.Unity
             GUI.color = original;
         }
 
-        private void OnDisable() => _console.StopRecording();
+        private void OnDisable()
+        {
+            // Anything still going when the recording stops is closed out first,
+            // or the last thing that happened — which is very often the thing
+            // being investigated — is left with no end and no duration.
+            _quietened.Flush();
+            _console.StopRecording();
+        }
 
         private void HandleClockKeys()
         {
@@ -1169,7 +1203,7 @@ namespace BattleChess.Unity
             // second at speed.
             List<int> before = _options.NoCasualties ? StrengthSnapshot() : EmptyStrengths;
 
-            _clock.Advance(_battle, _console);
+            _clock.Advance(_battle, _quietened);
 
             ApplyCheats(before);
 
@@ -1385,18 +1419,53 @@ namespace BattleChess.Unity
         /// </remarks>
         private void HoldTogether(List<UnitInstance> units)
         {
+            int wasGrouped = 0;
+
             foreach (UnitInstance unit in _battle.AllUnits)
             {
-                if (unit.Bond == TransientBond) unit.Bond = 0;
+                if (unit.Bond != TransientBond) continue;
+
+                unit.Bond = 0;
+                wasGrouped++;
             }
 
-            if (units.Count < 2) return;
+            int nowGrouped = 0;
+            float pace = float.MaxValue;
+            string slowest = string.Empty;
 
-            foreach (UnitInstance unit in units)
+            if (units.Count >= 2)
             {
-                // Never over a wing the player tied by hand — that one is
-                // theirs, and it already moves as one.
-                if (unit.Bond == 0) unit.Bond = TransientBond;
+                foreach (UnitInstance unit in units)
+                {
+                    // Never over a wing the player tied by hand — that one is
+                    // theirs, and it already moves as one.
+                    if (unit.Bond != 0) continue;
+
+                    unit.Bond = TransientBond;
+                    nowGrouped++;
+
+                    if (unit.BaseSpeed >= pace) continue;
+
+                    pace = unit.BaseSpeed;
+                    slowest = unit.Def.DisplayName;
+                }
+            }
+
+            // Said because it is invisible and it costs something. Boxing horse
+            // together with foot silently slows the horse to the foot's pace for
+            // as long as the selection is held, and a player watching cavalry
+            // crawl has no way to know that a box drawn several orders ago is
+            // the reason.
+            if (nowGrouped >= 2)
+            {
+                _console.Decision("Group",
+                    $"{nowGrouped} regiments picked out together — they move as one body at " +
+                    $"{pace:0.00} m/s, the pace of the {slowest}. Let go and they are on their own again.");
+            }
+            else if (wasGrouped >= 2)
+            {
+                _console.Decision("Group",
+                    $"{wasGrouped} regiments let go — each back to its own pace and its own orders.");
             }
         }
 

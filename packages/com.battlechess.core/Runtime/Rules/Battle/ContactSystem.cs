@@ -165,12 +165,11 @@ namespace BattleChess.Rules
                     unit.Organization -= EnemyBreakthroughDisorderPerTick;
                     enemy.Organization -= EnemyBreakthroughDisorderPerTick;
 
-                    if (tick % 10 == 0)
-                        log.Decision("Contact",
-                            $"{unit.Def.DisplayName} ({unit.FormationOrder.DisplayName}) is forcing through " +
-                            $"{enemy.Def.DisplayName} ({enemy.FormationOrder.DisplayName}): " +
-                            $"{breakthrough:0.00} against {stopping:0.00} — both losing order.",
-                            unit.Id);
+                    log.Decision("Contact",
+                        $"{unit.Def.DisplayName} ({unit.FormationOrder.DisplayName}) is forcing through " +
+                        $"{enemy.Def.DisplayName} ({enemy.FormationOrder.DisplayName}): " +
+                        $"{breakthrough:0.0} against {stopping:0.0} — both losing order.",
+                        unit.Id);
 
                     continue;
                 }

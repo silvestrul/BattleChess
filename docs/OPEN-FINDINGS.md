@@ -232,6 +232,45 @@ frontage still read the live footprint; **#41** finishes the job.
 
 ---
 
+## 6. A corner touch counts as contact but fights nobody
+
+Found by the new combat logging on its first run, which is what it was added
+for. A line in a recorded battle read:
+
+```
+140 Combat U1  Swordsmen (770 men) meets Spearmen (978 men) — front to front.
+               Bringing 0 against 0.
+```
+
+Two regiments met, neither could bring a single man to bear, and the pair drifted
+apart again having never exchanged a blow.
+
+**Measured.** Two 40 m blocks nose to nose, slid sideways a step at a time:
+
+| offset | in contact | shared frontage | each brings |
+|---|---|---|---|
+| 0 m | yes | 40 m | 160 |
+| 20 m | yes | 20 m | 80 |
+| 36 m | yes | 4 m | 13 |
+| **40 m** | **yes** | **0 m** | **0** |
+
+The degradation is smooth, so this is not a threshold placed badly — it is the
+exact boundary where two blocks touch corner to corner. Contact is decided by the
+gap between shapes; fighting is decided by how much frontage they share. At the
+corner those two honestly disagree.
+
+**Why it is worth fixing.** `EnemiesInContact` is not only a combat number. It
+feeds `OutnumberedShock` and `SurroundedDisorderPerPulse`, so a regiment can be
+frightened and pulled apart by an enemy it cannot fight and which cannot fight
+it — and, with [F3](DECISIONS.md), a corner-brusher may be occupying a place on a
+face that a regiment which could actually fight is queuing for.
+
+**Not pinned by a test yet**, and deliberately not fixed here: this was a logging
+pass, and the fix belongs with the flanking work where contact and frontage are
+being reasoned about together anyway.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

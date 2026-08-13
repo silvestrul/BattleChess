@@ -426,11 +426,10 @@ namespace BattleChess.Rules
                 // side again and nothing has been learned.
                 unit.GoingRoundBearing = Facing.FromVector(thisWay);
 
-                if (tick % 30 == 0)
-                    log.Decision("Move",
-                        $"{unit.Def.DisplayName} is working round its own {blocker.Def.DisplayName} " +
-                        "rather than through it.",
-                        unit.Id);
+                log.Decision("Move",
+                    $"{unit.Def.DisplayName} is working round its own {blocker.Def.DisplayName} " +
+                    "rather than through it.",
+                    unit.Id);
 
                 return round;
             }
@@ -438,11 +437,10 @@ namespace BattleChess.Rules
             // Boxed in on both sides as well as in front. Said on a counter
             // rather than every tick: it persists for as long as they all stand
             // there, and a line of it every second would bury everything else.
-            if (tick % 20 == 0)
-                log.Blocked("Move",
-                    $"{unit.Def.DisplayName} is hemmed in by its own {blocker.Def.DisplayName} with no way " +
-                    "round either flank — move one of them.",
-                    unit.Id);
+            log.Blocked("Move",
+                $"{unit.Def.DisplayName} is hemmed in by its own {blocker.Def.DisplayName} with no way " +
+                "round either flank — move one of them.",
+                unit.Id);
 
             return unit.Position;
         }
@@ -688,8 +686,7 @@ namespace BattleChess.Rules
 
             if (pivotingHalted && offByDegrees > WheelToleranceDegrees)
             {
-                if (tick % 5 == 0)
-                    log.Info("Move", $"{unit.Def.DisplayName} is wheeling — {offByDegrees:0}° to come round.", unit.Id);
+                log.Info("Move", $"{unit.Def.DisplayName} is wheeling rather than marching.", unit.Id);
 
                 return;
             }
@@ -882,8 +879,8 @@ namespace BattleChess.Rules
                 : string.Empty;
 
             log.Info("Move",
-                $"{unit.Def.DisplayName} reached its destination at tick {tick}, " +
-                $"on {ground.DisplayName} at {battle.SpeedOf(unit):0.0} m/s{front}.",
+                $"{unit.Def.DisplayName} reached its destination on {ground.DisplayName} " +
+                $"at {battle.SpeedOf(unit):0.0} m/s{front}.",
                 unit.Id);
 
             unit.Route = null;

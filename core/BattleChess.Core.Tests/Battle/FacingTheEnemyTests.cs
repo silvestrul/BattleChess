@@ -205,7 +205,12 @@ namespace BattleChess.Tests.Battle
             Assert.False(OrderSystem.InContactWith(bows, foot),
                 "And they should never have crossed swords with a spear wall at all.");
 
-            Assert.True(field.TimesSaid("volleys") > 0, "They should have been shooting the whole time.");
+            // Asked of the arrows rather than of the log. The shooting rule
+            // reports that a regiment is shooting, once, rather than narrating
+            // every volley — so counting lines counts nothing, whereas a spent
+            // quiver is proof either way.
+            Assert.True(bows.ShotsLeft < bows.Def.Get(UnitAttributes.Ammunition) * bows.InitialStrength,
+                "They should have been shooting the whole time.");
         }
 
         /// <summary>

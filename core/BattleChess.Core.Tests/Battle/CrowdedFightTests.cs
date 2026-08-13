@@ -63,7 +63,7 @@ namespace BattleChess.Tests.Battle
             field.March(ours, field.Centre, Stance.Advance);
             field.RunTurns(8);
 
-            int pulses = field.TimesSaid("exchange");
+            int pulses = ours.MeleePulses;
 
             Assert.True(pulses >= 10,
                 $"Eight turns is forty-eight combat pulses and only {pulses} landed. A regiment that has " +
@@ -112,8 +112,8 @@ namespace BattleChess.Tests.Battle
 
             field.RunTurns(6);
 
-            Assert.True(field.TimesSaid("exchange") >= 10,
-                $"It should be fighting: only {field.TimesSaid("exchange")} pulses landed in six turns.");
+            Assert.True(ours.MeleePulses >= 10,
+                $"It should be fighting: only {ours.MeleePulses} pulses landed in six turns.");
 
             Assert.True(Battlefield.LostPercent(quarry) > 0f,
                 "And the enemy it was ordered to attack should be the one bleeding.");
