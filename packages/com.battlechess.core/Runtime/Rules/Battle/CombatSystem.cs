@@ -219,7 +219,10 @@ namespace BattleChess.Rules
             var exchanges = new List<(UnitInstance A, UnitInstance B, bool Charge)>();
 
             foreach (UnitInstance unit in battle.UnitsOnField())
+            {
                 unit.EnemiesInContact = 0;
+                unit.ClaimedFrontage = 0f;
+            }
 
             for (int i = 0; i < _touched.Count; i++)
             {
@@ -235,6 +238,13 @@ namespace BattleChess.Rules
 
                 unit.EnemiesInContact++;
                 other.EnemiesInContact++;
+
+                // Both sides of the same contact, from each one's own side of
+                // it: how wide a front each is trying to use against the other.
+                // Totalled here so that every exchange this pulse is worked out
+                // against the same picture of how crowded each regiment is.
+                unit.ClaimedFrontage += EngagedWidth(unit, other);
+                other.ClaimedFrontage += EngagedWidth(other, unit);
 
                 exchanges.Add((unit, other, fresh));
             }
@@ -423,10 +433,26 @@ namespace BattleChess.Rules
         /// force. Men committed to the regiment on the left are not
         /// simultaneously fighting the one on the right.
         /// </para>
+        /// <para>
+        /// The division is <b>by shared ground, not by heads</b>. Each enemy is
+        /// answered in proportion to the width it is actually engaging, and the
+        /// shares are only scaled down where they add up to more line than the
+        /// regiment has — see <see cref="UnitInstance.ClaimedFrontage"/>.
+        /// Attackers on sixty and forty metres of a hundred-metre front are met
+        /// with sixty and forty.
+        /// </para>
+        /// <para>
+        /// Dividing by the number of enemies instead counted the geometry twice.
+        /// Two regiments side by side each overlap about half a defender's
+        /// front, so halving again gave the defender a quarter of its line
+        /// against each and an eighth of the fight it should have had. Measured
+        /// before the correction: two attackers brought 220 men to bear against
+        /// 108, and turned an even exchange into better than six to one.
+        /// </para>
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
-            float contactWidth = EngagedWidth(unit, enemy) / Math.Max(1, unit.EnemiesInContact);
+            float contactWidth = EngagedWidth(unit, enemy) * CrowdingShare(unit);
             Formation formation = unit.Formation;
 
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
@@ -441,16 +467,80 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// How far off a unit's own front a threat is coming from, 0 for
-        /// straight ahead and 1 for straight behind.
+        /// What fraction of the width it wants a regiment actually gets, once
+        /// every enemy on it has asked for a share.
         /// </summary>
-        private static float OffFront(UnitInstance unit, UnitInstance enemy) =>
-            Facing.AbsoluteDelta(unit.Facing, Facing.Towards(unit.Position, enemy.Position)) / MathF.PI;
+        /// <remarks>
+        /// One whenever there is line enough to go round, which is the ordinary
+        /// case for enemies drawn up beside each other — the geometry has
+        /// already divided them and nothing further is owed. Below one only
+        /// where the claims genuinely overlap.
+        ///
+        /// A regiment nobody has measured yet — asked about outside a combat
+        /// pulse, which the tests do — has claimed nothing, and is treated as
+        /// having its whole front to itself.
+        /// </remarks>
+        private static float CrowdingShare(UnitInstance unit)
+        {
+            float claimed = unit.ClaimedFrontage;
+            float own = unit.Footprint.Width;
+
+            return claimed > own && own > 0f ? own / claimed : 1f;
+        }
+
+        /// <summary>
+        /// How far off a unit's own front a threat is coming from, 0 for
+        /// straight ahead, 0.5 for square on a flank and 1 for straight behind.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Every rule about being caught out of position reads this one number —
+        /// how much of a line can answer, how much harder the blow lands, how
+        /// frightening it is — so getting it wrong is wrong three times over,
+        /// and it was.
+        /// </para>
+        /// <para>
+        /// It used to be the bearing from one centre to the other. For a
+        /// rectangle forty metres wide and six deep that says almost nothing:
+        /// two regiments drawn up shoulder to shoulder against a front stand
+        /// twenty-two metres either side of its middle and nine metres ahead of
+        /// it, which reads as sixty-eight degrees round — past the flanking arc.
+        /// So a pair attacking a front squarely were each scored as flankers,
+        /// each collected the envelop bonus and a thirty-eight per cent flanking
+        /// multiplier, and each had its own line discounted by a quarter for
+        /// facing the wrong way. All four rectangles were square on to each
+        /// other at the time.
+        /// </para>
+        /// <para>
+        /// Now taken from the nearest point of the enemy's shape — where the
+        /// fighting actually is — and measured against how far this regiment
+        /// reaches each way, so that the angle is judged on a body that is
+        /// mostly front rather than on a circle. Ask the rectangle, not its
+        /// middle.
+        /// </para>
+        /// </remarks>
+        private static float OffFront(UnitInstance unit, UnitInstance enemy)
+        {
+            OrientedRect ours = unit.Shape;
+            Vec2 offset = enemy.Shape.ClosestPointTo(ours.Centre) - ours.Centre;
+
+            float ahead = Vec2.Dot(offset, ours.Forward)
+                        / MathF.Max(0.01f, ours.Footprint.HalfDepth);
+
+            float aside = MathF.Abs(Vec2.Dot(offset, ours.Right))
+                        / MathF.Max(0.01f, ours.Footprint.HalfWidth);
+
+            return MathF.Atan2(aside, ahead) / MathF.PI;
+        }
 
         /// <summary>
         /// Beyond this far off its front, a regiment has no formed line facing
         /// the threat and can be enveloped.
         /// </summary>
+        /// <remarks>
+        /// A quarter turn: past forty-five degrees round the shape, which is a
+        /// genuine flank rather than a neighbour standing along the same front.
+        /// </remarks>
         private const float FrontalArc = 0.25f;
 
         /// <summary>

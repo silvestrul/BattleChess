@@ -151,6 +151,37 @@ namespace BattleChess.Rules
         /// <summary>Enemies in contact at the last combat pulse.</summary>
         public int EnemiesInContact { get; set; }
 
+        /// <summary>
+        /// Total width, in metres, that every enemy in contact is asking of this
+        /// regiment's line — summed at the last combat pulse.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A regiment has one frontage and cannot bring more than it to bear,
+        /// however many enemies are on it. This is how much is being asked;
+        /// where it exceeds the frontage the regiment actually has, every
+        /// enemy's share is scaled down in proportion.
+        /// </para>
+        /// <para>
+        /// It replaces dividing by the number of enemies, which counted the same
+        /// thing twice. Two regiments drawn up side by side already overlap only
+        /// half a defender's front each — the geometry has divided the line
+        /// before any rule does — so halving it again for the pair of them left
+        /// the defender answering with a quarter of its strength and made a
+        /// second attacker worth far more than it should be. Proportions come
+        /// out right on their own: attackers sharing sixty and forty metres of a
+        /// hundred-metre front are answered with sixty and forty.
+        /// </para>
+        /// <para>
+        /// The cap is what the divisor was protecting, and it still holds.
+        /// Regiments stacked on the same ground each overlap the whole of it, so
+        /// the sum runs to several times the frontage and each is scaled back to
+        /// its share — three on one spot get a third apiece rather than a full
+        /// line each.
+        /// </para>
+        /// </remarks>
+        public float ClaimedFrontage { get; set; }
+
         /// <summary>Ticks left before this unit can shoot again.</summary>
         public int ReloadRemaining { get; set; }
 

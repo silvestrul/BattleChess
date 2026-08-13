@@ -156,16 +156,49 @@ The leash that *does* work is pinned by
 
 ---
 
-## 4. Two attackers deal 2.3× the damage of one, not 1×
+## ~~4. Two attackers deal 2.3× the damage of one~~ — FIXED
 
-**Severity:** high, and the most consequential thing in this file. It is the
-rule the two-per-face placement was built to serve, and it does not hold.
+Closed. Two attackers now bring **156** men to bear where one alone brings
+**157**, and the defender answers with **154** where it answered **157** alone.
+Total frontage is conserved, each attacker deals and takes half, and what the
+second regiment buys is the defender's nerve — which is what it was always meant
+to buy. Pinned by `SharedFrontageTests`, five tests.
 
-**Not pinned by any test yet** — writing one would assert a ratio nobody has
-chosen. Found by review, measured with a throwaway harness.
+**The rule, as you put it:** divide by the ground each enemy actually shares, not
+by how many of them there are. Attackers on sixty and forty metres of a hundred
+metre front are answered with sixty and forty. Because `SharedFrontage` is
+symmetric, that *is* the geometric share, so the divisor simply goes; all that
+remains is a cap for the case it was protecting — regiments stacked on the same
+ground, whose claims sum past the frontage that exists, are scaled back in
+proportion. See `UnitInstance.ClaimedFrontage`.
 
-**Measured**, swordsmen against spearmen on plains, seed 40200, at the moment of
-contact and then over three pulses:
+**Two bugs, not one.** Removing the divisor fixed the defender's side (108 → 154)
+and left the attackers still bringing 220. The rest was a second fault in the
+same function, found only by measuring again afterwards rather than declaring
+victory on the first improvement:
+
+`OffFront` — which every rule about being caught out of position reads — was the
+bearing from one centre to the other. For a rectangle 40 m wide and 6 m deep that
+says almost nothing. Two regiments drawn up shoulder to shoulder against a front
+stand 22 m either side of its middle and 9 m ahead of it: **68° round**, past the
+45° flanking arc. So a pair attacking a front squarely were each scored as
+flankers — each collecting the envelop bonus, a 38% flanking multiplier, and a
+quarter discount on its own line for "facing the wrong way" — while all four
+rectangles stood square on to each other.
+
+It is the point-versus-shape mistake again, in the last place it was still
+hiding. `OffFront` now measures from the nearest point of the enemy's shape,
+against how far the regiment reaches each way. Genuine flanking is untouched:
+every flanking, rear-attack and envelopment test passes unchanged, and the sweep
+is still 0 concerns.
+
+---
+
+## ~~4 (original entry, kept for the numbers)~~
+
+Kept only because the before-and-after numbers are the clearest statement of what
+the rule means. **Measured** before the fix, swordsmen against spearmen on
+plains, seed 40200, at the moment of contact and then over three pulses:
 
 | | Shared frontage each | Attacker fighting men | Defender answers each with | Defender lost | Attackers lost |
 |---|---|---|---|---|---|
@@ -177,34 +210,12 @@ with 69% of what it managed against one, and the exchange goes from roughly even
 to better than six to one. Sending the second regiment is not "the same damage
 plus a morale effect" — it is overwhelmingly the right move on casualties alone.
 
-**Mechanism — a double count.** `FightingMen` divides a regiment's engaged width
-by its own `EnemiesInContact`, on the principle that a body has one frontage and
-must divide it among everyone it fights. That principle is right. But
-`SharedFrontage` **already** performs that division geometrically: two attackers
-standing side by side each genuinely overlap only ~20 m of the defender's 40 m
-front, and that is what `SharedFrontage` returns.
+And after:
 
-The defender is then charged for it twice — 20 m of geometry, halved again to
-10 m by the divisor — while each attacker keeps its full 20 m, because an
-attacker fighting one enemy has `EnemiesInContact == 1` and is never divided.
-
-The divisor would be correct if the attackers were stacked on the same ground.
-For attackers spread along the face it is redundant.
-
-**Why it is not fixed here.** Removing the divisor is a balance change that moves
-every multi-regiment fight in the game, and the right correction is not obvious:
-
-- Drop the divisor entirely, and the defender answers each attacker with its full
-  20 m of shared front — 220 attacking against 216 defending, near enough even,
-  which is the stated intent.
-- But the divisor is also what stops a defender bringing its whole line against
-  three enemies at once when they are *not* side by side — the case it was added
-  for. Removing it without replacing it re-opens that.
-- The likely correct form is to divide by the number of enemies **sharing this
-  same face** rather than by all enemies in contact, so geometry handles those
-  side by side and the divisor handles those stacked.
-
-Wants a decision, then its own pass.
+| | Attacker fighting men | Defender answers with |
+|---|---|---|
+| 1 attacker | 157 | 157 |
+| 2 attackers | 78 each — **156 total** | 77 each — **154 total** |
 
 ---
 
@@ -279,6 +290,14 @@ rule to this system.
   threshold does not help, because the input still crosses it eventually.
 - **Counting the same thing twice in two different rules.** Finding 4: geometry
   divides the defender's frontage, and then the combat rule divides it again.
+- **Asking a point-shaped question of a rectangle.** The founding idea of this
+  codebase, and still the most common fault in it — centre-to-centre distance and
+  centre-to-centre bearing both say almost nothing about a body 40 m wide and
+  6 m deep. Finding 4's second half had `OffFront` scoring two regiments as
+  flanking each other while they stood square on.
+- **Stopping at the first improvement.** Removing the divisor took two attackers
+  from 2.3× to 1.4× and looked like a fix. It was half of one. Measure again
+  after the change, against the number you actually wanted.
 - **Tests that measure after the battle has moved on.** Five tests in this sweep
   read a state that only exists mid-fight — how many regiments are in contact —
   after the defender had broken and the pursuit had scattered everyone. Catch the
