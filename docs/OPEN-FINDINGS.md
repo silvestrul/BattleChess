@@ -326,6 +326,53 @@ own pass.
 
 ---
 
+## 8. The stall detector calls a detour a stall, and M13 cannot land without it
+
+Found by building M13 (sidestep) and watching two tests fail. **Attempted, reverted,
+not committed** — the change is right and the ground under it is not ready.
+
+**What the change was.** A step is priced against the bearing to the next waypoint
+and *only afterwards* deflected round whatever is in the way, so the deflected part
+of a march is travelled at full speed in a direction nobody charged for.
+Sidestepping is currently **free**. Pricing it against the direction actually
+travelled is one small method, and it is plainly correct: it is the same fault as
+the arrival bearing and the mid-accumulation log line — a quantity computed against
+an assumption a later step invalidates.
+
+**Why it cannot land alone.** Honest pricing puts a perpendicular detour at 0.4× of
+pace. Clearing a 40 m regiment then takes about 62 ticks. `StallTicks` is 15 and
+`ReplansBeforeGivingUp` is 3, so the march is given up at roughly tick 60 — just
+before it would have got round. Two tests failed, both with the regiment stopped
+dead rather than merely slowed:
+
+```
+ARegimentHeldUpByAFriendGoesOnceTheFriendMovesOff
+  Once the way is clear it should walk through. It is still 231 m off.
+
+AWingGetsRoundAnObstacleInItsPathAndClosesUpAgain
+  U2 never got past the obstacle: it is at x=974 and the obstacle is at x=1000.
+```
+
+**The actual defect is the definition of progress.** `KeepTheMarchHonest` measures
+distance to the goal, and a regiment going round an obstacle does not reduce it —
+sideways is progress that does not look like progress. So the detector cannot tell
+"working round a friend" from "thrashing", which is the case it was written for
+(a regiment reversing twelve times in twenty-five ticks *was* moving).
+
+**Why the obvious fix is wrong.** Gating on `unit.GoingRound.IsValid` looks right —
+it is set exactly while a friend is being worked round, and cleared the moment none
+is. But it is set even when *both* ways round are blocked, so a boxed-in regiment
+would march forever and [M6](DECISIONS.md) ("an order always ends") would quietly
+stop being true.
+
+**What this means for the plan.** M13 and the [M10](DECISIONS.md) stall rework are
+*mutually* dependent, not sequential — the ordering in task #43 had it as sidestep
+first, then the stall fix, and that is wrong in both directions. They are one pass,
+and the design question to settle first is what "progress" means for a regiment that
+is deliberately going the wrong way for a while.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
