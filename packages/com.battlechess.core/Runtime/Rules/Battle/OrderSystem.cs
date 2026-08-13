@@ -885,12 +885,10 @@ namespace BattleChess.Rules
         /// </remarks>
         private static int FaceCapacity(UnitInstance unit, UnitInstance quarry, Vec2 alongTheFace)
         {
-            var block = new OrientedRect(quarry.Position, quarry.Facing, quarry.FootprintAtFullStrength);
-
-            float faceWidth = block.ProjectedRadius(alongTheFace) * 2f;
+            float faceWidth = quarry.Shape.ProjectedRadius(alongTheFace) * 2f;
             float eachWouldGet = faceWidth / MostOnOneFace;
 
-            return eachWouldGet >= unit.FootprintAtFullStrength.Width * MinimumUsefulShare
+            return eachWouldGet >= unit.Footprint.Width * MinimumUsefulShare
                 ? MostOnOneFace
                 : 1;
         }

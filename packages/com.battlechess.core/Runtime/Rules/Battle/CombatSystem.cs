@@ -452,7 +452,10 @@ namespace BattleChess.Rules
         /// </remarks>
         public static int FightingMen(UnitInstance unit, UnitInstance enemy)
         {
-            float contactWidth = EngagedWidth(unit, enemy) * CrowdingShare(unit);
+            float contactWidth = MathF.Min(
+                EngagedWidth(unit, enemy) * CrowdingShare(unit),
+                MenTurnedThatWay(unit, enemy));
+
             Formation formation = unit.Formation;
 
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
@@ -519,6 +522,42 @@ namespace BattleChess.Rules
         /// middle.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// How wide a line of men this regiment actually has pointing at that
+        /// enemy, in metres — the ceiling on what any amount of contact is
+        /// worth.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two separate things cap it, and they are easy to confuse. Contact is
+        /// measured between blocks, because blocks are what touch. What that
+        /// contact is <i>worth</i> is measured in men, because men are what
+        /// fight — and the block is two to one so that a regiment can be seen,
+        /// which is a statement about the screen and not about the field.
+        /// </para>
+        /// <para>
+        /// Facing the enemy, the ceiling is the frontage still manned: a
+        /// regiment at half strength fights along half its block and its flanks
+        /// are thin air. Caught side-on, the ceiling is its <i>ranks</i> — ten
+        /// men for a ten-rank body, four metres of them, against the hundred it
+        /// would have brought facing the right way.
+        /// </para>
+        /// <para>
+        /// Reading the block for this instead let a flanked regiment answer with
+        /// twenty metres of side rather than six, because the block is drawn
+        /// deep enough to click on. That made being caught out of position three
+        /// times less bad than it should be, from a decision about drawing.
+        /// </para>
+        /// </remarks>
+        private static float MenTurnedThatWay(UnitInstance unit, UnitInstance enemy)
+        {
+            Formation formation = unit.Formation;
+
+            return OffFront(unit, enemy) > FrontalArc
+                ? formation.Ranks * formation.FileWidth
+                : unit.FightingFrontage;
+        }
+
         private static float OffFront(UnitInstance unit, UnitInstance enemy)
         {
             OrientedRect ours = unit.Shape;
@@ -630,13 +669,31 @@ namespace BattleChess.Rules
             if (between.IsNearZero)
                 return MathF.Min(unit.Footprint.Width, enemy.Footprint.Width);
 
-            Vec2 across = new Vec2(-between.Y, between.X).Normalised();
+            // Along the enemy's own line, rather than square to the line joining
+            // the two centres. The old axis swung with position: two regiments
+            // set against one front stand off to either side, so the line to
+            // each of them ran at forty-odd degrees and the frontage was
+            // measured on the diagonal. Every attacker that was not exactly
+            // opposite its enemy was credited with more front than it owns, and
+            // the error grew with how far out it had to stand.
+            //
+            // A regiment's frontage lies along its front. That is not a
+            // function of where anybody else is standing.
+            Vec2 across = enemy.Shape.Right;
 
             float centre = Vec2.Dot(unit.Position, across);
             float enemyCentre = Vec2.Dot(enemy.Position, across);
 
-            float reach = unit.Shape.ProjectedRadius(across);
-            float enemyReach = enemy.Shape.ProjectedRadius(across);
+            // Measured off the ground the men really stand on, not the block.
+            // Projecting a rectangle onto a skewed axis picks up its depth as
+            // well as its width, so a body meeting another at an angle claimed a
+            // frontage wider than it owns — a forty-metre regiment shared 42.7 m
+            // with a forty-metre enemy, and a pair attacking one front brought
+            // 320 men where one alone brought 158. Frontage is a width. Nothing
+            // about how deep a regiment stands belongs in it, and least of all
+            // the two-to-one shape it is drawn at so it can be clicked on.
+            float reach = unit.SpaceShape.ProjectedRadius(across);
+            float enemyReach = enemy.SpaceShape.ProjectedRadius(across);
 
             float low = MathF.Max(centre - reach, enemyCentre - enemyReach);
             float high = MathF.Min(centre + reach, enemyCentre + enemyReach);

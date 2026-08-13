@@ -445,39 +445,59 @@ namespace BattleChess.Rules
         public Formation Formation => FormationOrder.ApplyTo(Def.NaturalFormation);
 
         /// <summary>
-        /// The ground this unit currently covers. Computed, never stored — so it
-        /// answers to both casualties and formation at once. A mauled regiment
-        /// genuinely occupies less frontage than a fresh one, and the same
-        /// regiment in column is a third the width it was in line.
-        /// </summary>
-        public Footprint Footprint => Formation.FootprintFor(Math.Max(1, _strength));
-
-        /// <summary>
-        /// The ground this unit covered when it was mustered, at full strength
-        /// in its current formation.
+        /// The ground this unit holds: its block. Two to one, and the same size
+        /// on the last turn of a battle as on the first.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// For the questions that must give the same answer on the last turn of
-        /// a battle as on the first. How much room a body of men takes up should
-        /// not collapse because it has taken casualties — losing men reduces how
-        /// many can <i>fight</i>, not how much ground the regiment stands on.
+        /// This is what collides, what blocks, what is clicked, what casts a
+        /// zone of control and what is drawn. One rectangle answering all of
+        /// them, because a regiment that looks flush with its neighbour and is
+        /// not is a bug the player cannot see and cannot work around.
         /// </para>
         /// <para>
-        /// Written for the rule deciding how many attackers fit on one face,
-        /// which read the live footprint and so slid all battle. Any yes-or-no
-        /// answer fed by a quantity that changes will cross its own threshold
-        /// somewhere: the first version flipped from two to one at the
-        /// defender's first casualty, and moving the constant only moved the
-        /// cliff to seventy per cent. There is no safe constant — the input has
-        /// to stop moving.
-        /// </para>
-        /// <para>
-        /// The first piece of the block, which will eventually be what collides,
-        /// blocks and is drawn.
+        /// It used to shrink with casualties, which quietly made the map move
+        /// under the player: a line that had been fought hard opened gaps that
+        /// nobody had ordered, and a mauled regiment stopped holding the ground
+        /// it had been put on. Losses reduce how many men can <i>fight</i> —
+        /// see <see cref="FightingFrontage"/> — not how much room a body takes
+        /// up. The survivors spread out; they do not huddle.
         /// </para>
         /// </remarks>
-        public Footprint FootprintAtFullStrength => Formation.FootprintFor(Math.Max(1, InitialStrength));
+        public Footprint Footprint => Formation.FootprintFor(Math.Max(1, InitialStrength));
+
+        /// <summary>
+        /// How much of the block still has men in it to fight with, in metres.
+        /// </summary>
+        /// <remarks>
+        /// The half of the old footprint that <i>should</i> answer to
+        /// casualties. A regiment at half strength holds its whole block but
+        /// fights along the middle of it, its flanks thinned to nothing — which
+        /// is what a worn line looks like from the other side.
+        /// </remarks>
+        public float FightingFrontage => Formation.FrontageFor(Math.Max(1, _strength));
+
+        /// <summary>
+        /// The ground this regiment's men really stand on — frontage by ranks,
+        /// forty metres by six rather than by twenty.
+        /// </summary>
+        /// <remarks>
+        /// What the fighting rules measure, as against <see cref="Footprint"/>,
+        /// which is what the world collides with. A regiment's side is six
+        /// metres of men whatever depth the block is drawn at, and combat that
+        /// read the block would let a flanked regiment answer with three times
+        /// the men it has facing that way.
+        /// </remarks>
+        public Footprint Space => Formation.SpaceFor(Math.Max(1, _strength));
+
+        /// <summary>Where this regiment's men really are, for the fighting rules.</summary>
+        public OrientedRect SpaceShape => new OrientedRect(Position, Facing, Space);
+
+        /// <summary>
+        /// How many ranks deep this regiment actually stands right now, holding
+        /// the frontage it is holding.
+        /// </summary>
+        public int OccupiedRanks => Formation.OccupiedRanks(_strength, FightingFrontage);
 
         /// <summary>
         /// Redraws the unit in a different order, paying the organization it

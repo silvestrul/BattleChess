@@ -117,22 +117,97 @@ namespace BattleChess.Contracts
         }
 
         /// <summary>
-        /// The ground a body of this many men covers.
+        /// How wide a body of this many men stands, in metres.
         /// </summary>
         /// <remarks>
         /// A unit reduced below one full rank keeps a single rank and simply
         /// narrows, rather than collapsing to nothing.
         /// </remarks>
-        public Footprint FootprintFor(int strength)
+        public float FrontageFor(int strength)
         {
             if (strength <= 0)
-                throw new ArgumentOutOfRangeException(nameof(strength), strength, "A unit with no men has no footprint.");
+                throw new ArgumentOutOfRangeException(nameof(strength), strength, "A unit with no men has no frontage.");
 
             int usedRanks = Math.Min(Ranks, strength);
             int files = (int)MathF.Ceiling(strength / (float)usedRanks);
 
-            return new Footprint(files * FileWidth, usedRanks * RankDepth);
+            return files * FileWidth;
         }
+
+        /// <summary>
+        /// How many ranks deep a body of this many men actually stands, given
+        /// the frontage it is holding.
+        /// </summary>
+        /// <remarks>
+        /// Not the same as <see cref="Ranks"/>, which is the order the regiment
+        /// was drawn up in. A regiment holds its frontage and loses depth, so a
+        /// body at a fifth strength is standing in two ranks where it was in
+        /// ten. What has nothing behind it is what breaks.
+        /// </remarks>
+        public int OccupiedRanks(int strength, float frontage)
+        {
+            int files = Math.Max(1, (int)MathF.Round(frontage / FileWidth));
+            return Math.Max(0, (int)MathF.Ceiling(Math.Max(0, strength) / (float)files));
+        }
+
+        /// <summary>
+        /// The ground this many men really stand on: frontage by ranks times
+        /// the spacing between them. Forty metres by six, not by twenty.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// What the fighting rules measure. The block is two to one so that a
+        /// regiment can be seen and clicked, and that shape must not reach the
+        /// combat rules: a side is six metres of men however deep the rectangle
+        /// is drawn, and a rule that measured the drawing would make a flank
+        /// attack three times easier to answer the day the drawing changed.
+        /// </para>
+        /// <para>
+        /// Unlike the block this does shrink, because it is the men.
+        /// </para>
+        /// </remarks>
+        public Footprint SpaceFor(int strength)
+        {
+            if (strength <= 0)
+                throw new ArgumentOutOfRangeException(nameof(strength), strength, "A unit with no men has no space.");
+
+            int usedRanks = Math.Min(Ranks, strength);
+            return new Footprint(FrontageFor(strength), usedRanks * RankDepth);
+        }
+
+        /// <summary>
+        /// The block a body of this many men holds.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two to one, width to depth, always — the shape from the videos, and
+        /// the shape that can be told apart at a glance and clicked on. The
+        /// depth is a drawing convention rather than a measurement: the men are
+        /// really ten deep at a bit over half a metre, which is six metres, not
+        /// twenty.
+        /// </para>
+        /// <para>
+        /// It is stated here rather than at the point of drawing because the
+        /// block <i>is</i> the collider. Keeping the aspect in the renderer
+        /// meant a regiment was drawn twenty metres deep and blocked six, so two
+        /// lines that looked flush had fourteen metres of open ground between
+        /// them and a regiment could stand visibly inside another one without
+        /// either noticing.
+        /// </para>
+        /// <para>
+        /// <see cref="RankDepth"/> no longer sets this. It survives as what the
+        /// spacing really is, for rules that ask about ranks rather than about
+        /// ground.
+        /// </para>
+        /// </remarks>
+        public Footprint FootprintFor(int strength)
+        {
+            float frontage = FrontageFor(strength);
+            return new Footprint(frontage, frontage / BlockWidthToDepth);
+        }
+
+        /// <summary>Width to depth of the block every regiment is drawn and collides as.</summary>
+        public const float BlockWidthToDepth = 2f;
 
         public override string ToString() => $"{Ranks} ranks, {FileWidth:0.##}m per file";
     }

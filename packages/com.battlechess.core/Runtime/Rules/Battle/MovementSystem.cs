@@ -545,12 +545,48 @@ namespace BattleChess.Rules
                 // than passing them. Only while marching: a regiment that has
                 // arrived beside a neighbour stands flush.
                 if (unit.IsMarching &&
+                    !ComingToRestBeside(unit, other) &&
                     OrientedRect.GapBetween(stepped, other.Shape) < BerthWhilePassingMetres &&
                     OrientedRect.GapBetween(here, other.Shape) >= BerthWhilePassingMetres)
                     return other;
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Whether this march <i>ends</i> beside the given friend, rather than
+        /// going past them.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The berth is charged against passing. Arriving is not passing, and
+        /// the two were being told apart by <c>IsMarching</c> — which is true
+        /// right up to the final step, so a regiment could never actually reach
+        /// a destination beside a neighbour. It closed to six metres, refused
+        /// its own last stride, and stood there.
+        /// </para>
+        /// <para>
+        /// That made the placement search and the march rule disagree about the
+        /// same question. The search will happily choose ground with a five
+        /// metre gap, having only checked that nothing overlaps; the march would
+        /// then decline to walk the last metre onto it. The regiment shuffled
+        /// north and south against the berth for half a turn until the stall
+        /// detector gave up on its behalf and stopped it short.
+        /// </para>
+        /// <para>
+        /// Asking where the order <i>ends</i> settles it. A destination inside
+        /// the berth is an order to stand there, and the berth has nothing to
+        /// say about it.
+        /// </para>
+        /// </remarks>
+        private static bool ComingToRestBeside(UnitInstance unit, UnitInstance other)
+        {
+            if (unit.Route == null) return false;
+
+            var atRest = new OrientedRect(unit.Route.Destination, unit.Facing, unit.Footprint);
+
+            return OrientedRect.GapBetween(atRest, other.Shape) < BerthWhilePassingMetres;
         }
 
         private static void StepUnit(BattleState battle, UnitInstance unit, int tick, IBattleLog log)

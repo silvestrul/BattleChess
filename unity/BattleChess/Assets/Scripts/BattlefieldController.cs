@@ -38,58 +38,33 @@ namespace BattleChess.Unity
         /// is. Cosmetic only — the rules always use the true footprint.
         /// </summary>
         /// <remarks>
-        /// The one place the drawing is allowed to differ from the truth, and
-        /// only ever by making a hairline thick enough to hit — a regiment six
-        /// metres deep is a couple of pixels at any sensible zoom.
-        ///
-        /// Regiments were briefly drawn at half the ground they held, which was
-        /// the wrong way to make them smaller: two of them made contact with a
-        /// visible gap still showing between the plates, because the ground they
-        /// held reached further than the rectangle said. The rectangle itself is
-        /// half the size it was now, so what is drawn is what is there.
+        /// Kept only as a floor for anything that somehow ends up narrower than
+        /// it should be. It is no longer doing any work in the ordinary case:
+        /// the rules hand over a block already two to one, and a forty-metre
+        /// regiment is twenty metres deep.
         /// </remarks>
         public const float ClickableDepthMetres = 9f;
 
-        /// <summary>
-        /// How many times longer than deep a regiment is drawn.
-        /// </summary>
+        /// <summary>The depth a regiment is drawn and hit-tested at, in metres.</summary>
         /// <remarks>
         /// <para>
-        /// A drawing convention, not a claim about the ground. The men are still
-        /// standing where they were — same ranks, same spacing, same forty
-        /// metres of front — but a six-metre bar at any useful zoom is a
-        /// hairline, and a battle drawn in hairlines is unreadable. Thickening
-        /// it is the same liberty the map-and-counters films take: the block
-        /// says "a regiment is here, facing this way", and its length is the
-        /// part that has to be true.
+        /// Now barely a function. The two-to-one shape moved into the rules,
+        /// where <c>Formation.BlockWidthToDepth</c> owns it, because the drawn
+        /// rectangle <b>is</b> the collider — what you see is what blocks, what
+        /// is clicked and what holds ground.
         /// </para>
         /// <para>
-        /// Stated as a <b>shape</b> rather than as a multiplier on the real
-        /// depth, which is what it was through three revisions — "double the
-        /// thickness", then double again, then two and a half times life. Each
-        /// of those left the drawn proportions hostage to a number the rules own
-        /// and may change: the day a regiment is ten times shallower than it is
-        /// wide rather than eight, a multiplier silently redraws the whole army.
-        /// Two to one is two to one whatever the ground underneath does.
-        /// </para>
-        /// <para>
-        /// Deliberately derived from the frontage, and never from the depth.
-        /// Frontage is the number that decides how many men can reach the enemy,
-        /// so a plate claiming more of it than the regiment holds would lie
-        /// about the one thing the player is reading it for.
-        /// </para>
-        /// <para>
-        /// Nothing in the rules reads this. Contact, zones of control, terrain
-        /// under the formation and whether two bodies can share ground all use
-        /// the real footprint, so the only thing a chunkier bar changes is how
-        /// easy it is to see.
+        /// It used to be decided here, and that was the bug. A regiment was
+        /// drawn twenty metres deep and collided at six, so two lines that
+        /// looked flush had fourteen metres of open ground between them, a
+        /// regiment could sit visually inside another one without either
+        /// noticing, and every flank was a six-metre sliver the eye said was
+        /// twenty. Three separate rules were reading a shape the player could
+        /// not see.
         /// </para>
         /// </remarks>
-        public const float DrawnLengthToDepth = 2f;
-
-        /// <summary>The depth a regiment is drawn and hit-tested at, in metres.</summary>
         public static float DrawnDepthOf(Footprint footprint) =>
-            Mathf.Max(footprint.Width / DrawnLengthToDepth, ClickableDepthMetres);
+            Mathf.Max(footprint.Depth, ClickableDepthMetres);
 
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
