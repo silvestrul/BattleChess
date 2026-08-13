@@ -22,9 +22,10 @@ Status: ✅ in the code · ⚠️ partly · ❌ not yet.
 |---|---|---|
 | S1 | A regiment is a rectangle on the ground with a free bearing, not a token. Every question about nearness asks the rectangle. | ✅ |
 | S2 | **Drawn 2:1** — width to depth — whatever the real depth is. A regiment 40 m wide is drawn 20 m deep. Replaces "2.5× depth", which replaced two rounds of "double the thickness". Stated as a shape so a change to the real depth cannot silently redraw the army. | ✅ |
-| S3 | The drawn rectangle **is** the collider. What you see is what blocks, what is clicked, and what holds ground. | ❌ #41 |
-| S4 | The block never shrinks as men die. Casualties reduce how many can **fight**, not how much room the body takes up. | ⚠️ `FootprintAtFullStrength` exists and face capacity uses it; collision and frontage still use the live one |
+| S3 | The drawn rectangle **is** the collider — the whole of it. What you see is what blocks, what is clicked, and what holds ground. It makes no sense in metres and is the better answer anyway, because the alternative is a regiment that looks flush with its neighbour while its collider is 14 m away. **Non-negotiable.** | ❌ #41 |
+| S4 | The rectangle never shrinks as men die — it is the same size on the last turn of a battle as the first, unless the regiment is wiped out entirely. Casualties reduce how many can **fight**, not how much room the body takes up. | ⚠️ `FootprintAtFullStrength` exists and face capacity uses it; collision, drawing and frontage still use the live one |
 | S5 | Real spacing is unchanged by any of this — the men are still a metre apart and ten deep. The rectangle is a visual and physical convenience, not a claim about ranks. | ✅ |
+| S6 | **Names.** A regiment's real ground is its *space* — say 100 m by 10 m, being 100 men a metre apart in 10 ranks. Its **frontage** is the line the first rank makes, which is the long side of the rectangle. The short ends are its **sides**. "Block", "footprint" and "fighting frontage" are not the vocabulary; frontage and sides are. | ⚠️ code still says footprint |
 
 ## Moving
 
@@ -57,6 +58,9 @@ Status: ✅ in the code · ⚠️ partly · ❌ not yet.
 | F10 | Cavalry breaks through infantry, but never through cavalry and never through spearmen. | ✅ |
 | F11 | A regiment can withdraw from a fight unless fully encircled, taking casualties in proportion to how much of it is gripped, and refused outright past ~85%. | ❌ finding 2 |
 | F12 | Tiredness from 0 to 1, up to −75% damage, worst in the front rank, some for waiting under stress. Lowers morale too. | ❌ #42 |
+| F13 | **Ranks refill the front rank.** A man who falls in the first rank is replaced from the second, and the second from the third. Not instantly — it takes ticks, so a line under heavy fire is genuinely thinner than its headcount says — but as fast as it can be. The regiment-level twin of [F5](#fighting). | ❌ new |
+| F14 | **Casualties must not round away.** Damage below half a man currently kills nobody, so a weak attack does literally nothing however long it lasts. Carry a rounding budget — the remainder rolls forward, rounding up once and down the next — rather than discarding the fraction. Finer pulses are an alternative or an addition. | ❌ new |
+| F15 | A flank attack does **not** engage along the full frontage. Against a 10-rank side, something like 20 attackers meet 10 defenders — not 100. The attacker deals more and takes less **until the defender stabilises**, rather than permanently. ❓ *Recorded from memory and never pinned at the time; needs restating before it is built.* | ❓ unclear |
 
 ## Orders and pursuit
 
@@ -75,6 +79,16 @@ Status: ✅ in the code · ⚠️ partly · ❌ not yet.
 | C2 | A bind button ties regiments into a wing that keeps its shape. | ✅ |
 | C3 | Right-drag draws a line; the regiment arrives facing perpendicular to it. | ✅ |
 | C4 | The player can set formation depth at deployment. | ❌ #31 |
+
+## Later — balance
+
+Not decisions yet. Raised deliberately as things to settle in one balance pass
+rather than piecemeal, so the numbers can be moved against each other.
+
+| | To settle |
+|---|---|
+| B1 | Spearmen hit for less per man, but the **second rank attacks too**, and they may form tighter than ordinary foot. Three knobs on one unit — worth doing together, and worth doing after [F13](#fighting) exists, since "the second rank fights" only means something once ranks are modelled. |
+| B2 | How much ranks 2 and 3 contribute in general. Currently a flat 0.3 for two supporting ranks. |
 
 ## How to work
 
