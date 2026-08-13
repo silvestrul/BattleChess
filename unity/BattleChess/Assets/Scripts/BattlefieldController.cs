@@ -274,9 +274,43 @@ namespace BattleChess.Unity
                 view.Render(alpha);
 
             RefreshOverlayUnits();
+            ForgetAFinishedRoute();
 
             TrackSelection();
             TrackOrders();
+        }
+
+        /// <summary>
+        /// Takes the planned-route line down once the march it describes is
+        /// over.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The line is a picture of an order <i>in progress</i>. It was only
+        /// ever cleared when the selection changed, so a regiment that arrived
+        /// went on trailing a six-metre amber bar, drawn above everything else,
+        /// pointing at ground it was already standing on.
+        /// </para>
+        /// <para>
+        /// This hid itself for as long as orders kept coming: each new march
+        /// replaced the line, so it always looked current. Only the <i>last</i>
+        /// order of a session was left showing — which is exactly how it was
+        /// reported, as every manoeuvre looking right except the final one. The
+        /// regiment had come round correctly and was sitting under a stale
+        /// drawing of where it had been sent.
+        /// </para>
+        /// </remarks>
+        private void ForgetAFinishedRoute()
+        {
+            if (_pathLine.positionCount == 0) return;
+
+            foreach (UnitInstance unit in _selection)
+            {
+                if (unit.IsMarching) return;
+            }
+
+            _pathLine.positionCount = 0;
+            _hasDestination = false;
         }
 
         // ---- Mouse ------------------------------------------------------------
