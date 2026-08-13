@@ -315,17 +315,42 @@ namespace BattleChess.Unity
 
         // ---- Mouse ------------------------------------------------------------
 
-        /// <summary>How far the mouse must be dragged before it counts as setting a facing, in metres.</summary>
-        private const float BearingDragMetres = 15f;
+        /// <summary>
+        /// How far the mouse must be dragged before it counts as setting a
+        /// facing, in screen pixels.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Pixels, not metres.</b> This was fifteen metres of ground, which
+        /// is not a gesture — it is a gesture divided by the zoom. At the
+        /// default view of a thousand-metre field in a small window the ground
+        /// runs about a metre and a half to the pixel, so fifteen metres is a
+        /// ten-pixel wobble: an ordinary unsteady click became an order to
+        /// form line on a bearing perpendicular to the wobble, which is to say
+        /// a facing chosen at random. Zoom out and it took less still.
+        /// </para>
+        /// <para>
+        /// What the player is doing is a hand movement on a screen, so the
+        /// threshold belongs in the units the hand works in. Twenty-four pixels
+        /// is a deliberate drag at any zoom and on any window.
+        /// </para>
+        /// </remarks>
+        private const float BearingDragPixels = 24f;
 
-        /// <summary>How far a left drag must run before it counts as a box rather than a click, in metres.</summary>
-        private const float BoxDragMetres = 12f;
+        /// <summary>
+        /// How far a left drag must run before it counts as a box rather than a
+        /// click, in screen pixels. Same reasoning as
+        /// <see cref="BearingDragPixels"/>, and it was the same fault.
+        /// </summary>
+        private const float BoxDragPixels = 20f;
 
         private bool _boxing;
         private Vec2 _boxFrom;
+        private Vector3 _boxFromScreen;
 
         private bool _ordering;
         private Vec2 _orderAt;
+        private Vector3 _orderAtScreen;
 
         private Vec2 MouseWorld() => _camera != null ? _camera.MouseWorldPosition() : default;
 
@@ -346,12 +371,13 @@ namespace BattleChess.Unity
             {
                 _boxing = true;
                 _boxFrom = MouseWorld();
+                _boxFromScreen = Input.mousePosition;
             }
 
             if (!_boxing) return;
 
             Vec2 here = MouseWorld();
-            bool dragged = Vec2.Distance(here, _boxFrom) >= BoxDragMetres;
+            bool dragged = DraggedABox();
 
             if (Input.GetMouseButton(0))
             {
@@ -366,6 +392,10 @@ namespace BattleChess.Unity
             if (dragged) SelectWithin(_boxFrom, here);
             else SelectAt(_boxFrom);
         }
+
+        /// <summary>Whether the left button has been dragged far enough to mean a box.</summary>
+        private bool DraggedABox() =>
+            (Input.mousePosition - _boxFromScreen).magnitude >= BoxDragPixels;
 
         /// <summary>
         /// Right button: click to march or attack, drag to march and arrive on
@@ -403,13 +433,14 @@ namespace BattleChess.Unity
 
                 _ordering = true;
                 _orderAt = at;
+                _orderAtScreen = Input.mousePosition;
                 return;
             }
 
             if (!_ordering) return;
 
             Vec2 drawn = MouseWorld() - _orderAt;
-            bool far = drawn.Length >= BearingDragMetres;
+            bool far = (Input.mousePosition - _orderAtScreen).magnitude >= BearingDragPixels;
 
             if (Input.GetMouseButton(1))
             {
@@ -812,7 +843,7 @@ namespace BattleChess.Unity
             if (!_boxing || Camera.main == null) return;
 
             Vec2 here = MouseWorld();
-            if (Vec2.Distance(here, _boxFrom) < BoxDragMetres) return;
+            if (!DraggedABox()) return;
 
             Vector3 a = Camera.main.WorldToScreenPoint(new Vector3(_boxFrom.X, _boxFrom.Y, 0f));
             Vector3 b = Camera.main.WorldToScreenPoint(new Vector3(here.X, here.Y, 0f));
@@ -1587,7 +1618,8 @@ namespace BattleChess.Unity
                     // all.
                     _console.Info("Move",
                         $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")} " +
-                        $"to face {unit.OrderFacing.Degrees:0}°. " +
+                        $"to face {unit.OrderFacing.Degrees:0}° " +
+                        $"({(bearing.HasValue ? "bearing drawn" : "the way it is going")}). " +
                         $"{offBy:0}° off the bearing at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
                         unit.Id);
 
