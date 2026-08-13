@@ -33,7 +33,8 @@ Status: ✅ in the code · ⚠️ partly · ❌ not yet.
 | M1 | Friendly regiments never share ground. | ✅ |
 | M2 | Contact of 5% or less is ignored, so a line can stand shoulder to shoulder — "glued", as in the Total War videos. | ✅ |
 | M3 | A move faces its line of march, at **any** distance and any angle. No dead zone. Three attempts at a threshold were three bugs. | ✅ |
-| M4 | Holding a front across a move is a real order and must be asked for, by drawing the bearing. | ✅ |
+| M4 | A drawn bearing is the front to **arrive on**. The regiment marches the way it is going, at full pace, and comes round at the end — the same manoeuvre an attack makes on its last hundred metres. *Supersedes "holding a front across a move must be asked for by drawing the bearing", which held the drawn front from the first step: a regiment sent 167 m travelled rear-first the whole way at 29% pace, which reads as a fault rather than an order.* | ✅ |
+| M4a | Crabbing along holding a front regardless of the line of march — a fighting withdrawal facing the enemy — is therefore no longer reachable. It was only ever a side effect of M4's old form. Wants its own control if it is wanted at all. | ❌ open |
 | M5 | Turning on the spot is never blocked by collision — otherwise a flanked regiment can never answer. Movement is still blocked if the path is. | ✅ |
 | M6 | An order always ends: a regiment that cannot reach the exact point walks to the nearest usable ground and says so. | ✅ |
 | M7 | Bound regiments move as one, at the pace of whichever is on the worst ground. | ✅ |

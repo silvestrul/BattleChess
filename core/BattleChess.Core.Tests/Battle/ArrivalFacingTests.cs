@@ -126,29 +126,48 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void HoldingYourFrontWhileYouSidestepIsSlow()
+        public void ADrawnBearingCostsNothingOnTheWayThere()
         {
-            float forwards = MetresCoveredIn(2, Facing.North);
-            float sideways = MetresCoveredIn(2, Facing.East);
+            float facingTheWayItGoes = MetresCoveredIn(2, Facing.North);
+            float holdingAFront = MetresCoveredIn(2, Facing.East);
 
-            Assert.True(sideways < forwards * 0.6f,
-                $"Edging a formation along without changing front has to cost something, or keeping " +
-                $"your facing is free: {sideways:0} m sideways against {forwards:0} m forwards.");
+            // A bearing says which way to be pointing on arrival. Holding it
+            // from the first step instead meant a regiment sent across the
+            // field crabbed the whole way at a third of its pace, rear-first,
+            // for a front it did not need until it got there. From outside that
+            // does not read as a manoeuvre — it reads as a regiment that has
+            // gone wrong, and it was reported as one.
+            Assert.True(holdingAFront > facingTheWayItGoes * 0.85f,
+                $"Asking for a front to arrive on should not slow the march to it: {holdingAFront:0} m " +
+                $"against {facingTheWayItGoes:0} m over the same two turns.");
+        }
 
-            Assert.True(sideways > 0f, "But it still moves.");
+        [Fact]
+        public void ButItIsFacingTheWayItIsGoingWhileItIsStillGoing()
+        {
+            var field = new Battlefield("plains", 22250);
+
+            UnitInstance unit = field.Add(0, "cavalry", field.Centre - new Vec2(0f, 300f), Facing.East);
+
+            // Sent a long way north, asked to arrive facing east.
+            field.March(unit, field.Centre + new Vec2(0f, 300f), bearing: Facing.East);
+            field.RunTurns(2);
+
+            Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, Facing.North)) < 20f,
+                $"Half way there it should be marching north like anything else, and it is facing " +
+                $"{unit.Facing.Degrees:0}°.");
+
+            // And still comes round to what was asked for by the end.
+            field.RunTurns(6);
+
+            Assert.True(Degrees(Facing.AbsoluteDelta(unit.Facing, Facing.East)) < 15f,
+                $"It was asked to arrive facing east and arrived facing {unit.Facing.Degrees:0}°.");
         }
 
         /// <summary>
-        /// Marches a regiment due north for a number of turns, holding a given
-        /// front the whole way.
+        /// Marches a regiment due north for a number of turns, asked to arrive
+        /// on a given front.
         /// </summary>
-        /// <remarks>
-        /// The front is asked for explicitly, because that is now the only way
-        /// to hold one across a march this long — a plain order would turn the
-        /// regiment north and there would be no penalty left to measure. Which
-        /// is the point: crabbing along is a manoeuvre somebody chooses and
-        /// pays for, not something a regiment falls into by accident.
-        /// </remarks>
         private static float MetresCoveredIn(int turns, Facing facing)
         {
             var field = new Battlefield("plains", 22200);
