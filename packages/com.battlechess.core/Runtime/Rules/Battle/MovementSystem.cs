@@ -564,7 +564,7 @@ namespace BattleChess.Rules
 
             if (route.IsComplete)
             {
-                Finish(unit, tick, log);
+                Finish(battle, unit, tick, log);
                 return;
             }
 
@@ -715,7 +715,7 @@ namespace BattleChess.Rules
                 route.Advance();
 
                 if (route.IsComplete)
-                    Finish(unit, tick, log);
+                    Finish(battle, unit, tick, log);
             }
         }
 
@@ -737,9 +737,37 @@ namespace BattleChess.Rules
             return SpeedWhileFullyReversed + (1f - SpeedWhileFullyReversed) * alignment;
         }
 
-        private static void Finish(UnitInstance unit, int tick, IBattleLog log)
+        /// <summary>
+        /// Reports an order carried out, and says enough about how it ended to
+        /// diagnose it from the log alone.
+        /// </summary>
+        /// <remarks>
+        /// This used to record only the tick. A recorded game then turned up a
+        /// march that took two and a half times as long as three others of the
+        /// same length and the same wheel, and nothing in the log could say why
+        /// — not the ground it crossed, not the pace it kept, not which way it
+        /// finished pointing. Every one of those is a line of text, and without
+        /// them a play report can only be answered by guessing or by asking.
+        /// </remarks>
+        private static void Finish(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
         {
-            log.Info("Move", $"{unit.Def.DisplayName} reached its destination at tick {tick}.", unit.Id);
+            float offOrdered = Facing.AbsoluteDelta(unit.Facing, unit.OrderFacing) * 180f / MathF.PI;
+            TerrainDef ground = battle.TerrainAt(unit.Position);
+
+            // A regiment threading ground too narrow for its frontage holds
+            // whatever bearing fits rather than the one it was given, and only
+            // comes back to it once clear. Ending a march still turned is the
+            // one case where that reads as an order gone wrong rather than as
+            // an obstacle handled, so it is called out by name.
+            string front = offOrdered > 10f
+                ? $" — finished {offOrdered:0}° off the front it was given, on ground it may still be threading"
+                : string.Empty;
+
+            log.Info("Move",
+                $"{unit.Def.DisplayName} reached its destination at tick {tick}, " +
+                $"on {ground.DisplayName} at {battle.SpeedOf(unit):0.0} m/s{front}.",
+                unit.Id);
+
             unit.Route = null;
         }
     }
