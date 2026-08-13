@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -852,6 +852,21 @@ namespace BattleChess.Rules
         private const float RearArc = 0.75f;
 
         /// <summary>
+        /// How many men an enveloping attacker brings for each one the enemy
+        /// has standing on the face it is hitting.
+        /// </summary>
+        /// <remarks>
+        /// Twice. Ten men doing a tenth of a frontal attack is not what being
+        /// taken in the flank feels like, and a hundred piling onto a face ten
+        /// men wide is not a fight — it is arithmetic nobody can act on. Twenty
+        /// against ten is the number, and it is what makes a rear attack worth
+        /// manoeuvring for rather than merely better: the same doubling against
+        /// a back rank is twice a hundred, so coming in behind brings roughly
+        /// ten times the men a flank does, off the width of the face alone.
+        /// </remarks>
+        private const float EnvelopingMultiple = 2f;
+
+        /// <summary>
         /// How much of its width a regiment loses the use of when it is taken
         /// from directly behind.
         /// </summary>
@@ -898,10 +913,16 @@ namespace BattleChess.Rules
             float overlap = SharedFrontage(unit, enemy);
 
             // Their front is turned away from us, so there is nothing holding
-            // our line off: we envelop as far as our own width allows, capped
-            // by how much of them there is to get at.
+            // our line off: we fold round the face they are showing and pile in
+            // along it, bringing twice as many men as they have standing there.
+            //
+            // Which face that is decides everything, and it is the same lookup
+            // the defender uses — a side is their ranks, a back is their whole
+            // frontage. So enveloping a flank brings twenty against ten, and
+            // coming in behind brings a hundred against a hundred, off one rule
+            // rather than two.
             float reach = OffFront(enemy, unit) > FrontalArc
-                ? MathF.Min(unit.Footprint.Width, MathF.Max(enemy.Footprint.Width, enemy.Footprint.Depth))
+                ? MathF.Min(unit.FightingFrontage, MenTurnedThatWay(enemy, unit) * EnvelopingMultiple)
                 : overlap;
 
             // And we are under the same rule in reverse.

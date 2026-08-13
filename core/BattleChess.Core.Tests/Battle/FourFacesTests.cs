@@ -85,6 +85,75 @@ namespace BattleChess.Tests.Battle
                 "being met square on.");
         }
 
+        /// <summary>
+        /// What a face costs in blood: both sides placed in contact on the given
+        /// quarter and left to fight a turn out.
+        /// </summary>
+        private static (int DefenderLost, int AttackerLost) FightItOut(Vec2 attackerFrom, Facing attackerFacing)
+        {
+            var field = new Battlefield("plains", 7700);
+
+            UnitInstance defender = field.Add(0, "swordsmen", field.Centre, Contracts.Facing.East);
+            UnitInstance attacker = field.Add(1, "swordsmen", field.Centre + attackerFrom, attackerFacing);
+
+            Battlefield.Hold(defender);
+            Battlefield.Hold(attacker);
+
+            int defenderStart = defender.Strength, attackerStart = attacker.Strength;
+
+            field.RunPulses(6);
+
+            return (defenderStart - defender.Strength, attackerStart - attacker.Strength);
+        }
+
+        // Touching, rather than clear of each other: the block is 40 m by 20 m,
+        // so half a depth each way meets at 20 m to front or rear and half a
+        // width plus half a depth meets at 30 m on the side.
+        private static readonly Vec2 AgainstTheFront = new Vec2(20f, 0f);
+        private static readonly Vec2 AgainstTheBack = new Vec2(-20f, 0f);
+        private static readonly Vec2 AgainstTheSide = new Vec2(0f, 30f);
+
+        [Fact]
+        public void EnvelopingAFlankBringsTwiceWhatTheEnemyHasOnIt()
+        {
+            (int defender, int attacker) = Facing(DueNorth, Contracts.Facing.South);
+
+            // Twenty against ten. Folding round a side is worth a great deal
+            // more than the ten men standing on it, and a great deal less than
+            // the hundred the attacker owns — a regiment does not get its whole
+            // frontage onto a face four metres wide, and when it did, a flank
+            // attack was as strong as taking a regiment in the back.
+            Assert.True(attacker <= defender * 3,
+                $"An enveloping attacker brought {attacker} men against the {defender} standing on the face. " +
+                "It is bringing its own frontage rather than twice theirs, which makes a flank as good as " +
+                "a rear attack and manoeuvring round the back pointless.");
+
+            Assert.True(attacker > defender,
+                $"It brought {attacker} against {defender} — enveloping should be worth more than meeting " +
+                "the face man for man.");
+        }
+
+        [Fact]
+        public void ComingInBehindIsWorthManyTimesWhatAFlankIs()
+        {
+            (int lostFromBehind, _) = FightItOut(AgainstTheBack, Contracts.Facing.East);
+            (int lostFromTheSide, _) = FightItOut(AgainstTheSide, Contracts.Facing.South);
+
+            // The arithmetic that decides whether getting round the back is
+            // worth the ride. A side is ten men, so enveloping it brings twenty;
+            // a back is a hundred, so enveloping that brings two hundred. Ten
+            // times the men means about ten times the casualties, and that
+            // difference is the entire reward for the harder manoeuvre.
+            //
+            // Measured at 9.5x. Asserted at 4x, which is far enough below to
+            // survive the shock rules landing on top and far enough above the
+            // 1.4x this used to be to fail if the faces are ever levelled again.
+            Assert.True(lostFromBehind > lostFromTheSide * 4,
+                $"A regiment taken from behind lost {lostFromBehind} men where one taken in the flank lost " +
+                $"{lostFromTheSide}. Riding all the way round should not be worth about the same as " +
+                "hitting the nearest side.");
+        }
+
         [Fact]
         public void HolesInTheLineDoNotEraseANarrowFaceAltogether()
         {
