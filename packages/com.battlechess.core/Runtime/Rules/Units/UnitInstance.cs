@@ -519,6 +519,31 @@ namespace BattleChess.Rules
         public float FrontRankGaps { get; set; }
 
         /// <summary>
+        /// Damage owed to this regiment that has not yet come to a whole man,
+        /// always less than one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Casualties are men, and men are whole numbers, but damage is not.
+        /// Rounding each exchange on its own threw the remainder away every
+        /// time — and anything under half a man rounded to nobody, so a weak
+        /// attack did not merely do little, it did <i>literally nothing</i>, for
+        /// as long as it went on. Archers at extreme range, a beaten regiment
+        /// still swinging, a handful of men round a flank: all of them free to
+        /// ignore.
+        /// </para>
+        /// <para>
+        /// Carried instead. What does not add up to a body this pulse is still
+        /// owed and is paid on some later one, so nothing is discarded and no
+        /// amount of damage is too small to eventually count. Held per regiment
+        /// rather than per pair of them, which is also what makes several weak
+        /// attackers add up together rather than each rounding separately to
+        /// nothing.
+        /// </para>
+        /// </remarks>
+        public float CasualtyDebt { get; set; }
+
+        /// <summary>
         /// How many ranks deep this regiment actually stands right now, holding
         /// the frontage it is holding.
         /// </summary>

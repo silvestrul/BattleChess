@@ -209,7 +209,12 @@ namespace BattleChess.Rules
                         * battle.Rng.NextVariance(
                             VolleyVariance + LongRangeVariance * Math.Clamp(distance / range, 0f, 1f));
 
-            int casualties = Math.Clamp((int)MathF.Round(raw), 0, target.Strength);
+            // Carried rather than rounded, exactly as melee is. Long shots are
+            // where this mattered most: a volley at the edge of its range works
+            // out to a fraction of a man, and rounding each one on its own meant
+            // an archer regiment could shoot all afternoon at something far
+            // enough away and never hit anybody at all.
+            int casualties = CombatSystem.BodiesOwed(target, raw, target.Strength);
             if (casualties <= 0) return;
 
             int before = target.Strength;

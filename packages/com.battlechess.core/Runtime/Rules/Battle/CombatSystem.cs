@@ -768,6 +768,49 @@ namespace BattleChess.Rules
             return MathF.Max(0f, high - low);
         }
 
+        /// <summary>
+        /// Turns damage into whole men, keeping the change.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Rounding each exchange on its own discarded whatever did not come to
+        /// a whole body, and everything under half a man discarded all of it. A
+        /// weak attack therefore did not do a little damage slowly — it did none
+        /// at all, for ever, and could be ignored outright by whoever it was
+        /// aimed at. That is not a rounding nicety; it is a hole an opponent can
+        /// stand in.
+        /// </para>
+        /// <para>
+        /// The remainder is carried on the regiment being hit and paid off on a
+        /// later pulse. Nothing is thrown away, the long-run total is exactly
+        /// the damage dealt, and several attackers too weak to kill anybody on
+        /// their own now add up with each other instead of each rounding
+        /// separately to nothing.
+        /// </para>
+        /// <para>
+        /// What the cap refuses is written off rather than carried. A pulse
+        /// cannot kill more men than stand in the fight, and holding the
+        /// overspill would be the fairer answer — but only if it can be paid.
+        /// Against a regiment whose front rank is momentarily empty there is
+        /// nothing to pay it with, so the debt would climb pulse after pulse and
+        /// then fall due all at once as a regiment dying in a single exchange
+        /// for damage dealt minutes earlier. The carry stays under one man,
+        /// always, and cannot ambush anybody.
+        /// </para>
+        /// </remarks>
+        internal static int BodiesOwed(UnitInstance defender, float raw, int mostThatCanFall)
+        {
+            if (raw > 0f) defender.CasualtyDebt += raw;
+
+            int whole = (int)MathF.Floor(defender.CasualtyDebt);
+
+            if (whole <= 0) return 0;
+
+            defender.CasualtyDebt -= whole;
+
+            return Math.Min(whole, Math.Max(0, mostThatCanFall));
+        }
+
         private static int Casualties(
             BattleState battle,
             UnitInstance attacker,
@@ -817,8 +860,9 @@ namespace BattleChess.Rules
                         * battle.Rng.NextVariance(charge ? ChargeVariance : CasualtyVariance);
 
             // A pulse cannot kill more men than are actually standing in the
-            // fight, however lopsided the odds.
-            return Math.Clamp((int)MathF.Round(raw), 0, defenderFighting);
+            // fight, however lopsided the odds. What it could not collect stays
+            // owed rather than being written off.
+            return BodiesOwed(defender, raw, defenderFighting);
         }
 
         /// <summary>
