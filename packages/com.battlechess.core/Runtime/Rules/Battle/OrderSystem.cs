@@ -644,18 +644,16 @@ namespace BattleChess.Rules
         /// near the 45° boundary commits rather than dithering between two.
         /// </para>
         /// <para>
-        /// Everybody attacking the same regiment forms on the same face and
-        /// stands beside each other along it, rather than each picking its own
-        /// and one of them wandering round the back. Two regiments sent at one
-        /// enemy should hit it together — which halves what each of them deals
-        /// and takes, because they are sharing a frontage, and is worth doing
-        /// anyway for what it does to the defender's nerve.
+        /// Each attacker chooses its own face, from where it was standing when
+        /// the order was given — see <see cref="ChooseFace"/>. Regiments sent
+        /// from the same quarter therefore agree on a face without being made
+        /// to and stand beside each other along it, while one deliberately sent
+        /// round the flank keeps its own and is not dragged back into line.
         /// </para>
         /// <para>
-        /// The lowest-numbered attacker decides the face for all of them, which
-        /// is arbitrary but reproducible — and it hands the player the choice
-        /// without needing a control for it, since the face follows from where
-        /// that regiment is standing when the order is given.
+        /// Those sharing a face divide it: see
+        /// <see cref="PlaceInTheAttackingLine"/> for how many fit and where the
+        /// rest wait.
         /// </para>
         /// </remarks>
         private static Vec2 DressingSlot(

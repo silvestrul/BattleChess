@@ -11,10 +11,11 @@ over movement, rotation, grouping and attack orders.
 
 ---
 
-## ~~1. A third regiment sent at one enemy does nothing~~ — FIXED
+## ~~1. A third regiment sent at one enemy does nothing~~ — placement FIXED
 
-Closed by the two-per-face rule. Kept here only until the two leftovers below
-are closed too, because they are the same piece of ground.
+Closed **as a placement bug** by the two-per-face rule. The damage half of the
+same rule turns out not to hold — see finding 4, which is the more important of
+the two and was found by reviewing this entry rather than by any test.
 
 **The rule, as decided.** A face is worth **one full frontage of fighting**
 however many regiments are pushed onto it, because damage is dealt across the
@@ -22,6 +23,9 @@ ground two bodies genuinely share and two attackers divide that ground between
 them. So a pair on the front deal together what one deals alone, each taking
 half — and buy the defender's nerve rather than his blood. Four faces at two
 apiece is six or eight regiments landing four frontages of damage.
+
+**That is the intent. The code does not do it** — measured at 2.3× the damage
+for two attackers rather than 1×. Finding 4 has the numbers.
 
 Capacity is capped at two **and limited by what the face can physically hold**:
 the 40 m front and rear take a pair, the 6 m flanks take one. A lone flanker
@@ -44,6 +48,7 @@ is how regiments get cut up on their own side's initiative.
   and dropped a regiment that was already fighting into the reserve for the rest
   of the battle. This is the third time a threshold placed exactly on its own
   common case has caused a bug in this project. Put them well clear.
+  **This was only half diagnosed at the time** — see finding 5.
 
 Now pinned live by `AThirdRegimentSentAtTheSameEnemyMustNotMakeTheAttackWorse`,
 `AThirdRegimentWaitsBehindTheLineRatherThanShovingIntoIt`,
@@ -151,6 +156,90 @@ The leash that *does* work is pinned by
 
 ---
 
+## 4. Two attackers deal 2.3× the damage of one, not 1×
+
+**Severity:** high, and the most consequential thing in this file. It is the
+rule the two-per-face placement was built to serve, and it does not hold.
+
+**Not pinned by any test yet** — writing one would assert a ratio nobody has
+chosen. Found by review, measured with a throwaway harness.
+
+**Measured**, swordsmen against spearmen on plains, seed 40200, at the moment of
+contact and then over three pulses:
+
+| | Shared frontage each | Attacker fighting men | Defender answers each with | Defender lost | Attackers lost |
+|---|---|---|---|---|---|
+| 1 attacker | 39.6 m | 157 | 157 | 17 | 8 |
+| 2 attackers | 20.1 m each | 110 each — **220 total** | 54 each — **108 total** | **39** | **6** |
+
+So two regiments bring 40% more men to bear than one does, the defender answers
+with 69% of what it managed against one, and the exchange goes from roughly even
+to better than six to one. Sending the second regiment is not "the same damage
+plus a morale effect" — it is overwhelmingly the right move on casualties alone.
+
+**Mechanism — a double count.** `FightingMen` divides a regiment's engaged width
+by its own `EnemiesInContact`, on the principle that a body has one frontage and
+must divide it among everyone it fights. That principle is right. But
+`SharedFrontage` **already** performs that division geometrically: two attackers
+standing side by side each genuinely overlap only ~20 m of the defender's 40 m
+front, and that is what `SharedFrontage` returns.
+
+The defender is then charged for it twice — 20 m of geometry, halved again to
+10 m by the divisor — while each attacker keeps its full 20 m, because an
+attacker fighting one enemy has `EnemiesInContact == 1` and is never divided.
+
+The divisor would be correct if the attackers were stacked on the same ground.
+For attackers spread along the face it is redundant.
+
+**Why it is not fixed here.** Removing the divisor is a balance change that moves
+every multi-regiment fight in the game, and the right correction is not obvious:
+
+- Drop the divisor entirely, and the defender answers each attacker with its full
+  20 m of shared front — 220 attacking against 216 defending, near enough even,
+  which is the stated intent.
+- But the divisor is also what stops a defender bringing its whole line against
+  three enemies at once when they are *not* side by side — the case it was added
+  for. Removing it without replacing it re-opens that.
+- The likely correct form is to divide by the number of enemies **sharing this
+  same face** rather than by all enemies in contact, so geometry handles those
+  side by side and the divisor handles those stacked.
+
+Wants a decision, then its own pass.
+
+---
+
+## 5. Face capacity still flips mid-fight, at 70% instead of 99%
+
+**Severity:** medium. The bug that was fixed is only relocated, not removed.
+
+**Not pinned by a test** — the fights that would show it end too fast. The
+defender in `AFaceDoesNotStopHoldingTwoJustBecauseTheDefenderHasLostMen` routs at
+91% strength, well before the threshold.
+
+`FaceCapacity` compares the defender's **live** frontage against
+`MinimumUsefulShare`. Frontage is `files × fileWidth` where `files` is
+`ceil(strength / ranks)`, so it falls **linearly with casualties** — measured
+1000 men → 40.0 m, 963 → 38.8 m, 911 → 36.8 m.
+
+Capacity therefore drops from two to one when the face falls below
+`2 × 0.35 × 40 = 28 m`, which is **70% of the defender's starting strength**. A
+regiment that has lost 30% of its men is an ordinary mid-fight regiment, not an
+edge case, and at that instant one of the two attackers already fighting is
+reassigned to the reserve and walks backwards out of the line.
+
+**The lesson recorded in the commit was the weaker one.** "Put the threshold well
+clear of its common case" only buys distance. The real fault is that **a discrete
+capacity is computed from a quantity that changes during the fight**, so there is
+always some point on the curve where it flips. Raising the margin moves the
+cliff; it does not remove it.
+
+**The fix.** Compute capacity from a frontage that does not change — the
+defender's footprint at full strength. Task **#41** makes the block constant by
+design, so this closes with it provided the capacity check is pointed at the
+block rather than at the live footprint.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
@@ -163,7 +252,7 @@ task list and none is a regression.
 | 26 | Special unit types | — |
 | 29 | Splitting regiments into bodies of ~500 | — |
 | 31 | Player-set formation depth at deployment | `NotYetBuiltTests` |
-| 41 | Split the collision block from the fighting frontage | findings 1 and 2 above |
+| 41 | Split the collision block from the fighting frontage | findings 1b, 2 and 5 above |
 | 42 | Tiredness | `NotYetBuiltTests.MenTireOverALongEngagement` |
 
 ---
@@ -171,6 +260,26 @@ task list and none is a regression.
 ## How to close an entry
 
 1. Un-skip the test named in the entry and watch it fail for the stated reason.
+   Some entries name no test, because asserting either behaviour would settle a
+   question nobody has answered — those want a decision first, then a test.
 2. Fix it.
 3. Delete the entry from this file.
 4. When the file has no entries left, delete the file.
+
+## What keeps going wrong
+
+Not findings; the shape the findings keep taking. Worth reading before adding a
+rule to this system.
+
+- **A threshold placed on its own common case.** Three bearing dead zones and one
+  face-capacity rule, all of which fired on exactly the situation they were meant
+  to judge. Finding 5 is the current instance.
+- **A discrete decision fed by a continuous, changing quantity.** The deeper
+  version of the same thing, and the one that keeps being missed: moving the
+  threshold does not help, because the input still crosses it eventually.
+- **Counting the same thing twice in two different rules.** Finding 4: geometry
+  divides the defender's frontage, and then the combat rule divides it again.
+- **Tests that measure after the battle has moved on.** Five tests in this sweep
+  read a state that only exists mid-fight — how many regiments are in contact —
+  after the defender had broken and the pursuit had scattered everyone. Catch the
+  moment with `RunUntil`, or watch turn by turn.
