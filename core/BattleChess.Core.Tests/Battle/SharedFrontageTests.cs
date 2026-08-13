@@ -55,6 +55,16 @@ namespace BattleChess.Tests.Battle
             Assert.True(quarry.EnemiesInContact >= offsets.Length,
                 $"Only {quarry.EnemiesInContact} of {offsets.Length} ever reached it, so there is nothing to measure.");
 
+            // These are questions about frontage, and frontage alone. By the
+            // time everyone has closed, the regiments have also been fighting —
+            // so they are carrying holes in their front ranks, and a defender
+            // set upon by two is carrying twice as many. That is F13 working
+            // exactly as it should, and it has nothing to do with how a front is
+            // shared out. Left in, it turns every measurement here into two
+            // things added together and neither of them legible.
+            quarry.FrontRankGaps = 0f;
+            foreach (UnitInstance unit in attackers) unit.FrontRankGaps = 0f;
+
             int bringing = 0, answering = 0;
 
             foreach (UnitInstance unit in attackers)

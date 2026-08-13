@@ -210,6 +210,7 @@ namespace BattleChess.Rules
             // against a contact window barely 29 m wide, so charging home a
             // second and third time cost the enemy nothing at all.
             NoteContacts(battle);
+            CloseTheGaps(battle);
 
             if (tick % PulseIntervalTicks != 0) return;
 
@@ -461,6 +462,9 @@ namespace BattleChess.Rules
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
             frontRank = Math.Min(frontRank, unit.Strength);
 
+            // Holes in the line that nobody has stepped into yet.
+            frontRank -= (int)MathF.Round(unit.FrontRankGaps);
+
             if (frontRank <= 0) return 0;
 
             int behind = Math.Max(0, unit.Strength - frontRank);
@@ -522,6 +526,69 @@ namespace BattleChess.Rules
         /// middle.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// How long a hole in the front rank waits for the man behind it, in
+        /// ticks.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A <b>latency</b>, and deliberately not a rate. Filling gaps at so
+        /// many men a tick sets a constant refill racing a constant rate of
+        /// loss, and one of them always wins: above the loss rate every gap
+        /// closes before anything looks at it and the rule is dead weight that
+        /// reads as though it works; below it the holes accumulate for the whole
+        /// battle with nothing to stop them, so a regiment in a long fight ends
+        /// up with a front rank of nobody. Measured, at a fiftieth of a rank per
+        /// tick: gaps never once left zero. At a five-hundredth: they climbed
+        /// past a fifth of the rank and were still climbing.
+        /// </para>
+        /// <para>
+        /// There is no figure between those that behaves, because the shape is
+        /// wrong. A gap is not a stock being drained — it is a casualty waiting
+        /// on the man behind him, and what governs it is how long he takes to
+        /// step up. Expressed that way the holes settle at the rate men are
+        /// falling times how long each takes to replace: small in a grind, ugly
+        /// after a charge, and self-limiting in both cases.
+        /// </para>
+        /// <para>
+        /// Ten ticks — the ranks close between one exchange and the next.
+        /// </para>
+        /// </remarks>
+        private const float StepUpTicks = 10f;
+
+        /// <summary>
+        /// Steps men up from the ranks behind into the holes in front of them.
+        /// </summary>
+        /// <remarks>
+        /// Every tick rather than every pulse, because filling a gap is the fast
+        /// thing here and the exchange is the slow one. Walked in ascending unit
+        /// id like everything else in the rules.
+        /// </remarks>
+        private static void CloseTheGaps(BattleState battle)
+        {
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (unit.FrontRankGaps <= 0f) continue;
+
+                float inTheFrontRank = unit.FightingFrontage / unit.Formation.FileWidth;
+
+                // A regiment cannot be missing more of its front rank than it
+                // has front rank, however badly it has been handled.
+                if (unit.FrontRankGaps > inTheFrontRank)
+                    unit.FrontRankGaps = inTheFrontRank;
+
+                // Nothing behind the front rank, so nothing to fill with. This
+                // is what being worn down actually costs: not that the survivors
+                // fight worse, but that nobody steps over them, so every hole
+                // torn in the line stays torn.
+                if (unit.OccupiedRanks <= 1) continue;
+
+                unit.FrontRankGaps -= unit.FrontRankGaps / StepUpTicks;
+
+                if (unit.FrontRankGaps < 0.5f) unit.FrontRankGaps = 0f;
+            }
+        }
+
         /// <summary>
         /// How wide a line of men this regiment actually has pointing at that
         /// enemy, in metres — the ceiling on what any amount of contact is

@@ -494,6 +494,31 @@ namespace BattleChess.Rules
         public OrientedRect SpaceShape => new OrientedRect(Position, Facing, Space);
 
         /// <summary>
+        /// Places in the front rank with nobody standing in them, in men.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A man who falls in the front rank is replaced by the man behind him,
+        /// and that takes a moment. Until it happens the regiment has a hole in
+        /// its line and fights with fewer men than its headcount says — which is
+        /// why a charge that kills a great many at once hurts far more than the
+        /// same losses spread over a quarter of an hour.
+        /// </para>
+        /// <para>
+        /// The rate has to be slower than a pulse or the rule does nothing at
+        /// all: casualties land on one exchange and are counted on the next, ten
+        /// ticks later, so anything that fills in under ten ticks is never seen
+        /// by anything. See <c>CombatSystem.GapsClosedPerTick</c>.
+        /// </para>
+        /// <para>
+        /// A regiment with nothing behind its front rank cannot fill anything.
+        /// That is the real cost of being worn down: not that the survivors
+        /// fight worse, but that there is no one left to step over them.
+        /// </para>
+        /// </remarks>
+        public float FrontRankGaps { get; set; }
+
+        /// <summary>
         /// How many ranks deep this regiment actually stands right now, holding
         /// the frontage it is holding.
         /// </summary>
@@ -588,6 +613,11 @@ namespace BattleChess.Rules
         public void TakeCasualties(int men)
         {
             if (men <= 0) return;
+
+            // The men who fall are the men who were fighting, and the men who
+            // were fighting are the front rank. Every casualty is a hole in the
+            // line until somebody steps into it.
+            FrontRankGaps += men;
 
             Strength -= men;
 
