@@ -436,7 +436,7 @@ namespace BattleChess.Rules
             float off = OffFront(defender, attacker);
 
             if (off <= FrontalArc) return "square on to its front";
-            return off >= 0.75f ? "into its rear" : "into its flank";
+            return off >= RearArc ? "into its rear" : "into its flank";
         }
 
         /// <summary>
@@ -608,8 +608,24 @@ namespace BattleChess.Rules
             int frontRank = (int)MathF.Floor(contactWidth / formation.FileWidth);
             frontRank = Math.Min(frontRank, unit.Strength);
 
-            // Holes in the line that nobody has stepped into yet.
-            frontRank -= (int)MathF.Round(unit.FrontRankGaps);
+            // Holes in the line that nobody has stepped into yet, charged as a
+            // share of the face rather than as a flat number of men.
+            //
+            // Flat subtraction quietly assumed the face was a full frontage. On
+            // a side it is not: a body eight ranks deep answers a flank with
+            // eight men, so eight gaps anywhere in a regiment of eight hundred
+            // wiped out its entire flank contribution and the fight resolved to
+            // nothing. Against the front — where every previous test of this
+            // lived — a face is the full frontage and the two forms agree, so
+            // this changes the common case not at all and the narrow ones
+            // completely.
+            float filesWhenWhole = unit.FightingFrontage / formation.FileWidth;
+
+            if (filesWhenWhole > 0f && unit.FrontRankGaps > 0f)
+            {
+                float missing = Math.Clamp(unit.FrontRankGaps / filesWhenWhole, 0f, 1f);
+                frontRank -= (int)MathF.Round(frontRank * missing);
+            }
 
             if (frontRank <= 0) return 0;
 
@@ -749,26 +765,51 @@ namespace BattleChess.Rules
         /// which is a statement about the screen and not about the field.
         /// </para>
         /// <para>
-        /// Facing the enemy, the ceiling is the frontage still manned: a
-        /// regiment at half strength fights along half its block and its flanks
-        /// are thin air. Caught side-on, the ceiling is its <i>ranks</i> — ten
-        /// men for a ten-rank body, four metres of them, against the hundred it
+        /// <b>Four faces, and the face decides the count.</b> Front and rear are
+        /// both a full frontage — a hundred men either way, because the back
+        /// rank is as wide as the first. The two sides are the depth: ten men
+        /// for a ten-rank body, four metres of them, against the hundred it
         /// would have brought facing the right way.
         /// </para>
         /// <para>
-        /// Reading the block for this instead let a flanked regiment answer with
+        /// The rear used to be lumped in with the sides, on a single test for
+        /// "not facing this way". Measured: a regiment of eight hundred taken
+        /// squarely from behind answered with <i>thirteen men</i>, and once a
+        /// few holes had opened in its line it answered with none at all —
+        /// engagements in a recorded game opened "Bringing 0 against 122" and
+        /// the melee then did nothing while both sides stood there. Being taken
+        /// from behind should be the worst thing that happens to a regiment, and
+        /// it was the quietest.
+        /// </para>
+        /// <para>
+        /// Reading the block for the sides let a flanked regiment answer with
         /// twenty metres of side rather than six, because the block is drawn
         /// deep enough to click on. That made being caught out of position three
         /// times less bad than it should be, from a decision about drawing.
+        /// Counted in men and converted through the file width, never read off
+        /// the drawn rectangle.
         /// </para>
         /// </remarks>
         private static float MenTurnedThatWay(UnitInstance unit, UnitInstance enemy)
         {
-            Formation formation = unit.Formation;
+            float off = OffFront(unit, enemy);
 
-            return OffFront(unit, enemy) > FrontalArc
-                ? formation.Ranks * formation.FileWidth
-                : unit.FightingFrontage;
+            // Behind. The back rank is exactly as wide as the front one, so
+            // every man in it has somewhere to face — which is why being taken
+            // from behind is so much worse than being taken in the side rather
+            // than merely as bad. The panic is the same; the number of men who
+            // can act on it is ten times larger.
+            //
+            // This used to answer with the ranks, the same as a flank, and a
+            // regiment attacked squarely in the rear brought thirteen men out of
+            // eight hundred. Not a rounding problem: the wrong face.
+            if (off >= RearArc) return unit.FightingFrontage;
+
+            // A side, which is the depth: one man per rank.
+            if (off > FrontalArc)
+                return unit.OccupiedRanks * unit.Formation.FileWidth;
+
+            return unit.FightingFrontage;
         }
 
         private static float OffFront(UnitInstance unit, UnitInstance enemy)
@@ -794,6 +835,21 @@ namespace BattleChess.Rules
         /// genuine flank rather than a neighbour standing along the same front.
         /// </remarks>
         private const float FrontalArc = 0.25f;
+
+        /// <summary>
+        /// Past this far round, a threat is behind a regiment rather than beside
+        /// it, and meets its back rank instead of its side.
+        /// </summary>
+        /// <remarks>
+        /// The mirror of <see cref="FrontalArc"/>, and deliberately the same
+        /// quarter turn: the four faces of a rectangle divide the circle evenly,
+        /// so front, side and rear cannot be given arcs that disagree without
+        /// one of them quietly borrowing from another. Existed only as an
+        /// unnamed 0.75 inside the logging, which is how the rear came to be
+        /// described but not counted — the recording said "into its rear" while
+        /// the arithmetic answered with a flank.
+        /// </remarks>
+        private const float RearArc = 0.75f;
 
         /// <summary>
         /// How much of its width a regiment loses the use of when it is taken

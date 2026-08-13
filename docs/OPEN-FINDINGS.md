@@ -269,6 +269,26 @@ face that a regiment which could actually fight is queuing for.
 pass, and the fix belongs with the flanking work where contact and frontage are
 being reasoned about together anyway.
 
+**Still open after F19** (four sides, four counts), and worth saying why, because
+F19 was expected to absorb it and did not. F19 changed *how many men a face is
+worth*; this is about *whether two shapes overlap at all*, which is still decided
+by `SharedFrontage` projecting both rectangles onto one axis. The two zeros in the
+recording had different causes and only one of them has been fixed:
+
+| recorded line | cause | after F19 |
+|---|---|---|
+| `into its rear. Bringing 0 against 122` | rear counted as a flank, then gaps ate the remainder | fixed — the rear is a full frontage |
+| `front to front. Bringing 0 against 0` | corner touch, genuinely no shared ground | **unchanged** |
+
+The remaining half is the axis, not the count. `SharedFrontage` always projects
+onto `enemy.Shape.Right`, which is the enemy's *frontage* direction — right for a
+front or rear meeting and meaningless for a side one, where the face runs along
+the enemy's `Forward` instead. Choosing the axis from the face being attacked
+would make F15's asymmetry fall out of the geometry rather than needing the
+`EngagedWidth` envelop branch to put it back. Measured while F19 was being built:
+two regiments perpendicular report a shared frontage of **6.0 m one way and 0.0 m
+the other**, from the same pair of rectangles.
+
 ---
 
 ## 7. An attacking regiment arrives at its destination every tick
