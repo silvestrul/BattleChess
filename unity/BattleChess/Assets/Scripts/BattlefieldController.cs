@@ -1616,11 +1616,18 @@ namespace BattleChess.Unity
                     // print different numbers, and a report of "it took a
                     // different bearing" could not be checked against the log at
                     // all.
+                    // The raw geometry as well as the conclusion. Printing only
+                    // OrderFacing meant the log was quoting the very code under
+                    // suspicion back at itself — if the front is being worked
+                    // out wrongly, a line that reports the front cannot show it.
+                    // From here, to there, and the bearing those two imply.
                     _console.Info("Move",
                         $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")} " +
-                        $"to face {unit.OrderFacing.Degrees:0}° " +
+                        $"from ({unit.Position.X:0},{unit.Position.Y:0}) to ({destination.X:0},{destination.Y:0}) — " +
+                        $"that line is {Facing.Towards(unit.Position, destination).Degrees:0}°, " +
+                        $"and it will face {unit.OrderFacing.Degrees:0}° " +
                         $"({(bearing.HasValue ? "bearing drawn" : "the way it is going")}). " +
-                        $"{offBy:0}° off the bearing at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
+                        $"{offBy:0}° off at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
                         unit.Id);
 
                     // A big wheel is the most interesting thing about to happen, and
