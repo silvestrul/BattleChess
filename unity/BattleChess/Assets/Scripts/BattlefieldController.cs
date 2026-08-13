@@ -1496,7 +1496,10 @@ namespace BattleChess.Unity
                 if (Vec2.Distance(stand, destination) > 1f)
                     _console.Info("Path",
                         $"{unit.Def.DisplayName} is aiming {Vec2.Distance(stand, destination):0} m off that " +
-                        "point — the ground there is taken or impassable.", unit.Id);
+                        $"point — the ground there is taken or impassable. It will face " +
+                        $"{Facing.Towards(unit.Position, stand).Degrees:0}° for the ground it can stand on, " +
+                        $"not {Facing.Towards(unit.Position, destination).Degrees:0}° for the point clicked.",
+                        unit.Id);
 
                 destination = stand;
             }
@@ -1575,8 +1578,16 @@ namespace BattleChess.Unity
                 }
                 else
                 {
+                    // The front it is heading for, in map degrees, as well as how
+                    // far round that is from here. Only the second was recorded,
+                    // and it is measured from wherever the regiment happens to be
+                    // pointing — so two identical orders given a moment apart
+                    // print different numbers, and a report of "it took a
+                    // different bearing" could not be checked against the log at
+                    // all.
                     _console.Info("Move",
-                        $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")}. " +
+                        $"{unit.Def.DisplayName} marching{(_options.WheelBeforeMarching ? " (wheeling first)" : "")} " +
+                        $"to face {unit.OrderFacing.Degrees:0}°. " +
                         $"{offBy:0}° off the bearing at {turnRate:0}°/s — {wheelSeconds:0} ticks to come round.",
                         unit.Id);
 
