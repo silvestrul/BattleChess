@@ -386,22 +386,46 @@ namespace BattleChess.Rules
                 // next step, so it bought nothing even for the one case it
                 // could have helped.
                 //
-                // Deliberately narrow: only a press-through is exempt. An
-                // ordinary accidental overlap still comes apart half and half,
-                // because that is what keeps a queue of attackers off each
-                // other and it has no quarrel with anybody's orders.
+                // That exemption was written narrow — only a declared
+                // press-through — on the grounds that an ordinary accidental
+                // overlap has no quarrel with anybody's orders. It has one, and
+                // "accidental" turned out to cover most of it: a corner clipped
+                // going round, an attack that reached the ground by steering
+                // rather than by plan, two regiments arriving together. In every
+                // one of those the regiment standing still was taking half a
+                // step a tick from somebody else's march.
                 if (unit.Route?.PressingThrough == true || other.Route?.PressingThrough == true)
                     continue;
 
                 float step = ShufflingApartSpeed * BattleClock.SecondsPerTick;
-
-                // Half the correction each, along the shortest way out. Moving
-                // one alone would let a standing regiment be walked across the
-                // field by anything that leaned on it.
                 Vec2 push = apart.Normalised() * step;
 
-                unit.Position = KeepInsideTheField(battle, unit, unit.Position + push);
-                other.Position = KeepInsideTheField(battle, other, other.Position - push);
+                // M1a, unconditionally: whoever is marching takes the whole
+                // correction, and a body that was not told to move gives no
+                // ground at all. Only when neither of them is going anywhere is
+                // it shared — two regiments deployed on top of each other have
+                // an equal claim to the ground and no order to appeal to.
+                //
+                // Sharing it was right while overlaps were brief accidents and
+                // became wrong the moment a march could sit inside somebody for
+                // hundreds of metres. Note that the mover's half was mostly
+                // wasted anyway: its own next step undid it.
+                bool weAreMarching = unit.IsMarching;
+                bool theyAre = other.IsMarching;
+
+                if (weAreMarching && !theyAre)
+                {
+                    unit.Position = KeepInsideTheField(battle, unit, unit.Position + push * 2f);
+                }
+                else if (theyAre && !weAreMarching)
+                {
+                    other.Position = KeepInsideTheField(battle, other, other.Position - push * 2f);
+                }
+                else
+                {
+                    unit.Position = KeepInsideTheField(battle, unit, unit.Position + push);
+                    other.Position = KeepInsideTheField(battle, other, other.Position - push);
+                }
             }
         }
 

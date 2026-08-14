@@ -618,6 +618,58 @@ confidence.
 
 ---
 
+## 12. It only wheels once — FIXED, and two of the four reports were one fault
+
+From `logs/battle-20260814-125645.log` and a play report, 14 Aug 2026.
+
+**a. A route that bends is walked holding one front — FIXED ([M23](DECISIONS.md)).**
+The designer's report was *"rotation should be done every time it changes direction
+… it only wheels once"*, and that is exactly what the code did. `FrontWhileMarching`
+opened with `if (!unit.Order.Bearing.HasValue) return unit.OrderFacing;` under the
+comment *"the front already is the line of march"* — true while every route was a
+single line, and false the moment routes could bend. `OrderFacing` is fixed once in
+`GiveOrder` as the bearing from where the regiment started to where it was sent, so
+an arching regiment wheeled onto leg one and then crabbed every remaining leg.
+
+Measured on a four-leg route bending 47°, 9°, −9°, −47°: it came round onto **2 of
+4 legs** and spent **81 of 111 marching ticks** more than 25° off the leg it was
+actually walking. **Verified by restoring the early return**, which puts both
+numbers straight back.
+
+**b. Going round sometimes clips what it went round — same fault, fixed with it.**
+Three answers to one question: the planner checked each leg at the facing the
+regiment held *when it planned*, the walk held the start-to-destination bearing,
+and the leg's own bearing was neither. A 40 × 20 body is a different obstacle at
+47°, so the shape that was checked was not the shape that travelled. Each leg is
+now checked at the front it will be held on, entering on the one before it, both
+ends of the turn (`Marching.IsClearLeg`). Rung-3 frequency is unchanged at 2 of 6
+crowds, so the stricter check did not push marches down the ladder.
+
+**c. Regiments still get pushed — FIXED, [M1a](DECISIONS.md) made unconditional.**
+The exemption from the separation shuffle was written narrow, covering only a
+declared press-through, on the grounds that an accidental overlap has no quarrel
+with anybody's orders. It has one, and "accidental" covered most of the cases.
+Whoever is marching now takes the whole correction. **Verified by disabling:** 1,5 m
+of drift on a holding regiment against 0,0 with the rule in.
+
+**Two regiments that are both stationary still share it, deliberately** — deployed
+on top of each other they have an equal claim to the ground and no order to appeal
+to. A march that *finishes* inside somebody therefore still shuffles both. Nothing
+tracks who was there first, and inventing it is not worth a rule yet.
+
+**d. "Sometimes it goes through units at no cost" — not reproduced.** Asked as a
+property rather than hunted as a scenario: every tick a regiment is inside one of
+its own, counted from outside the rule that does the charging, against what the
+rule charged. They agree exactly — 12 ticks, 12 charged. Two things could still
+produce the impression and neither is a defect: the charge is gated on the same
+5% grazing tolerance as every other overlap question, so a corner clipped is free
+by design; and cavalry slowed from 4,8 to 2,9 m/s still crosses a twenty-metre
+regiment in seven seconds. The arrival line now names the number per march
+(*"18 s of it shouldering through its own"*), so the next report can be answered
+from the recording instead of argued about.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

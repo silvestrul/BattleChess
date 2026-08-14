@@ -1020,8 +1020,22 @@ namespace BattleChess.Rules
         private static Facing FrontWhileMarching(
             BattleState battle, UnitInstance unit, MovementRoute route, Facing marchBearing)
         {
-            // No bearing was drawn, so the front already is the line of march.
-            if (!unit.Order.Bearing.HasValue) return unit.OrderFacing;
+            // There used to be an early return here: no bearing drawn, so "the
+            // front already is the line of march" — return `OrderFacing` and be
+            // done. That was true exactly as long as every route was one line.
+            //
+            // M23. `OrderFacing` is fixed once, in `GiveOrder`, as the bearing
+            // from where the regiment started to where it was sent. On a route
+            // that bends it is not the line of march on any leg but the first,
+            // so an arching regiment wheeled once and then walked every
+            // remaining leg pointing along the old one — crabbing at two fifths
+            // of pace for no reason, and presenting a shape to the ground that
+            // the planner had never checked.
+            //
+            // Nothing else is needed: the logic below already marches on the
+            // leg's own bearing and comes round to the ordered front near the
+            // end, and on a straight route `marchBearing` and `OrderFacing` are
+            // the same thing, so it collapses to what it always did.
 
             float toTurn = Facing.AbsoluteDelta(marchBearing, unit.OrderFacing) * 180f / MathF.PI;
             float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));

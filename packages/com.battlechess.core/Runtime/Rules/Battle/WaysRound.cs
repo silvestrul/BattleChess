@@ -113,8 +113,12 @@ namespace BattleChess.Rules
                 {
                     Vec2 through = blocker.Position + (side == 0 ? across : -across) * beside;
 
-                    if (!Marching.IsClearLine(battle, unit, unit.Position, through, unit.Facing)) continue;
-                    if (!Marching.IsClearLine(battle, unit, through, destination, unit.Facing)) continue;
+                    // M23: each leg checked at the front it will be walked on,
+                    // entering on the one before it.
+                    if (!Marching.IsClearLeg(battle, unit, unit.Position, through, unit.Facing)) continue;
+
+                    Facing onward = Facing.FromVector(through - unit.Position);
+                    if (!Marching.IsClearLeg(battle, unit, through, destination, onward)) continue;
 
                     var candidate = new[] { unit.Position, through, destination };
 
@@ -172,8 +176,10 @@ namespace BattleChess.Rules
 
                         Vec2 through = blocker.Position + (side == 0 ? across : -across) * beside;
 
-                        if (!Marching.IsClearLine(battle, unit, unit.Position, through, unit.Facing)) continue;
-                        if (!Marching.IsClearLine(battle, unit, through, destination, unit.Facing)) continue;
+                        if (!Marching.IsClearLeg(battle, unit, unit.Position, through, unit.Facing)) continue;
+
+                        Facing onward = Facing.FromVector(through - unit.Position);
+                        if (!Marching.IsClearLeg(battle, unit, through, destination, onward)) continue;
 
                         var candidate = new[] { unit.Position, through, destination };
 
@@ -234,8 +240,10 @@ namespace BattleChess.Rules
                     // Each bend appends the point it reaches, so the endpoints
                     // arrive with them. Adding the destination again here put a
                     // duplicate on the end of every route it produced.
-                    if (!Bend(battle, unit, unit.Position, through, legs)) continue;
-                    if (!Bend(battle, unit, through, destination, legs)) continue;
+                    if (!Bend(battle, unit, unit.Position, through, unit.Facing, legs)) continue;
+
+                    Facing onward = Facing.FromVector(through - unit.Position);
+                    if (!Bend(battle, unit, through, destination, onward, legs)) continue;
 
                     // M22: the whole point of this strategy is that it buys
                     // extra bends, so it is the one most in need of being priced
@@ -256,9 +264,9 @@ namespace BattleChess.Rules
             /// once around anything in between. False if even that cannot.
             /// </summary>
             private static bool Bend(
-                BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, List<Vec2> into)
+                BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing entering, List<Vec2> into)
             {
-                if (Marching.IsClearLine(battle, unit, from, to, unit.Facing))
+                if (Marching.IsClearLeg(battle, unit, from, to, entering))
                 {
                     if (into.Count == 0 || into[into.Count - 1] != to) into.Add(to);
                     return true;
@@ -278,8 +286,8 @@ namespace BattleChess.Rules
                 {
                     Vec2 via = second.Position + (side == 0 ? across : -across) * beside;
 
-                    if (!Marching.IsClearLine(battle, unit, from, via, unit.Facing)) continue;
-                    if (!Marching.IsClearLine(battle, unit, via, to, unit.Facing)) continue;
+                    if (!Marching.IsClearLeg(battle, unit, from, via, entering)) continue;
+                    if (!Marching.IsClearLeg(battle, unit, via, to, Facing.FromVector(via - from))) continue;
 
                     into.Add(via);
                     into.Add(to);

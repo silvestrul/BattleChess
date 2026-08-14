@@ -510,6 +510,43 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
+        /// Whether a leg of a bent route is clear for the body that will walk it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M23</b>, and it is the other half of the same fix. A regiment now
+        /// comes round onto every leg, so the shape travelling a leg is the one
+        /// squared to <i>that</i> leg — not the one it happened to be holding
+        /// when the route was planned, which is what every check here used to
+        /// ask about. A body forty metres across and twenty deep is a different
+        /// obstacle at forty-seven degrees, and checking the wrong one is how a
+        /// route that was found clear puts a corner through what it just went
+        /// round.
+        /// </para>
+        /// <para>
+        /// Both ends of the turn are checked, because the wheel happens on the
+        /// leg rather than before it: the regiment enters still holding the
+        /// previous bearing and comes round as it goes. The bulge between the
+        /// two — a rectangle sweeps about two metres wider mid-rotation than at
+        /// either end — is what <see cref="TangentMarginMetres"/> is for.
+        /// </para>
+        /// </remarks>
+        public static bool IsClearLeg(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing entering)
+        {
+            Vec2 leg = to - from;
+            if (leg.IsNearZero) return IsClearLine(battle, unit, from, to, entering);
+
+            Facing holding = Facing.FromVector(leg);
+
+            if (!IsClearLine(battle, unit, from, to, holding)) return false;
+
+            if (Facing.AbsoluteDelta(entering, holding) < 0.01f) return true;
+
+            return IsClearLine(battle, unit, from, to, entering);
+        }
+
+        /// <summary>
         /// Whether one regiment counts as an obstacle to another when a route is
         /// being planned.
         /// </summary>
