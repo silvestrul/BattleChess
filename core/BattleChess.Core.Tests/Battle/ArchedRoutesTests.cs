@@ -391,6 +391,144 @@ namespace BattleChess.Tests.Battle
                 "standing, not what is in its way.");
         }
 
+        [Fact]
+        public void ARegimentAlreadyLappingWhatIsAheadStillGoesRoundIt()
+        {
+            // `logs/battle-20260814-144010.log`. Five press-throughs, four of
+            // them the same regiment against the same Archers, each setting off
+            // from ground it had just finished a march on:
+            //
+            //   3388   reached its destination ... averaging 3,7 m/s
+            //   3398 > pushing through its own Archers — no way round it and no
+            //          gap to thread.
+            //   3398   marching from (140,146) to (306,308) — that line is 44°.
+            //
+            // A regiment that comes to rest lapping one of its own and is then
+            // ordered off past it cannot plan a way round: every candidate leg
+            // starts inside the very body it is trying to get round, so the
+            // sweep collides on metre zero of all of them.
+            //
+            // M25 excuses a lapped body abreast or behind, which is what stops
+            // two regiments swapping places from walking through each other.
+            // Ahead is the case it deliberately does not excuse — and this is
+            // the case it left behind.
+            var field = new Battlefield("plains", 51000);
+
+            UnitInstance mover = field.Add(0, "cavalry", field.Centre, Facing.East);
+
+            // Lapping, and lying along the line of march rather than beside it.
+            var along = new Vec2(MathF.Cos(44f * MathF.PI / 180f), MathF.Sin(44f * MathF.PI / 180f));
+
+            UnitInstance ahead = field.Add(0, "archers", field.Centre + along * 22f, Facing.East);
+            Battlefield.Hold(ahead);
+
+            foreach (Vec2 at in new[] { new Vec2(0f, 48f), new Vec2(0f, -48f) })
+            {
+                UnitInstance beside = field.Add(0, "spearmen", field.Centre + at, Facing.East);
+                Battlefield.Hold(beside);
+            }
+
+            Vec2 destination = field.Centre + along * 232f;
+
+            _out.WriteLine($"lapping the Archers by " +
+                           $"{OrientedRect.OverlapFraction(mover.Shape, ahead.Shape):0.00} of a regiment.");
+
+            Plan plan = Marching.PlanTo(field.State, mover, field.Pathfinder, destination);
+
+            string rung =
+                plan.PressedThrough ? "3 — through its own"
+                : plan.Path.CellsExplored > 0 ? "search"
+                : plan.Hold != null ? "2 — crabbed"
+                : plan.Path.Waypoints.Count > 2 ? "2 — round it"
+                : "1 — straight there";
+
+            _out.WriteLine($"rung {rung}, {plan.Path.Waypoints.Count} waypoints.");
+
+            Assert.False(plan.PressedThrough,
+                "Standing half inside its own Archers and sent off past them, it shouldered through " +
+                "rather than stepping out and round. Being already inside a body is the reason a way " +
+                "round is needed, not a reason there cannot be one.");
+        }
+
+        [Fact]
+        public void SqueezingPastACornerIsOneMovementRatherThanAStutter()
+        {
+            // "They still stutter a bit when they would hit the edges of some
+            // units."
+            //
+            // **This does not reproduce it, and says so rather than pretending.**
+            // The suspicion was the berth, which is edge-triggered — it fires on
+            // the step that would newly close inside it, so it looks like it
+            // should shimmy: refuse the step in, edge out, be clear, step in
+            // again. A second threshold to hold the passage open was written and
+            // measured, and made this arrangement *worse*: 116 ticks sideways
+            // with 5 changes of direction against 78 and 3 without. It was
+            // thrown away. See finding 15.
+            //
+            // Note what the recording actually shows — "and that held for 15
+            // ticks (9 times over)" — is a decision *reported* nine times, not
+            // taken nine times, and that much is now fixed: the detour says
+            // itself on the tick it is settled. Whether anything visible remains
+            // is for the next play-test.
+            //
+            // What this does hold is the outcome: a regiment slaloming past
+            // three corners crosses them as movements rather than as a shimmy,
+            // and it will catch a regression that makes that untrue.
+            var field = new Battlefield("plains", 52000);
+
+            // Two corners, not one. The recorded stutter alternates between
+            // two neighbours fifteen ticks apart, and a single body is passed
+            // cleanly — the first version of this test measured one corner and
+            // read the same 1 change of direction whether the fix was in or out.
+            foreach (Vec2 at in new[] { new Vec2(-40f, 34f), new Vec2(40f, -34f), new Vec2(120f, 34f) })
+            {
+                UnitInstance corner = field.Add(0, "spearmen", field.Centre + at, Facing.East);
+                Battlefield.Hold(corner);
+            }
+
+            UnitInstance mover = field.Add(0, "cavalry", field.Centre - new Vec2(240f, 0f), Facing.East);
+            Vec2 destination = field.Centre + new Vec2(240f, 0f);
+
+            field.March(mover, destination);
+
+            var log = new Quiet();
+
+            // The line of march is due east, so anything across it is sideways.
+            Vec2 was = mover.Position;
+            int flips = 0;
+            int sideways = 0;
+            float last = 0f;
+
+            Advance(field, log, turns: 16, () =>
+            {
+                float across = mover.Position.Y - was.Y;
+                was = mover.Position;
+
+                if (MathF.Abs(across) < 0.05f) return;
+
+                sideways++;
+
+                if (last != 0f && MathF.Sign(across) != MathF.Sign(last)) flips++;
+
+                last = across;
+            });
+
+            _out.WriteLine($"{sideways} ticks of sideways movement, {flips} changes of direction; " +
+                           $"finished {Vec2.Distance(mover.Position, destination):0} m short.");
+
+            Assert.True(sideways > 20,
+                $"Only {sideways} ticks moved sideways at all, so it never had to squeeze past anything " +
+                "and this proves nothing.");
+
+            // Going round a corner and coming back onto the march is two changes
+            // of direction. A shimmy is one every other tick. Generous, because
+            // arriving and dressing add a few of their own — the fault this
+            // guards against reads in the dozens.
+            Assert.True(flips < sideways / 4,
+                $"It changed sideways direction {flips} times in {sideways} ticks of sideways movement. " +
+                "Squeezing past a corner is one movement, not a shimmy against the berth.");
+        }
+
         // ---- M20: the charge covers every tick it applies to ------------------
 
         [Fact]

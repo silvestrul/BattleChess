@@ -774,6 +774,56 @@ states, rather than today's rounding.
 
 ---
 
+## 15. Setting off from inside its own — FIXED. The stutter — NOT REPRODUCED
+
+From `logs/battle-20260814-144010.log`, 14 Aug 2026. The turning is reported good.
+Two things left.
+
+**a. "It still goes right through archers" — FIXED ([M25a](DECISIONS.md)).** Five
+press-throughs, four of them the same regiment against the same Archers, and each
+set off from ground it had just finished a march on:
+
+```
+3388   reached its destination ... averaging 3,7 m/s
+3398 > pushing through its own Archers — no way round it and no gap to thread.
+3398   marching from (140,146) to (306,308) — that line is 44°.
+```
+
+A regiment that comes to rest lapping one of its own and is then sent off past it
+cannot plan a way round, because every candidate leg starts inside the very body it
+is trying to get round. Reproduced at an overlap of 0.13 of a regiment.
+
+[M25](DECISIONS.md) excuses a lapped body **abreast or behind**, which is what stops
+two regiments swapping places from walking through each other — and *ahead* is
+exactly the case it declines to excuse. So the rungs now read it differently, which
+they must: the straight line still refuses a lapped body ahead; the legs of a detour
+ignore whatever is lapped at their start. The swap deadlock test still passes, which
+is the guard that this did not simply undo M25.
+
+**b. "They still stutter a bit when they would hit the edges of some units" — open,
+and honestly so.** The suspicion was the berth, which is edge-triggered: it fires on
+the step that would *newly* close inside it, so it looks like it should shimmy —
+refuse the step in, edge out, be clear, step in again, every other tick.
+
+A second threshold to hold the passage open until there was real daylight was
+written and measured. On the only arrangement that squeezes past anything it gave
+**116 ticks of sideways movement with 5 changes of direction, against 78 and 3
+without it** — worse on both counts. It was thrown away rather than shipped on the
+strength of a plausible story.
+
+One real part of it is fixed. *"And that held for 15 ticks (9 times over)"* is a
+decision **reported** nine times, not taken nine times; the detour now says itself on
+the tick it is settled, as every other decision does. That alone may be most of what
+was read as a stutter in the log, though not necessarily what was seen on screen.
+
+`SqueezingPastACornerIsOneMovementRatherThanAStutter` is kept as a **behaviour guard
+that does not discriminate** — it passes with the fix in and out, and says so in its
+own comment. The next play-test is the verification. What would settle it is a note
+of *which* regiment and roughly when, so the coordinates can be pulled out of the
+log the way findings 13 and 14 were.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

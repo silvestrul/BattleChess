@@ -491,8 +491,15 @@ namespace BattleChess.Rules
         /// stops a body dead, and another regiment is only in the way if the
         /// two shapes genuinely meet, which a centre-line test cannot tell.
         /// </remarks>
+        /// <param name="leaving">
+        /// Whether this line is a way <i>out</i> of something the regiment is
+        /// already inside. A body it laps at the start then stops being an
+        /// obstacle, because being inside it is the reason a way round is wanted
+        /// — see <see cref="IsClearLeg"/>, which is the only caller that says so.
+        /// </param>
         public static bool IsClearLine(
-            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing)
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
+            bool leaving = false)
         {
             Vec2 travel = to - from;
             float length = travel.Length;
@@ -507,6 +514,7 @@ namespace BattleChess.Rules
             {
                 if (!IsInTheWayOf(unit, other)) continue;
                 if (WhereItIsStanding(body, travel, other)) continue;
+                if (leaving && OrientedRect.Overlaps(body, other.Shape)) continue;
 
                 if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
             }
@@ -598,11 +606,11 @@ namespace BattleChess.Rules
         {
             Facing holding = AlongTheLine(from, to, entering);
 
-            if (!IsClearLine(battle, unit, from, to, holding)) return false;
+            if (!IsClearLine(battle, unit, from, to, holding, leaving: true)) return false;
 
             if (Facing.AbsoluteDelta(entering, holding) < 0.01f) return true;
 
-            return IsClearLine(battle, unit, from, to, entering);
+            return IsClearLine(battle, unit, from, to, entering, leaving: true);
         }
 
         /// <summary>

@@ -456,7 +456,16 @@ namespace BattleChess.Rules
             // question — threading a crowd means meeting a new one every few
             // metres, and letting each of them re-decide the side is the same
             // fault with more steps.
-            if (unit.GoingRound != UnitId.None)
+            // Whether this tick is where the detour was decided, kept so the
+            // log can say it once. It was said on every tick of the manoeuvre,
+            // which the de-duplicator then collapsed into "and that held for 15
+            // ticks (9 times over)" — a line that reads like a regiment
+            // deciding nine times and is in fact a regiment deciding once and
+            // being asked nine times. A decision repeated is what the whole
+            // logging pass was about.
+            bool justDecided = unit.GoingRound == UnitId.None;
+
+            if (!justDecided)
             {
                 pastTheirFlank = unit.GoingRoundBearing.ToVector();
             }
@@ -491,10 +500,11 @@ namespace BattleChess.Rules
                 // side again and nothing has been learned.
                 unit.GoingRoundBearing = Facing.FromVector(thisWay);
 
-                log.Decision("Move",
-                    $"{unit.Def.DisplayName} is working round its own {blocker.Def.DisplayName} " +
-                    "rather than through it.",
-                    unit.Id);
+                if (justDecided)
+                    log.Decision("Move",
+                        $"{unit.Def.DisplayName} is working round its own {blocker.Def.DisplayName} " +
+                        "rather than through it.",
+                        unit.Id);
 
                 return round;
             }
@@ -614,6 +624,7 @@ namespace BattleChess.Rules
         /// </remarks>
         private const float BerthWhilePassingMetres = 6f;
 
+
         /// <summary>
         /// A friendly formation this step would newly crowd, if there is one.
         /// </summary>
@@ -655,6 +666,19 @@ namespace BattleChess.Rules
                 // while going somewhere — which is gluing itself to them rather
                 // than passing them. Only while marching: a regiment that has
                 // arrived beside a neighbour stands flush.
+                //
+                // The berth is edge-triggered: it fires on the step that would
+                // *newly* close inside it. That looks like it ought to shimmy —
+                // refuse the step in, edge out, be clear, step in again — and a
+                // second threshold to hold the passage open until there was real
+                // daylight was duly written and measured. It was thrown away: on
+                // the only arrangement that squeezes past anything it moved 116
+                // ticks sideways with 5 changes of direction, against 78 and 3
+                // without it. Worse on both counts.
+                //
+                // See finding 15. The stutter the play-test reports is real on
+                // screen and is **not reproduced here**, and a fix that measures
+                // worse than the fault is not a fix.
                 if (unit.IsMarching &&
                     !ComingToRestBeside(unit, other) &&
                     OrientedRect.GapBetween(stepped, other.Shape) < BerthWhilePassingMetres &&
