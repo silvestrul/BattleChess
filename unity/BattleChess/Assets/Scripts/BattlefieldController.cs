@@ -1592,7 +1592,8 @@ namespace BattleChess.Unity
             // M10: the straight line first, the search only if something is
             // genuinely in the way. Most player orders across open ground now
             // never reach the pathfinder at all.
-            PathResult path = Marching.PlanTo(_battle, unit, pathfinder, destination);
+            Plan plan = Marching.PlanTo(_battle, unit, pathfinder, destination, _console);
+            PathResult path = plan.Path;
 
             // The route overlay and the drawn line show one march. Ordering a
             // wing would have six of them fight over the same LineRenderer and
@@ -1645,7 +1646,7 @@ namespace BattleChess.Unity
                 // turns up on the way.
                 unit.GiveOrder(
                     UnitOrder.MoveTo(destination, _options.WheelBeforeMarching, bearing: bearing), unit.Position);
-                unit.Route = new MovementRoute(path.Waypoints, _options.WheelBeforeMarching);
+                unit.Route = plan.ToRoute(_options.WheelBeforeMarching);
 
                 // Against the front it will actually hold, not against the line
                 // of march. Those are different whenever a bearing was drawn,

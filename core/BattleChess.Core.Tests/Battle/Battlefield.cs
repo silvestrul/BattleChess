@@ -175,18 +175,20 @@ namespace BattleChess.Tests.Battle
         /// "wheel round and go" have to say so, exactly as a player does.
         /// </param>
         public void March(
-            UnitInstance unit, Vec2 destination, Stance stance = Stance.Advance, Facing? bearing = null)
+            UnitInstance unit, Vec2 destination, Stance stance = Stance.Advance, Facing? bearing = null,
+            IBattleLog? log = null)
         {
             unit.Stance = stance;
             unit.GiveOrder(UnitOrder.MoveTo(destination, bearing: bearing), unit.Position);
 
-            PathResult path = Marching.PlanTo(State, unit, _pathfinder, destination);
+            Plan plan = Marching.PlanTo(State, unit, _pathfinder, destination, log);
+            PathResult path = plan.Path;
 
             if (!path.Found || path.Waypoints.Count < 2)
                 throw new InvalidOperationException(
                     $"No route for {unit.Def.DisplayName} to {destination}: {path.Failure} {path.FailureDetail}");
 
-            unit.Route = Marching.RouteFor(path);
+            unit.Route = plan.ToRoute();
         }
 
         /// <summary>Leaves a unit standing where it is: it will fight, but never follow.</summary>

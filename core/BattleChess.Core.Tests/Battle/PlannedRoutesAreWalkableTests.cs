@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -73,20 +73,21 @@ namespace BattleChess.Tests.Battle
             UnitInstance mover = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East);
             Vec2 destination = field.Centre + new Vec2(250f, 0f);
 
-            PathResult route = Marching.PlanTo(field.State, mover, field.Pathfinder, destination);
+            Plan plan = Marching.PlanTo(field.State, mover, field.Pathfinder, destination);
+            PathResult route = plan.Path;
 
             Assert.True(route.Found, $"{what}: no route at all.");
 
             // A route that has deliberately given up on keeping clear is exempt
             // — that is what it means — and one the search produced is the
             // search's business, not the cast's.
-            if (Marching.LastPressedThrough || route.CellsExplored > 0)
+            if (plan.PressedThrough || route.CellsExplored > 0)
             {
-                _out.WriteLine($"{what}: exempt ({(Marching.LastPressedThrough ? "pressing through" : "searched")}).");
+                _out.WriteLine($"{what}: exempt ({(plan.PressedThrough ? "pressing through" : "searched")}).");
                 return;
             }
 
-            Facing?[]? hold = Marching.LastHold;
+            Facing?[]? hold = plan.Hold;
 
             for (int leg = 1; leg < route.Waypoints.Count; leg++)
             {

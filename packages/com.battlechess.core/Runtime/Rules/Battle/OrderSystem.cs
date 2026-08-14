@@ -299,8 +299,9 @@ namespace BattleChess.Rules
             float moved = Vec2.Distance(placement, goal);
             bool groundWasTaken = moved > PlacementMovedMetres;
 
-            PathResult path = Marching.PlanTo(
-                battle, unit, _pathfinder, groundWasTaken ? placement : goal);
+            Plan plan = Marching.PlanTo(
+                battle, unit, _pathfinder, groundWasTaken ? placement : goal, log);
+            PathResult path = plan.Path;
 
             if (!path.Found || path.Waypoints.Count < 2)
             {
@@ -308,7 +309,7 @@ namespace BattleChess.Rules
                 return;
             }
 
-            unit.Route = Marching.RouteFor(path);
+            unit.Route = plan.ToRoute();
             unit.ForgetProgress();
 
             log.Decision("Move",
@@ -699,7 +700,8 @@ namespace BattleChess.Rules
             // was the work repeated, every repetition announced itself.
             if (Vec2.Distance(unit.Position, aim) <= StandingCloseEnough) return true;
 
-            PathResult path = Marching.PlanTo(battle, unit, _pathfinder, aim);
+            Plan plan = Marching.PlanTo(battle, unit, _pathfinder, aim, log);
+            PathResult path = plan.Path;
 
             if (!path.Found || path.Waypoints.Count < 2)
             {
@@ -710,7 +712,7 @@ namespace BattleChess.Rules
                 return false;
             }
 
-            unit.Route = Marching.RouteFor(path, unit.Order.WheelFirst);
+            unit.Route = plan.ToRoute(unit.Order.WheelFirst);
 
             log.Decision("Order",
                 $"{unit.Def.DisplayName} is {verb} {quarry.Def.DisplayName}.",

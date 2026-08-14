@@ -41,6 +41,50 @@ namespace BattleChess.Rules
     /// where it always was.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// A route, and everything the planner decided about how to walk it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The interesting parts of a plan — which legs are crabbed, whether it gave
+    /// up on keeping clear — are not properties of a line across ground, so they
+    /// cannot live in <see cref="PathResult"/>, which is a Contracts type and
+    /// describes exactly that. They travel here instead.
+    /// </para>
+    /// <para>
+    /// They were static properties on the planner for two passes, read on the
+    /// next line by whoever had just called it. That is a seam, it was flagged
+    /// as one when it was written, and it duly failed: tests run in parallel,
+    /// each plan overwrote the last, and a route came back described by
+    /// somebody else's decisions. It cost a real test failure that looked like a
+    /// pathfinding bug. Shared mutable state does not survive being convenient.
+    /// </para>
+    /// </remarks>
+    public readonly struct Plan
+    {
+        public Plan(PathResult path, Facing?[]? hold, bool pressedThrough)
+        {
+            Path = path;
+            Hold = hold;
+            PressedThrough = pressedThrough;
+        }
+
+        /// <summary>The line itself.</summary>
+        public readonly PathResult Path;
+
+        /// <summary>The front to hold on each leg, where a leg asks for one.</summary>
+        public readonly Facing?[]? Hold;
+
+        /// <summary>Whether this plan gave up on keeping clear of its own side.</summary>
+        public readonly bool PressedThrough;
+
+        public bool Found => Path.Found;
+
+        /// <summary>Turns the plan into the route a regiment actually walks.</summary>
+        public MovementRoute ToRoute(bool wheelFirst = false) =>
+            new MovementRoute(Path.Waypoints, wheelFirst, Hold) { PressingThrough = PressedThrough };
+    }
+
     public static class Marching
     {
         /// <summary>
@@ -65,15 +109,14 @@ namespace BattleChess.Rules
         /// route of two waypoints having explored no cells, which is also how it
         /// shows up in a recording and makes the saving legible there.
         /// </remarks>
-        public static PathResult PlanTo(
-            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination)
+        public static Plan PlanTo(
+            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+            IBattleLog? log = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
-            LastHold = null;
-            LastPressedThrough = false;
 
             // Rung 1: straight there.
             if (IsClearLine(battle, unit, unit.Position, destination, unit.Facing))
@@ -86,14 +129,32 @@ namespace BattleChess.Rules
             if (unit.Order.Kind != OrderKind.Attack)
             {
                 IReadOnlyList<Vec2>? arch = ArchAround(battle, unit, destination);
-                if (arch != null) return Straight(arch);
+
+                if (arch != null)
+                {
+                    // Said once, when the decision is made, rather than every
+                    // tick while it is carried out. Which rung answered is the
+                    // whole of what a reader wants: a regiment arching across
+                    // the screen looks like a fault unless the log says it chose
+                    // to, and one walking through its own looks like a worse one.
+                    Say(log, unit, InTheWay(battle, unit, destination),
+                        "is going round its own {0} rather than through it.");
+
+                    return Straight(arch);
+                }
 
                 // M14: full width has failed, so try it side-on. Same line, same
                 // ground, a body twenty metres across instead of forty.
                 IReadOnlyList<Vec2>? threaded =
                     CrabThrough(battle, unit, destination, out Facing?[]? hold);
 
-                if (threaded != null) return Straight(threaded, hold);
+                if (threaded != null)
+                {
+                    Say(log, unit, InTheWay(battle, unit, destination),
+                        "is turning side-on to thread a gap beside its own {0} — its front will not fit.");
+
+                    return Straight(threaded, hold);
+                }
 
                 // Rung 3: through its own. Nothing fits, nothing goes round and
                 // nothing threads, so the last thing left is to shoulder past
@@ -111,14 +172,21 @@ namespace BattleChess.Rules
                                   (destination - unit.Position).Length, unit.Facing) &&
                     NobodyStandingAt(battle, unit, destination))
                 {
-                    LastPressedThrough = true;
-                    return Straight(new[] { unit.Position, destination });
+                    // The one that must never be silent. Two regiments sharing
+                    // ground is what M1 spent the whole project forbidding, and
+                    // on screen it reads as a collision bug. If it is going to
+                    // happen it has to say so, and say that everything else was
+                    // tried first.
+                    Say(log, unit, InTheWay(battle, unit, destination),
+                        "is pushing through its own {0} — no way round it and no gap to thread.");
+
+                    return Straight(new[] { unit.Position, destination }, through: true);
                 }
             }
 
             // Rungs 3 and 4 are not built. Until they are, the search is what
             // answers — which is also what answered before any of this.
-            return pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
+            return new Plan(pathfinder.FindPath(unit.Position, destination, unit.Def.Movement), null, false);
         }
 
         /// <summary>
@@ -132,49 +200,43 @@ namespace BattleChess.Rules
         /// </remarks>
         private const float TangentMarginMetres = 8f;
 
-        private static PathResult Straight(IReadOnlyList<Vec2> waypoints, Facing?[]? hold = null)
+        /// <summary>Whatever is standing in the way of the straight line.</summary>
+        private static UnitInstance? InTheWay(BattleState battle, UnitInstance unit, Vec2 destination) =>
+            FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
+
+        /// <summary>
+        /// Reports which rung of the ladder answered, once, as it is decided.
+        /// </summary>
+        /// <remarks>
+        /// Said when the choice is made rather than every tick while it is
+        /// carried out — these are decisions, and a decision repeated sixty
+        /// times a minute is the noise the whole logging pass was about. Which
+        /// rung answered is exactly what a reader needs and cannot otherwise
+        /// get: a regiment arching across the screen looks like a fault unless
+        /// the recording says it chose to, and one walking through its own looks
+        /// like a collision bug rather than the last resort it is.
+        /// </remarks>
+        private static void Say(IBattleLog? log, UnitInstance unit, UnitInstance? blocker, string what)
+        {
+            if (log == null) return;
+
+            log.Decision("Move",
+                $"{unit.Def.DisplayName} " + string.Format(what, blocker?.Def.DisplayName ?? "own troops"),
+                unit.Id);
+        }
+
+
+        private static Plan Straight(IReadOnlyList<Vec2> waypoints, Facing?[]? hold = null, bool through = false)
         {
             float total = 0f;
 
             for (int i = 1; i < waypoints.Count; i++)
                 total += Vec2.Distance(waypoints[i - 1], waypoints[i]);
 
-            var route = PathResult.Success(waypoints, Array.Empty<Coord>(), total, total, cellsExplored: 0);
-
-            LastHold = hold;
-            return route;
+            return new Plan(
+                PathResult.Success(waypoints, Array.Empty<Coord>(), total, total, cellsExplored: 0),
+                hold, through);
         }
-
-        /// <summary>
-        /// The front the last plan asked to be held, if it asked for one.
-        /// </summary>
-        /// <remarks>
-        /// A seam, and an ugly one. <see cref="PathResult"/> lives in Contracts
-        /// and describes a line across ground; which way a regiment faces while
-        /// walking it is a rules question and has no business in that type. This
-        /// hands the answer to the caller that just asked, which is every caller
-        /// there is, and it is read on the next line every time.
-        /// </remarks>
-        public static Facing?[]? LastHold { get; private set; }
-
-        /// <summary>
-        /// Whether the last plan gave up on keeping clear of its own side.
-        /// </summary>
-        public static bool LastPressedThrough { get; private set; }
-
-        /// <summary>
-        /// Builds the route a plan just described, carrying everything the plan
-        /// decided about how to walk it.
-        /// </summary>
-        /// <remarks>
-        /// One place, because there are five callers and the interesting parts
-        /// of a plan — which legs are crabbed, whether it gave up on keeping
-        /// clear — travel beside the waypoints rather than inside them. A caller
-        /// that builds the route itself gets the line and silently drops the
-        /// rest.
-        /// </remarks>
-        public static MovementRoute RouteFor(PathResult path, bool wheelFirst = false) =>
-            new MovementRoute(path.Waypoints, wheelFirst, LastHold) { PressingThrough = LastPressedThrough };
 
         /// <summary>
         /// Whether the straight line works for a body turned side-on to it.

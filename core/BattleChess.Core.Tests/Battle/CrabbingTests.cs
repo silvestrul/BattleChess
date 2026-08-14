@@ -40,7 +40,8 @@ namespace BattleChess.Tests.Battle
         /// right to prefer it, so nothing would ever crab and the test would
         /// pass while proving nothing.
         /// </remarks>
-        private static Battlefield AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, float gap)
+        private static Battlefield AWallWithAGapInIt(
+            out UnitInstance mover, out Vec2 destination, float gap, IBattleLog? log = null)
         {
             var field = new Battlefield("plains", 32000);
 
@@ -63,7 +64,7 @@ namespace BattleChess.Tests.Battle
             mover = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East);
             destination = field.Centre + new Vec2(250f, 0f);
 
-            field.March(mover, destination);
+            field.March(mover, destination, log: log);
 
             return field;
         }
@@ -337,6 +338,83 @@ namespace BattleChess.Tests.Battle
             Assert.False(everOverlapped,
                 "It walked through one of its own to reach a gap it fits through. Sharing ground is the " +
                 "last thing to try, not the first.");
+        }
+
+        // ---- Saying which rung answered --------------------------------------
+
+        private sealed class Heard : IBattleLog
+        {
+            public readonly System.Collections.Generic.List<string> Lines = new System.Collections.Generic.List<string>();
+            public void Record(in BattleLogEntry entry) => Lines.Add(entry.Message);
+
+            public int Saying(string fragment)
+            {
+                int n = 0;
+                foreach (string line in Lines) if (line.Contains(fragment)) n++;
+                return n;
+            }
+        }
+
+        private Heard Listen(Battlefield field, int turns = 12, Heard? into = null)
+        {
+            Heard log = into ?? new Heard();
+
+            var clock = new BattleClock();
+            foreach (IBattleSystem system in field.Clock.Systems) clock.Add(system);
+
+            for (int tick = 0; tick < BattleClock.TicksPerTurn * turns; tick++) clock.Advance(field.State, log);
+
+            return log;
+        }
+
+        [Fact]
+        public void PushingThroughItsOwnIsNeverSilent()
+        {
+            var log = new Heard();
+            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 0f, log);
+
+            Listen(field, turns: 16, into: log);
+
+            // Two regiments sharing ground is what M1 spent the whole project
+            // forbidding, and on screen it reads as a collision bug. If it is
+            // going to happen it has to say so, and say that everything else
+            // was tried first.
+            Assert.True(log.Saying("is pushing through its own") > 0,
+                "A regiment walked through one of its own and the recording never mentioned it. That is " +
+                "indistinguishable from a collision fault by anyone reading the log afterwards.");
+        }
+
+        [Fact]
+        public void TurningSideOnToThreadAGapSaysSo()
+        {
+            var log = new Heard();
+            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 30f, log);
+
+            Listen(field, into: log);
+
+            Assert.True(log.Saying("is turning side-on to thread a gap") > 0,
+                "The most visible manoeuvre in the game is not in the recording at all.");
+        }
+
+        [Fact]
+        public void DecisionsAreSaidOnceAndNotEveryTick()
+        {
+            var log = new Heard();
+            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 30f, log);
+
+            Listen(field, into: log);
+
+            int said = log.Saying("is turning side-on to thread a gap")
+                     + log.Saying("is going round its own")
+                     + log.Saying("is pushing through its own");
+
+            // These are decisions, not states. A decision repeated sixty times
+            // a minute is exactly the noise the logging pass was about, and
+            // planning happens on a cadence, so a handful is right and a
+            // hundred means the line has been put somewhere that runs per tick.
+            Assert.True(said < 15,
+                $"The planner announced itself {said} times over twelve turns. These are decisions and " +
+                "should be said when they are taken.");
         }
     }
 }

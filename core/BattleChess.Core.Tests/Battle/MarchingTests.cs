@@ -37,7 +37,7 @@ namespace BattleChess.Tests.Battle
 
             UnitInstance unit = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East);
 
-            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, field.Centre + new Vec2(250f, 0f));
+            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, field.Centre + new Vec2(250f, 0f)).Path;
 
             _out.WriteLine($"{route.Waypoints.Count} waypoints, {route.CellsExplored} cells explored, " +
                            $"{route.Distance:0} m.");
@@ -62,7 +62,7 @@ namespace BattleChess.Tests.Battle
 
             Vec2 destination = field.Centre + new Vec2(250f, 0f);
 
-            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, destination);
+            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, destination).Path;
 
             foreach (Vec2 point in route.Waypoints) _out.WriteLine($"  ({point.X:0}, {point.Y:0})");
             _out.WriteLine($"{route.CellsExplored} cells explored, {route.Distance:0} m.");
@@ -96,7 +96,7 @@ namespace BattleChess.Tests.Battle
             // Nothing standing anywhere: if this comes back as a straight line
             // the arch is not being reached at all and the test above proves
             // less than it looks like it does.
-            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, field.Centre + new Vec2(250f, 0f));
+            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, field.Centre + new Vec2(250f, 0f)).Path;
 
             Assert.Equal(2, route.Waypoints.Count);
         }

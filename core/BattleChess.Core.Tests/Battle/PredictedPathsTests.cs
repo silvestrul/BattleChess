@@ -46,7 +46,7 @@ namespace BattleChess.Tests.Battle
             UnitInstance mover = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, 0f), Facing.East);
 
             PathResult route = Marching.PlanTo(
-                field.State, mover, field.Pathfinder, field.Centre + new Vec2(300f, 0f));
+                field.State, mover, field.Pathfinder, field.Centre + new Vec2(300f, 0f)).Path;
 
             foreach (Vec2 w in route.Waypoints) _out.WriteLine($"  ({w.X:0},{w.Y:0})");
 
@@ -66,7 +66,7 @@ namespace BattleChess.Tests.Battle
             UnitInstance mover = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, 0f), Facing.East);
 
             PathResult route = Marching.PlanTo(
-                field.State, mover, field.Pathfinder, field.Centre + new Vec2(300f, 0f));
+                field.State, mover, field.Pathfinder, field.Centre + new Vec2(300f, 0f)).Path;
 
             Assert.Equal(3, route.Waypoints.Count);
         }
@@ -85,7 +85,7 @@ namespace BattleChess.Tests.Battle
             UnitInstance mover = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, 0f), Facing.East);
 
             PathResult route = Marching.PlanTo(
-                field.State, mover, field.Pathfinder, field.Centre + new Vec2(300f, 0f));
+                field.State, mover, field.Pathfinder, field.Centre + new Vec2(300f, 0f)).Path;
 
             foreach (Vec2 w in route.Waypoints) _out.WriteLine($"  ({w.X:0},{w.Y:0})");
 
