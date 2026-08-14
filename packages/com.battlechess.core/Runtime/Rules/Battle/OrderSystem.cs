@@ -308,7 +308,7 @@ namespace BattleChess.Rules
                 return;
             }
 
-            unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false, Marching.LastHold);
+            unit.Route = Marching.RouteFor(path);
             unit.ForgetProgress();
 
             log.Decision("Move",
@@ -710,7 +710,7 @@ namespace BattleChess.Rules
                 return false;
             }
 
-            unit.Route = new MovementRoute(path.Waypoints, unit.Order.WheelFirst);
+            unit.Route = Marching.RouteFor(path, unit.Order.WheelFirst);
 
             log.Decision("Order",
                 $"{unit.Def.DisplayName} is {verb} {quarry.Def.DisplayName}.",

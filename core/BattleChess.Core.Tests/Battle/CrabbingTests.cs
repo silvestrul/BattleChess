@@ -207,30 +207,23 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void AGapNarrowerThanItIsDeepIsNotThreadedAtAll()
+        public void AGapNarrowerThanItIsDeepIsNotThreadedButPressedThrough()
         {
-            // Ten metres against twenty of depth. No amount of turning helps,
-            // and pretending otherwise would walk a regiment into its own men.
+            // Ten metres against twenty of depth. No amount of turning helps, so
+            // crabbing must not be attempted — and since the far side is open
+            // ground, M18 rung three carries it through instead. Standing there
+            // for ever is the one answer that is not allowed.
             Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 10f);
 
-            var log = new Complaints();
+            (float left, _, float squarest) = Run(field, mover, destination, turns: 16);
 
-            var clock = new BattleClock();
-            foreach (IBattleSystem system in field.Clock.Systems) clock.Add(system);
+            _out.WriteLine($"{left:0} m short, turned {squarest:0}° at the wall.");
 
-            for (int tick = 0; tick < BattleClock.TicksPerTurn * 12; tick++) clock.Advance(field.State, log);
+            Assert.True(squarest < 45f,
+                $"It turned {squarest:0}° to thread a gap narrower than it is deep. Crabbing cannot help " +
+                "here and pretending it can walks a regiment into its own men on purpose.");
 
-            foreach (UnitInstance wall in field.State.UnitsOnField())
-            {
-                if (ReferenceEquals(wall, mover)) continue;
-
-                // Also vacuous today: it does not force through because it
-                // cannot get there at all. It becomes a real guard the moment
-                // crabbing gives it a way of trying.
-                Assert.False(OrientedRect.Overlaps(mover.Shape, wall.Shape),
-                    "It forced itself through a gap narrower than it is deep and is now standing inside " +
-                    "one of its own regiments.");
-            }
+            Assert.True(left < 60f, $"It should have pressed through; it is {left:0} m short.");
         }
 
         // ---- Paying for it ---------------------------------------------------
@@ -278,6 +271,57 @@ namespace BattleChess.Tests.Battle
             }
 
             return 0;
+        }
+
+        // ---- Rung three: through its own ------------------------------------
+
+        [Fact]
+        public void AWallOfItsOwnWithNoGapIsPressedThroughRatherThanStoodBeforeForEver()
+        {
+            // No gap at all: nothing to walk through, nothing to crab through,
+            // and the wall is long enough that going round is not on offer
+            // either. M1 is a strong preference, not an invariant — overlapping
+            // your own men is bad, and standing still until the battle ends is
+            // worse.
+            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 0f);
+
+            (float left, _, _) = Run(field, mover, destination, turns: 16);
+
+            _out.WriteLine($"{left:0} m short.");
+
+            Assert.True(left < 60f,
+                $"It is {left:0} m short. Walled in by its own with no way round and no gap to thread, " +
+                "a regiment has to push through them rather than stand there for the rest of the game.");
+        }
+
+        [Fact]
+        public void ItDoesNotPushThroughItsOwnWhenThereIsAWayRound()
+        {
+            // Rung three is the last one tried, not a shortcut. With a gap wide
+            // enough to walk, nobody should ever be shouldered aside.
+            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 60f);
+
+            var log = new Complaints();
+
+            var clock = new BattleClock();
+            foreach (IBattleSystem system in field.Clock.Systems) clock.Add(system);
+
+            bool everOverlapped = false;
+
+            for (int tick = 0; tick < BattleClock.TicksPerTurn * 12; tick++)
+            {
+                clock.Advance(field.State, log);
+
+                foreach (UnitInstance other in field.State.UnitsOnField())
+                {
+                    if (ReferenceEquals(other, mover)) continue;
+                    if (OrientedRect.Overlaps(mover.Shape, other.Shape)) everOverlapped = true;
+                }
+            }
+
+            Assert.False(everOverlapped,
+                "It walked through one of its own to reach a gap it fits through. Sharing ground is the " +
+                "last thing to try, not the first.");
         }
     }
 }

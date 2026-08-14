@@ -34,6 +34,18 @@ namespace BattleChess.Rules
 
         private readonly Facing?[] _hold;
 
+        /// <summary>
+        /// Whether this route gives up on keeping clear of its own side.
+        /// </summary>
+        /// <remarks>
+        /// <b>M18</b> rung three, and the reason [M1](DECISIONS.md) is a strong
+        /// preference rather than an invariant. Set only when nothing else
+        /// worked — no line, no way round, no gap to thread — because a regiment
+        /// walled in by its own with an absolute rule against sharing ground
+        /// stands there until the battle ends.
+        /// </remarks>
+        public bool PressingThrough { get; set; }
+
         public MovementRoute(IReadOnlyList<Vec2> waypoints, bool wheelFirst)
             : this(waypoints, wheelFirst, null)
         {

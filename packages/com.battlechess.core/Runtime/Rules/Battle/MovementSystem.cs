@@ -751,7 +751,16 @@ namespace BattleChess.Rules
             // what threading a gap actually looks like.
             if (battle.FormationFits(unit, next, unit.Facing) ||
                 !battle.FormationFits(unit, unit.Position, unit.Facing))
-                unit.Position = MakeRoomForFriends(battle, unit, next, tick, log);
+            {
+                // A route that has given up on keeping clear walks through them.
+                // Everything above this still applies — the ground has to be
+                // crossable and the formation has to fit on it — so what is
+                // being set aside is M1 alone, and only because the planner has
+                // already tried every way of honouring it.
+                unit.Position = route.PressingThrough
+                    ? next
+                    : MakeRoomForFriends(battle, unit, next, tick, log);
+            }
 
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
             {

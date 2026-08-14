@@ -72,6 +72,9 @@ namespace BattleChess.Rules
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
+            LastHold = null;
+            LastPressedThrough = false;
+
             // Rung 1: straight there.
             if (IsClearLine(battle, unit, unit.Position, destination, unit.Facing))
                 return Straight(new[] { unit.Position, destination });
@@ -91,6 +94,26 @@ namespace BattleChess.Rules
                     CrabThrough(battle, unit, destination, out Facing?[]? hold);
 
                 if (threaded != null) return Straight(threaded, hold);
+
+                // Rung 3: through its own. Nothing fits, nothing goes round and
+                // nothing threads, so the last thing left is to shoulder past
+                // them.
+                //
+                // Two things still have to hold. The ground must be crossable,
+                // which is the difference between this and giving up. And the
+                // far end must be somewhere the regiment can actually stand:
+                // shouldering through men on the way is one thing, coming to
+                // rest inside them is another, and it is the placement search's
+                // job to find the nearest ground that is free. Without that
+                // second test a regiment ordered onto its own troops pressed
+                // into them and stopped there, having never said why.
+                if (GroundIsClear(battle, unit, unit.Position, destination - unit.Position,
+                                  (destination - unit.Position).Length, unit.Facing) &&
+                    NobodyStandingAt(battle, unit, destination))
+                {
+                    LastPressedThrough = true;
+                    return Straight(new[] { unit.Position, destination });
+                }
             }
 
             // Rungs 3 and 4 are not built. Until they are, the search is what
@@ -133,6 +156,25 @@ namespace BattleChess.Rules
         /// there is, and it is read on the next line every time.
         /// </remarks>
         public static Facing?[]? LastHold { get; private set; }
+
+        /// <summary>
+        /// Whether the last plan gave up on keeping clear of its own side.
+        /// </summary>
+        public static bool LastPressedThrough { get; private set; }
+
+        /// <summary>
+        /// Builds the route a plan just described, carrying everything the plan
+        /// decided about how to walk it.
+        /// </summary>
+        /// <remarks>
+        /// One place, because there are five callers and the interesting parts
+        /// of a plan — which legs are crabbed, whether it gave up on keeping
+        /// clear — travel beside the waypoints rather than inside them. A caller
+        /// that builds the route itself gets the line and silently drops the
+        /// rest.
+        /// </remarks>
+        public static MovementRoute RouteFor(PathResult path, bool wheelFirst = false) =>
+            new MovementRoute(path.Waypoints, wheelFirst, LastHold) { PressingThrough = LastPressedThrough };
 
         /// <summary>
         /// Whether the straight line works for a body turned side-on to it.
@@ -341,6 +383,24 @@ namespace BattleChess.Rules
             if (ReferenceEquals(other, unit)) return false;
 
             return other.Owner == unit.Owner;
+        }
+
+        /// <summary>
+        /// Whether a regiment could come to rest here without sharing ground
+        /// with one of its own.
+        /// </summary>
+        private static bool NobodyStandingAt(BattleState battle, UnitInstance unit, Vec2 at)
+        {
+            var body = new OrientedRect(at, unit.Facing, unit.Footprint);
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (!IsInTheWayOf(unit, other)) continue;
+
+                if (OrientedRect.Overlaps(body, other.Shape)) return false;
+            }
+
+            return true;
         }
 
         private static bool GroundIsClear(
