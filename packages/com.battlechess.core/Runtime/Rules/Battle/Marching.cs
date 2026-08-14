@@ -232,10 +232,29 @@ namespace BattleChess.Rules
 
             if (tight == null) return null;
 
-            float past = tight.Shape.ProjectedRadius(along) + TangentMarginMetres;
-
             float entry = MathF.Max(0f, upTo - TangentMarginMetres);
-            float exit = MathF.Min(length, upTo + 2f * past);
+
+            // Walked out to where the march can honestly be resumed, rather than
+            // guessed at from the blocker's depth. The guess was short: it
+            // allowed for the body it was going round and not for the body doing
+            // the going, which is twice as long side-on as it is deep. The
+            // regiment was told to face front again while still inside the wall,
+            // and every leg after that was a line nobody had checked.
+            //
+            // Asked of the thing that will actually be true — can the rest of
+            // the march be walked from here facing forwards — so it cannot be
+            // short by an arithmetic slip a second time.
+            float exit = length;
+
+            for (float probe = upTo; probe < length; probe += TangentMarginMetres)
+            {
+                Vec2 at = unit.Position + along * probe;
+
+                if (!IsClearLine(battle, unit, at, destination, straight)) continue;
+
+                exit = probe;
+                break;
+            }
 
             // The squeeze runs the whole way, so there is nothing to come back
             // onto and the simple form is the honest one.

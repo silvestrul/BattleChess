@@ -466,9 +466,20 @@ arch measured cheaper than the crab (about 500 against 566, crabbed legs charged
 two fifths of pace) and *still* should not have been chosen, because the arch was
 not walkable — both tangents put the body across the wall. So either `ArchAround`
 is returning a way round that its own leg checks should have rejected, or those
-checks disagree with the sampled `IsClearLine` they now share. **That is the thing
-to find first**, and it is a disagreement between two answers to the same question,
-which is this project's most common fault by a distance.
+checks disagree with the sampled `IsClearLine` they now share. **Half answered, and not where it was being looked for.** Asking the question as a
+*property* rather than investigating the scenario — *any route the planner returns
+must be walkable along every leg at the front that leg is walked on* — turned up a
+real fault in the crabbed route, present before prediction and nothing to do with
+it. The exit waypoint was placed by arithmetic that allowed for the body being gone
+round and not for the body doing the going, which is twice as long side-on as it is
+deep. The regiment was told to face front again while still inside the wall, so
+every leg after that was a line nobody had checked. Now measured — walked out to
+where the rest of the march is genuinely clear — and pinned by
+`PlannedRoutesAreWalkableTests` across eight arrangements.
+
+Whether that was also what made arching win cases crabbing should have had is
+**not established**: prediction is still reverted, and the two were only ever seen
+together. The property test is the thing to re-run first when it goes back in.
 
 Reverted whole rather than left half-landed. Crabbing and rung three, which were
 green before it, are untouched.
