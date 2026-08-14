@@ -322,6 +322,33 @@ namespace BattleChess.Rules
             TicksWithoutProgress = 0;
         }
 
+        // ---- What the march actually cost -------------------------------------
+
+        /// <summary>Ground covered under this order, in metres.</summary>
+        /// <remarks>
+        /// <b>W5.</b> Kept because the arrival line used to report the pace the
+        /// regiment <i>could</i> have made on the ground it finished on — asked
+        /// of the same code under suspicion. Every arrival in a recorded battle
+        /// read "4,8 m/s"; the achieved pace was 2.6 to 3.6. A line written to
+        /// diagnose slow marches reported the one number that could never show
+        /// one. These three count the outcome instead.
+        /// </remarks>
+        public float GroundCovered { get; set; }
+
+        /// <summary>Ticks spent under way on this order.</summary>
+        public int MarchingTicks { get; set; }
+
+        /// <summary>Of those, how many were spent sharing ground with its own ([M20]).</summary>
+        public int TicksInsideItsOwn { get; set; }
+
+        /// <summary>Forgets what the march cost, as when a fresh one begins.</summary>
+        public void ForgetTheReckoning()
+        {
+            GroundCovered = 0f;
+            MarchingTicks = 0;
+            TicksInsideItsOwn = 0;
+        }
+
         /// <summary>The friendly regiment this one is currently working its way round.</summary>
         /// <remarks>
         /// Kept so the choice of side is made once and then held. Deciding it
@@ -407,6 +434,7 @@ namespace BattleChess.Rules
             DressingBearing = null;
 
             ForgetProgress();
+            ForgetTheReckoning();
             FailedReplans = 0;
             GoingRound = UnitId.None;
             ForcedIntoThisFight = false;

@@ -116,11 +116,16 @@ namespace BattleChess.Rules
                     if (!Marching.IsClearLine(battle, unit, unit.Position, through, unit.Facing)) continue;
                     if (!Marching.IsClearLine(battle, unit, through, destination, unit.Facing)) continue;
 
-                    float cost = Vec2.Distance(unit.Position, through) + Vec2.Distance(through, destination);
+                    var candidate = new[] { unit.Position, through, destination };
+
+                    // M22: seconds, not metres. The two sides of a body are the
+                    // same distance round and a very different wheel when the
+                    // regiment is already pointing one of the two ways.
+                    float cost = Marching.SecondsToWalk(battle, unit, candidate);
                     if (cost >= shortest) continue;
 
                     shortest = cost;
-                    best = new[] { unit.Position, through, destination };
+                    best = candidate;
                 }
 
                 return best;
@@ -170,12 +175,14 @@ namespace BattleChess.Rules
                         if (!Marching.IsClearLine(battle, unit, unit.Position, through, unit.Facing)) continue;
                         if (!Marching.IsClearLine(battle, unit, through, destination, unit.Facing)) continue;
 
-                        float cost = Vec2.Distance(unit.Position, through) + Vec2.Distance(through, destination);
+                        var candidate = new[] { unit.Position, through, destination };
+
+                        float cost = Marching.SecondsToWalk(battle, unit, candidate);
 
                         if (cost < shortest)
                         {
                             shortest = cost;
-                            best = new[] { unit.Position, through, destination };
+                            best = candidate;
                         }
 
                         // Standing off further only ever costs more, so the first
@@ -230,8 +237,10 @@ namespace BattleChess.Rules
                     if (!Bend(battle, unit, unit.Position, through, legs)) continue;
                     if (!Bend(battle, unit, through, destination, legs)) continue;
 
-                    float cost = 0f;
-                    for (int i = 1; i < legs.Count; i++) cost += Vec2.Distance(legs[i - 1], legs[i]);
+                    // M22: the whole point of this strategy is that it buys
+                    // extra bends, so it is the one most in need of being priced
+                    // in the thing a bend actually costs.
+                    float cost = Marching.SecondsToWalk(battle, unit, legs);
 
                     if (cost >= shortest) continue;
 

@@ -15,10 +15,17 @@ namespace BattleChess.Rules
     /// ignored an order.
     /// </para>
     /// <para>
-    /// This is what gives <c>turnRate</c> its meaning. Spearmen at 20°/s spend
-    /// nine seconds wheeling about, crawling the whole time; scouts at 60°/s do
-    /// it in three. That difference is precisely why cavalry goes looking for a
-    /// pike block's flank rather than its front.
+    /// This is what gives <c>turnRate</c> its meaning. Spearmen at 3°/s spend a
+    /// full minute wheeling about, crawling the whole time; scouts at 6°/s do it
+    /// in thirty seconds. That difference is precisely why cavalry goes looking
+    /// for a pike block's flank rather than its front.
+    /// </para>
+    /// <para>
+    /// Those numbers used to read 20°/s and 60°/s here, which is an order of
+    /// magnitude away from the content and made the wheel look like small change
+    /// to anyone reading the rule rather than the recordings. It is not: a
+    /// measured battle spent 1,432 of 2,644 ticks coming round. The rates
+    /// themselves are still open — see T2 in docs/DECISIONS.md.
     /// </para>
     /// </remarks>
     public sealed class MovementSystem : IBattleSystem
@@ -50,6 +57,48 @@ namespace BattleChess.Rules
 
         /// <summary>Distance within which a waypoint counts as reached, in metres.</summary>
         private const float ArrivalTolerance = 0.5f;
+
+        /// <summary>
+        /// Pace kept while sharing ground with one of your own.
+        /// </summary>
+        /// <remarks>
+        /// <b>M20.</b> Flat rather than per body, by the designer's call —
+        /// noticeable, never a trap. A regiment that has been forced onto
+        /// <see cref="MovementRoute.PressingThrough"/> still gets where it was
+        /// sent in a reasonable time; it just no longer does it faster than
+        /// going round would have.
+        /// </remarks>
+        private const float PaceWhileInsideItsOwn = 0.6f;
+
+        /// <summary>
+        /// Whether this regiment is currently sharing ground with one of its own.
+        /// </summary>
+        /// <remarks>
+        /// The same grazing tolerance as everywhere else, so that where a
+        /// regiment may stand, what it may walk through, and what it is charged
+        /// for are one decision rather than three that can drift apart. Routers
+        /// are exempt: men running are not a formation and nothing about
+        /// keeping order applies to them.
+        /// </remarks>
+        private static bool InsideItsOwn(BattleState battle, UnitInstance unit)
+        {
+            if (unit.State == UnitState.Routing) return false;
+
+            OrientedRect here = unit.Shape;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id) continue;
+                if (other.Owner != unit.Owner) continue;
+                if (!other.IsFighting) continue;
+                if (other.State == UnitState.Routing) continue;
+
+                if (OrientedRect.OverlapFraction(here, other.Shape) > OrderSystem.GrazingTolerance)
+                    return true;
+            }
+
+            return false;
+        }
 
         /// <summary>
         /// How much faster men run when they have stopped caring about order.
@@ -89,6 +138,14 @@ namespace BattleChess.Rules
                 // after the fact.
                 if (unit.Route == null || unit.Route.IsComplete)
                 {
+                    // A regiment that is not marching is not getting round
+                    // anything. Without this the commitment outlives the march
+                    // that made it: the last thing a route does is complete, so
+                    // nothing below ever runs again to release it, and the next
+                    // order inherits a detour decided about a regiment that is
+                    // now somewhere else entirely.
+                    unit.GoingRound = UnitId.None;
+
                     WheelOnTheSpot(unit);
                     continue;
                 }
@@ -305,13 +362,11 @@ namespace BattleChess.Rules
             // into a massacre.
             if (unit.State == UnitState.Routing) return next;
 
+            ForgetTheDetourOnceItIsBehind(battle, unit, next);
+
             UnitInstance? blocker = FriendInTheWay(battle, unit, next);
 
-            if (blocker == null)
-            {
-                unit.GoingRound = UnitId.None;
-                return next;
-            }
+            if (blocker == null) return next;
 
             // Whoever has to give way. A regiment already standing where it
             // means to stand is not shoved off it to make room for one still
@@ -387,11 +442,21 @@ namespace BattleChess.Rules
             // metres apart for the next seven. The line of march does not swing.
             Vec2 pastTheirFlank;
 
-            // Which way round is settled once and then kept until this blocker
-            // is behind us. Deciding it afresh every tick is what produced the
-            // seizure: a regiment sitting on the blocker's centreline gets a
-            // different answer each time it asks, and thrashes between the two.
-            if (unit.GoingRound == blocker.Id)
+            // M21. Which way round is settled once and then kept until the body
+            // it was settled about is behind us — not until the first tick
+            // nobody happens to be touching us, which is what the release used
+            // to be and what produced the seizure. A sidestep succeeds, the
+            // commitment is dropped, the same regiment is in the way again the
+            // very next tick, and the side is derived afresh from a slightly
+            // different position; a regiment near the blocker's centreline gets
+            // a different answer each time it asks and thrashes between the two.
+            //
+            // The commitment is to a *direction*, not to a body. While it holds,
+            // whichever friend is in the way now does not get to re-open the
+            // question — threading a crowd means meeting a new one every few
+            // metres, and letting each of them re-decide the side is the same
+            // fault with more steps.
+            if (unit.GoingRound != UnitId.None)
             {
                 pastTheirFlank = unit.GoingRoundBearing.ToVector();
             }
@@ -457,6 +522,40 @@ namespace BattleChess.Rules
                 unit.Id);
 
             return next;
+        }
+
+        /// <summary>
+        /// Drops a detour once the regiment it was decided about is behind.
+        /// </summary>
+        /// <remarks>
+        /// <b>M21</b>, and both halves of the condition earn their place. Abreast
+        /// is not past — releasing there puts the regiment back to re-deciding
+        /// at the exact moment it is level with the body and least able to tell
+        /// the two sides apart. And past-but-still-crowding is the manoeuvre
+        /// still happening, not the manoeuvre finished. A commitment that is
+        /// never released would be the opposite failure and just as bad: a
+        /// regiment sidling for ever.
+        /// </remarks>
+        private static void ForgetTheDetourOnceItIsBehind(
+            BattleState battle, UnitInstance unit, Vec2 next)
+        {
+            if (unit.GoingRound == UnitId.None) return;
+
+            UnitInstance went = battle.Get(unit.GoingRound);
+
+            if (!went.IsFighting || went.State == UnitState.Routing)
+            {
+                unit.GoingRound = UnitId.None;
+                return;
+            }
+
+            Vec2 heading = next - unit.Position;
+            if (heading.IsNearZero) return;
+
+            if (Vec2.Dot(went.Position - unit.Position, heading.Normalised()) >= 0f) return;
+            if (OrientedRect.GapBetween(unit.Shape, went.Shape) < BerthWhilePassingMetres) return;
+
+            unit.GoingRound = UnitId.None;
         }
 
         /// <summary>
@@ -616,6 +715,12 @@ namespace BattleChess.Rules
                 return;
             }
 
+            // Counted here rather than beside the step, so that the ticks a
+            // regiment spends wheeling instead of marching are in the total.
+            // Those are exactly the ticks the reckoning exists to expose.
+            Vec2 stoodAt = unit.Position;
+            unit.MarchingTicks++;
+
             Vec2 toTarget = route.Target - unit.Position;
             Facing desired = Facing.FromVector(toTarget);
 
@@ -630,6 +735,8 @@ namespace BattleChess.Rules
 
                 float panicSpeed = battle.SpeedOf(unit) * FlightSpeedBonus;
                 unit.Position = Vec2.MoveTowards(unit.Position, route.Target, panicSpeed * BattleClock.SecondsPerTick);
+
+                unit.GroundCovered += Vec2.Distance(stoodAt, unit.Position);
 
                 if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
                     route.Advance();
@@ -738,6 +845,21 @@ namespace BattleChess.Rules
             float offTheLineOfMarch = Facing.AbsoluteDelta(unit.Facing, marchBearing) * 180f / MathF.PI;
 
             float speed = terrainSpeed * AlignmentPenalty(offTheLineOfMarch);
+
+            // M20. Being inside a body of men is slow, and until now it was
+            // free: a recorded game had cavalry walk clean through an Archers
+            // regiment three times at full pace, which made M18's last resort
+            // cheaper than the rungs above it.
+            //
+            // Charged on the overlap itself rather than on the plan's intent, so
+            // rung three, a crab that clips a neighbour and an accidental scrum
+            // are all priced by one rule and cannot come to disagree.
+            if (InsideItsOwn(battle, unit))
+            {
+                speed *= PaceWhileInsideItsOwn;
+                unit.TicksInsideItsOwn++;
+            }
+
             float step = speed * BattleClock.SecondsPerTick;
 
             // Bad ground pulls a formation apart as it is crossed. Charged per
@@ -786,6 +908,8 @@ namespace BattleChess.Rules
                     : MakeRoomForFriends(battle, unit, next, tick, log);
             }
 
+            unit.GroundCovered += Vec2.Distance(stoodAt, unit.Position);
+
             if (Vec2.Distance(unit.Position, route.Target) <= ArrivalTolerance)
             {
                 route.Advance();
@@ -800,12 +924,23 @@ namespace BattleChess.Rules
         /// march.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Squared cosine falloff: full pace when aligned, about three quarters
         /// at 45°, two fifths at a right angle, and a shuffle when reversed. The
         /// square is what makes small corrections nearly free while a genuine
         /// change of front is expensive.
+        /// </para>
+        /// <para>
+        /// Public because the planner has to cost a route by the same rule the
+        /// walker will apply to it ([M22](../../../../docs/DECISIONS.md)). A
+        /// second copy of this curve living in <see cref="Marching"/> is two
+        /// answers to one question, and this project has been bitten by that
+        /// shape four times: the plan would be priced by a rule the march does
+        /// not obey, and the disagreement would show up as routes that look
+        /// wrong for no findable reason.
+        /// </para>
         /// </remarks>
-        private static float AlignmentPenalty(float offByDegrees)
+        public static float AlignmentPenalty(float offByDegrees)
         {
             float halfCosine = (1f + MathF.Cos(offByDegrees * MathF.PI / 180f)) * 0.5f;
             float alignment = halfCosine * halfCosine;
@@ -919,9 +1054,21 @@ namespace BattleChess.Rules
                 ? $" — finished {offOrdered:0}° off the front it was given, on ground it may still be threading"
                 : string.Empty;
 
+            // W5: what it made, not what it could have made. The old line asked
+            // `SpeedOf` — the pace this ground allows — so a recorded battle
+            // reported "4,8 m/s" on 22 of 27 arrivals while the regiments were
+            // actually managing 2.6 to 3.6. The number written to diagnose a
+            // slow march was the one number a slow march could never change.
+            float seconds = MathF.Max(BattleClock.SecondsPerTick, unit.MarchingTicks * BattleClock.SecondsPerTick);
+
+            string shouldered = unit.TicksInsideItsOwn > 0
+                ? $", {unit.TicksInsideItsOwn * BattleClock.SecondsPerTick:0} s of it shouldering through its own"
+                : string.Empty;
+
             log.Info("Move",
                 $"{unit.Def.DisplayName} reached its destination on {ground.DisplayName} " +
-                $"at {battle.SpeedOf(unit):0.0} m/s{front}.",
+                $"in {seconds:0} s, averaging {unit.GroundCovered / seconds:0.0} m/s " +
+                $"against {battle.SpeedOf(unit):0.0} this ground allows{shouldered}{front}.",
                 unit.Id);
 
             unit.Route = null;

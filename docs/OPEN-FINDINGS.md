@@ -547,9 +547,74 @@ them as a test that still runs.
 170°, 150°, 147°, 146° and 129° in one short game, each 24 to 42 ticks at 4°/s.
 The designer has now seen it. T2 was parked pending exactly this judgement.
 
+Now measured properly across a whole recording rather than sampled:
+**1,432 of 2,644 ticks spent coming round — 54%** — over 36 marches averaging
+**125°** at **40 ticks** each. Achieved pace 58–76% of nominal. The designer's
+call on 14 Aug was to leave the rates alone and fix the planner first, so that
+the change can be judged against a number rather than a feeling. T2 stays open
+with its three candidates intact.
+
 **d. The route line reads as nonsense for a cast — open, cosmetic.** `0 cells
 reduced to 2 waypoints, 0 explored` is what a route that never touched the search
 now prints. It should say it walked straight there.
+
+---
+
+## 11. Nothing knew what anything cost — FIXED
+
+From `logs/battle-20260814-122229.log` and a play report, 14 Aug 2026. Three
+complaints, one cause: no rule anywhere could price a march.
+
+**a. Shouldering through its own was free — FIXED ([M20](DECISIONS.md)).**
+`trustTheRoute` skipped the steering entirely and the step was taken at full
+length; nothing charged for being inside a body of men. Cavalry walked clean
+through an Archers regiment three times in that recording at 100% pace, which
+made rung three cheaper than the rungs above it and inverted the whole ladder.
+Now 60% of pace while overlapping anyone, charged on the overlap rather than on
+the plan's intent. **Verified by disabling:** the same journey measures 290 ticks
+free and 326 charged.
+
+**b. The squeeze had seizures — FIXED ([M21](DECISIONS.md)).** The detour
+commitment was released the first tick nobody was touching the regiment, so a
+successful sidestep dropped it, the same friend was in the way again next tick,
+and the side was re-derived from a slightly different position. **Verified by
+restoring the old release:** the committed side reversed **240 times** through
+full 180° swings, and a charge finished **320 m short** of the enemy it was sent
+at. With the fix: 0 reversals, arrives 4 m off.
+
+Reaching this at all took two wrong arrangements, which is the more useful
+finding. A wall of stationary friends never gets near the steering — the planner
+casts, sees them, and routes round first. Crossing traffic never gets near it
+either, because regiments passing at an angle are wholly handled by the sliding
+branch. What reaches it is an **attack**, which skips rung two by design. Both
+wrong arrangements reported "0 detours" and would have passed on a flat zero,
+which is also what a working commitment gives.
+
+**c. The arrival line reported a number that could never change — FIXED
+([W5](DECISIONS.md)).** Every arrival read the pace the ground allowed, asked of
+the same code under suspicion; 22 of 27 said "4,8 m/s" while the regiments were
+managing 2.6 to 3.6. It now reports seconds taken, the pace actually averaged,
+and how much of it was spent shouldering through its own.
+
+**d. "The arcs look too wide" — measurable now, not yet answered.** The
+suspicion could not be confirmed or denied because nothing recorded what a detour
+was worth. Rung two now costs its candidates in seconds ([M22](DECISIONS.md)),
+compares arching against crabbing as [M18](DECISIONS.md) always said it should
+([M22a](DECISIONS.md)), and says what it chose and what the straight line would
+have cost: *"is going round its own Spearmen rather than through it — 332 s
+against 314 s straight."* On the synthetic arrangements the detours run about 6%
+over the straight line, which is not wide. **The next play-test is what settles
+it**, and the log will now carry the number.
+
+**e. The comparison arrangements are still synthetic — open.** Costing in
+seconds did not change which way round wins: both repairs still find one in four
+crowds of six and `round, and round again` is still shorter. That is expected —
+these are arrangements invented to reproduce a fault, not battles. The live log
+had press-throughs at 26% → 41% and every arch single-bend, meaning the
+distinguishing feature of the chosen strategy never fires in real play. **The
+default should not be changed again until `WaysRoundComparisonTests` is rebuilt
+from real battles**, or it will be picked wrong a second time with equal
+confidence.
 
 ---
 

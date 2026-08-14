@@ -130,30 +130,59 @@ namespace BattleChess.Rules
             {
                 IReadOnlyList<Vec2>? arch = (wayRound ?? WaysRound.Default).Round(battle, unit, destination);
 
-                if (arch != null)
+                // M14: full width first, side-on second. Same line, same ground,
+                // a body twenty metres across instead of forty.
+                IReadOnlyList<Vec2>? threaded =
+                    CrabThrough(battle, unit, destination, out Facing?[]? hold);
+
+                // M22a. Both of these are rung two, and M18 has always said the
+                // cheaper of them wins — but the code took the arch whenever it
+                // found one and only crabbed if arching had failed, which is not
+                // a comparison at all. It is one now that a route can be priced
+                // in the thing that actually costs: time.
+                //
+                // The crab is worked out even when the arch succeeds, which is
+                // strictly more work per plan. Affordable because M11 already
+                // caps planning to a cadence rather than a tick rate, and
+                // because rung two is only reached once the straight line has
+                // failed — the common march never gets here at all.
+                if (arch != null || threaded != null)
                 {
+                    float straight = SecondsToWalk(battle, unit, new[] { unit.Position, destination });
+
+                    float arching = arch != null
+                        ? SecondsToWalk(battle, unit, arch)
+                        : float.MaxValue;
+
+                    float crabbing = threaded != null
+                        ? SecondsToWalk(battle, unit, threaded, hold)
+                        : float.MaxValue;
+
+                    UnitInstance? blocking = InTheWay(battle, unit, destination);
+
                     // Said once, when the decision is made, rather than every
                     // tick while it is carried out. Which rung answered is the
                     // whole of what a reader wants: a regiment arching across
                     // the screen looks like a fault unless the log says it chose
                     // to, and one walking through its own looks like a worse one.
-                    Say(log, unit, InTheWay(battle, unit, destination),
-                        "is going round its own {0} rather than through it.");
+                    //
+                    // And what it cost, because "the arcs look too wide" is a
+                    // judgement, a judgement needs a number, and no rule
+                    // anywhere used to record one.
+                    if (arching <= crabbing)
+                    {
+                        Say(log, unit, blocking,
+                            "is going round its own {0} rather than through it",
+                            arching, straight);
 
-                    return Straight(arch);
-                }
+                        return Straight(arch!);
+                    }
 
-                // M14: full width has failed, so try it side-on. Same line, same
-                // ground, a body twenty metres across instead of forty.
-                IReadOnlyList<Vec2>? threaded =
-                    CrabThrough(battle, unit, destination, out Facing?[]? hold);
+                    Say(log, unit, blocking,
+                        "is turning side-on to thread a gap beside its own {0} — its front will not fit",
+                        crabbing, straight);
 
-                if (threaded != null)
-                {
-                    Say(log, unit, InTheWay(battle, unit, destination),
-                        "is turning side-on to thread a gap beside its own {0} — its front will not fit.");
-
-                    return Straight(threaded, hold);
+                    return Straight(threaded!, hold);
                 }
 
                 // Rung 3: through its own. Nothing fits, nothing goes round and
@@ -178,7 +207,8 @@ namespace BattleChess.Rules
                     // happen it has to say so, and say that everything else was
                     // tried first.
                     Say(log, unit, InTheWay(battle, unit, destination),
-                        "is pushing through its own {0} — no way round it and no gap to thread.");
+                        "is pushing through its own {0} — no way round it and no gap to thread.",
+                        null, null);
 
                     return Straight(new[] { unit.Position, destination }, through: true);
                 }
@@ -188,6 +218,97 @@ namespace BattleChess.Rules
             // answers — which is also what answered before any of this.
             return new Plan(pathfinder.FindPath(unit.Position, destination, unit.Def.Movement), null, false);
         }
+
+        /// <summary>
+        /// How long a regiment would take to walk a given line, in seconds.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M22.</b> A route's cost is not its length. Every bend is a wheel,
+        /// every wheel is time spent at a fraction of pace, and a planner
+        /// choosing on distance will buy a twenty-six metre saving with a right
+        /// angle worth forty seconds. Recorded on 14 August: one cavalry
+        /// regiment spent <b>1,432 of 2,644 ticks</b> coming round — 54% of the
+        /// battle — and no rule with an opinion about where to walk could see any
+        /// of it.
+        /// </para>
+        /// <para>
+        /// The wheel is charged as pace lost rather than as time standing still,
+        /// because that is what actually happens: a regiment sets off at once
+        /// and comes round as it goes. So a leg costs the seconds spent turning,
+        /// at whatever the average penalty over the turn is worth, and then the
+        /// rest of the leg at the settled pace — which is full for a march and
+        /// about two fifths for a crab.
+        /// </para>
+        /// <para>
+        /// It asks <see cref="MovementSystem.AlignmentPenalty"/> rather than
+        /// keeping its own copy of the curve. The plan must be priced by the
+        /// rule the march will obey, or the two quietly disagree and the routes
+        /// look wrong for no findable reason.
+        /// </para>
+        /// <para>
+        /// A model of a wheel, not a simulation of one. It is used to choose
+        /// between routes, not to promise a time, and it is held to a quarter
+        /// either way against real marches by a property test.
+        /// </para>
+        /// </remarks>
+        /// <param name="hold">
+        /// The front to hold on each leg, where a leg asks for one — so a crab
+        /// is costed as the crab it is rather than as a march of the same
+        /// length.
+        /// </param>
+        public static float SecondsToWalk(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints,
+            IReadOnlyList<Facing?>? hold = null)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+            if (waypoints == null) throw new ArgumentNullException(nameof(waypoints));
+
+            float pace = MathF.Max(0.1f, battle.SpeedOf(unit));
+            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
+
+            Facing facing = unit.Facing;
+            float seconds = 0f;
+
+            for (int i = 1; i < waypoints.Count; i++)
+            {
+                Vec2 leg = waypoints[i] - waypoints[i - 1];
+                float length = leg.Length;
+
+                if (length <= 0f) continue;
+
+                Facing bearing = Facing.FromVector(leg);
+
+                // The front this leg will actually be walked on: whatever it
+                // asks for if it is a crab, and the line of march otherwise.
+                Facing front = hold != null && i < hold.Count && hold[i].HasValue
+                    ? hold[i]!.Value
+                    : bearing;
+
+                float toTurn = Degrees(facing, front);
+                float settled = Degrees(front, bearing);
+                float atTheStart = Degrees(facing, bearing);
+
+                float whileComingRound =
+                    pace * MovementSystem.AlignmentPenalty((atTheStart + settled) * 0.5f);
+
+                float onceRound = pace * MovementSystem.AlignmentPenalty(settled);
+
+                // The wheel may outlast the leg, in which case none of it is
+                // walked at the settled pace and the second term falls away.
+                float covered = MathF.Min(length, toTurn / turnRate * whileComingRound);
+
+                seconds += covered / whileComingRound + (length - covered) / onceRound;
+
+                facing = front;
+            }
+
+            return seconds;
+        }
+
+        private static float Degrees(Facing from, Facing to) =>
+            Facing.AbsoluteDelta(from, to) * 180f / MathF.PI;
 
         /// <summary>
         /// Room left beside whatever is being gone round, in metres.
@@ -216,12 +337,24 @@ namespace BattleChess.Rules
         /// the recording says it chose to, and one walking through its own looks
         /// like a collision bug rather than the last resort it is.
         /// </remarks>
-        private static void Say(IBattleLog? log, UnitInstance unit, UnitInstance? blocker, string what)
+        /// <param name="seconds">
+        /// What the chosen line costs, and what the straight one would have cost
+        /// if it had been available. Both null for a decision with nothing to
+        /// compare against — pressing through <i>is</i> the straight line, so
+        /// "62 s against 62 s straight" says nothing twice.
+        /// </param>
+        private static void Say(
+            IBattleLog? log, UnitInstance unit, UnitInstance? blocker, string what,
+            float? seconds, float? straight)
         {
             if (log == null) return;
 
+            string cost = seconds.HasValue && straight.HasValue
+                ? $" — {seconds.Value:0} s against {straight.Value:0} s straight."
+                : string.Empty;
+
             log.Decision("Move",
-                $"{unit.Def.DisplayName} " + string.Format(what, blocker?.Def.DisplayName ?? "own troops"),
+                $"{unit.Def.DisplayName} " + string.Format(what, blocker?.Def.DisplayName ?? "own troops") + cost,
                 unit.Id);
         }
 
