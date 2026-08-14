@@ -149,6 +149,56 @@ namespace BattleChess.Tests.Battle
                 "order wants it is building a route of no length and arriving down it again.");
         }
 
+        private sealed class Complaints : IBattleLog
+        {
+            public int Stuck;
+            public void Record(in BattleLogEntry entry)
+            {
+                if (entry.Message.Contains("is not getting through") ||
+                    entry.Message.Contains("cannot get to where it was sent")) Stuck++;
+            }
+        }
+
+        [Fact]
+        public void GoingRoundOneOfItsOwnIsNotMistakenForBeingStuck()
+        {
+            var field = new Battlefield("plains", 31500);
+
+            UnitInstance standing = field.Add(0, "spearmen", field.Centre, Facing.East);
+            Battlefield.Hold(standing);
+
+            UnitInstance mover = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East);
+            Vec2 destination = field.Centre + new Vec2(250f, 0f);
+
+            field.March(mover, destination);
+
+            var log = new Complaints();
+
+            var clock = new BattleClock();
+            foreach (IBattleSystem system in field.Clock.Systems) clock.Add(system);
+
+            for (int tick = 0; tick < BattleClock.TicksPerTurn * 10; tick++)
+                clock.Advance(field.State, log);
+
+            float left = Vec2.Distance(mover.Position, destination);
+
+            _out.WriteLine($"{left:0} m short, complained {log.Stuck} times.");
+
+            // An end-to-end guard, and honest about being only that: it holds
+            // with the old distance-to-the-destination measure as well as the
+            // new along-the-route one, because arching puts the way round *in*
+            // the route and the march never has to leave it. The progress
+            // change is still right — steering pushes a body sideways at
+            // execution time and that reduces no distance to anything — but
+            // nothing exercises it today, and it will not be genuinely load
+            // bearing until crabbing makes detours slow enough to outlast the
+            // detector's patience. That is finding 8, and it is still open.
+            Assert.Equal(0, log.Stuck);
+
+            Assert.True(left < 60f,
+                $"It should have walked round them and got there; it is {left:0} m short.");
+        }
+
         [Fact]
         public void ItIsTheBodyThatHasToFitAndNotTheCentreLine()
         {

@@ -387,6 +387,21 @@ is. But it is set even when *both* ways round are blocked, so a boxed-in regimen
 would march forever and [M6](DECISIONS.md) ("an order always ends") would quietly
 stop being true.
 
+**Half addressed.** Progress is now measured along the route rather than as
+distance to the destination, and the destination-relaxing retry is gone — but that
+retry turned out to be *two* remedies wearing one symptom, and deleting both broke
+a regiment sent onto its own troops. The ground it was sent to may be occupied, in
+which case the destination has to move; or the destination is fine and something
+stands halfway along, in which case the route has to change. How far the placement
+search moves the aim is what says which, and it was measurably 0 m or measurably
+tens of metres and never in between.
+
+**The progress change is not yet exercised by anything.** With arching, the way
+round is *in* the route, so a march never leaves it and the old measure would not
+have stalled either — verified by reverting the line and watching the test pass
+unchanged. It becomes load-bearing when crabbing makes a detour slow enough to
+outlast the detector's patience, which is the original trigger and is still ahead.
+
 **What this means for the plan.** M13 and the [M10](DECISIONS.md) stall rework are
 *mutually* dependent, not sequential — the ordering in task #43 had it as sidestep
 first, then the stall fix, and that is wrong in both directions. They are one pass,
