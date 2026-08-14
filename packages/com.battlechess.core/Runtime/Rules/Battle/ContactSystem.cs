@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -368,6 +368,30 @@ namespace BattleChess.Rules
                 // Men running are not making room for anybody, and holding a
                 // rout off its own reserves would dam it against them.
                 if (unit.State == UnitState.Routing || other.State == UnitState.Routing) continue;
+
+                // A march that has deliberately given up on keeping clear is
+                // entitled to the overlap — that is the whole of M18's third
+                // rung — so neither body is shuffled while one passes through
+                // the other.
+                //
+                // Without this the shuffle fought the plan and robbed the
+                // player at the same time. Half the correction went to the
+                // regiment standing still, every tick, for the entire length of
+                // the passage: a three-hundred-metre march carried whatever it
+                // walked through along with it, across the field, having never
+                // been ordered anywhere. A regiment that was not told to move
+                // does not move.
+                //
+                // The other half went to the mover and was undone by its own
+                // next step, so it bought nothing even for the one case it
+                // could have helped.
+                //
+                // Deliberately narrow: only a press-through is exempt. An
+                // ordinary accidental overlap still comes apart half and half,
+                // because that is what keeps a queue of attackers off each
+                // other and it has no quarrel with anybody's orders.
+                if (unit.Route?.PressingThrough == true || other.Route?.PressingThrough == true)
+                    continue;
 
                 float step = ShufflingApartSpeed * BattleClock.SecondsPerTick;
 

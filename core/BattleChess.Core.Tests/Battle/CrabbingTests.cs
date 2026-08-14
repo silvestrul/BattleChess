@@ -468,5 +468,48 @@ namespace BattleChess.Tests.Battle
                 $"It is {left:0} m short. Steering may adjust a step; it must not veto one the planner " +
                 "has already checked and found walkable.");
         }
+
+        [Fact]
+        public void ARegimentPressedThroughIsNotCarriedAlongWithTheMarch()
+        {
+            // A regiment that was not told to move does not move. The shuffle
+            // that pulls two overlapping bodies apart gave half the correction
+            // to each of them, which was right while overlaps were brief
+            // accidents — and became a way of walking a holding regiment across
+            // the field once a march could press through its own on purpose,
+            // every tick, for hundreds of metres.
+            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 0f);
+
+            var stoodAt = new System.Collections.Generic.Dictionary<UnitId, Vec2>();
+
+            foreach (UnitInstance u in field.State.UnitsOnField())
+                if (!ReferenceEquals(u, mover)) stoodAt[u.Id] = u.Position;
+
+            Listen(field, turns: 16);
+
+            float worst = 0f;
+            string who = "";
+
+            foreach (UnitInstance u in field.State.UnitsOnField())
+            {
+                if (ReferenceEquals(u, mover)) continue;
+
+                float shifted = Vec2.Distance(u.Position, stoodAt[u.Id]);
+
+                if (shifted <= worst) continue;
+
+                worst = shifted;
+                who = u.Def.DisplayName;
+            }
+
+            _out.WriteLine($"worst drift {worst:0.0} m ({who}); mover finished " +
+                           $"{Vec2.Distance(mover.Position, destination):0} m short.");
+
+            // A metre or two of settling is the ordinary shoulder-to-shoulder
+            // shuffle and is not what this is about. Tens of metres is a
+            // regiment being carried off its ground.
+            Assert.True(worst < 10f,
+                $"{who} was moved {worst:0} m by a march passing through it. It had no orders.");
+        }
     }
 }
