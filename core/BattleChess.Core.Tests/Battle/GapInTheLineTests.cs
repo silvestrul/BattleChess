@@ -33,6 +33,13 @@ namespace BattleChess.Tests.Battle
             Battlefield.Hold(field.Add(0, "archers", new Vec2(213f, 213f), Facing.FromDegrees(0f)));
             Battlefield.Hold(field.Add(0, "swordsmen", new Vec2(263f, 213f), Facing.FromDegrees(0f)));
 
+            // The rest of the line, shoulder to shoulder at their own depth, so
+            // the only way past it is the one gap. Two bodies alone are not a
+            // line: M28's corner walk beat threading them by simply going round
+            // the pair, which is correct and measures nothing about corridors.
+            foreach (float x in new[] { 113f, 133f, 153f, 173f, 193f, 283f, 303f, 323f, 343f })
+                Battlefield.Hold(field.Add(0, "spearmen", new Vec2(x, 213f), Facing.FromDegrees(0f)));
+
             // Standing in the gap already, pointing back the way it came — the
             // 171° wheel the recording reports on this very order.
             cavalry = field.Add(0, "cavalry", new Vec2(247f, 169f), Facing.FromDegrees(-68f));
@@ -76,8 +83,7 @@ namespace BattleChess.Tests.Battle
             return field;
         }
 
-        [Fact(Skip = "Finding 19 — reproduced and diagnosed, not yet fixed. A one-waypoint detour " +
-                     "cannot express the route this needs, which is a two-bend walk round the body.")]
+        [Fact]
         public void AShortHopPastOneCornerGoesRoundTheCorner()
         {
             Battlefield field = TheShortHopPastACorner(out UnitInstance cavalry, out Vec2 destination);
@@ -102,6 +108,66 @@ namespace BattleChess.Tests.Battle
                 "An 84 m hop past one regiment, with open ground on the far side of it, and the answer " +
                 "was to walk through it. The route it needs comes in from due east along the body's " +
                 "face, which is two bends — and rung two only ever builds one waypoint.");
+        }
+
+
+        /// <summary>
+        /// Tick 678 of `logs/battle-20260814-230444.log` — the simplest
+        /// arrangement in the game, and the one that settled it.
+        /// </summary>
+        /// <remarks>
+        /// <code>
+        /// 678 > pushing through its own Spearmen — no way round it and no gap
+        ///       to thread. by (285,340) → (244,283). 1 of its own on that line.
+        /// </code>
+        /// <b>One</b> regiment, alone in open ground, sitting almost exactly
+        /// halfway along a 71 m march. Five of the ten move decisions in that
+        /// recording shouldered through it. Nothing about crowds, lines or gaps
+        /// applies — there is open field in every direction — and the aiming
+        /// construction still could not describe a way past.
+        /// </remarks>
+        [Fact]
+        public void OneRegimentAloneInOpenGroundIsWalkedRound()
+        {
+            var field = new Battlefield("plains", 230444);
+
+            UnitInstance standing =
+                field.Add(0, "spearmen", new Vec2(263f, 313f), Facing.FromDegrees(0f));
+
+            Battlefield.Hold(standing);
+
+            UnitInstance cavalry =
+                field.Add(0, "cavalry", new Vec2(285f, 340f), Facing.FromDegrees(54f));
+
+            var destination = new Vec2(244f, 283f);
+
+            Plan plan = Marching.PlanTo(
+                field.State, cavalry, field.Pathfinder, destination, field.Transcript);
+
+            foreach (string said in field.Transcript.Lines) _out.WriteLine(said);
+
+            Assert.False(
+                Marching.IsClearLine(field.State, cavalry, cavalry.Position, destination,
+                                     Marching.AlongTheLine(cavalry.Position, destination, cavalry.Facing)),
+                "The straight line is clear, so nothing needed avoiding and this measures nothing.");
+
+            // Every leg of what came back, walked by the body that will walk it.
+            // "Did not declare a press-through" is not the same as "keeps clear",
+            // and this is the case where the difference matters.
+            for (int i = 1; i < plan.Path.Waypoints.Count; i++)
+            {
+                Vec2 from = plan.Path.Waypoints[i - 1];
+                Vec2 to = plan.Path.Waypoints[i];
+
+                Assert.True(
+                    Marching.IsClearLine(field.State, cavalry, from, to,
+                                         Marching.AlongTheLine(from, to, cavalry.Facing), leaving: true),
+                    $"Leg ({from.X:0},{from.Y:0}) → ({to.X:0},{to.Y:0}) walks through somebody.");
+            }
+
+            Assert.False(plan.PressedThrough,
+                "One regiment standing alone in open ground, halfway along a 71 m march, and the answer " +
+                "was to walk through it.");
         }
 
         [Fact]

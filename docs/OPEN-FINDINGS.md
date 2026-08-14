@@ -963,7 +963,7 @@ against a planner that can find these routes at all.
 
 ---
 
-## 19. A one-waypoint detour cannot get round a body you are already touching
+## ~~19. A one-waypoint detour cannot get round a body you are already touching~~ — FIXED ([M28](DECISIONS.md))
 
 `logs/battle-20260814-225633.log` tick 2609, and the honest summary is that
 [M27](DECISIONS.md) fixed the gap case — the corridor at x=238 is used at ticks 1616,
@@ -996,16 +996,33 @@ regiment presents its 20 m depth to the Swordsmen instead of its 40 m front. Tha
 **two-bend** route, and every rung-two strategy builds exactly **one** waypoint. The
 construction cannot express the answer.
 
-**What this is really saying.** Aiming a single point perpendicular to the line of
-march has now been patched three times — [M19a](DECISIONS.md)'s margin, stepping out
-in [WaysRound](../packages/com.battlechess.core/Runtime/Rules/Battle/WaysRound.cs),
-and M27's corridors — and each fix uncovered the next arrangement it cannot describe.
-The general answer is to route around the blocker's **inflated rectangle**: expand the
-body by the mover's own reach, walk its corners, and the close destination, the corner
-graze and the gap all fall out of one construction. That is task **#43** ("trajectory
-first, sidestep, and a rectangle that pathfinds") and it is a redesign of rung two
-rather than a patch to it — so it is recorded here rather than attempted in the same
-pass that landed M27.
+**And then it happened in the simplest arrangement in the game.**
+`logs/battle-20260814-230444.log`: **one Spearmen regiment alone in open ground**,
+sitting almost exactly halfway along a 71 m march, open field in every direction —
+and **five of the ten move decisions in that recording shouldered through it**. No
+crowd, no line, no gap. That is what ended the patching.
+
+**Fixed by [M28](DECISIONS.md)**, which is task #43's rectangle arriving early: grow
+each body by the mover's reach, take the corners, walk the cheapest way through them.
+All three recorded arrangements now route, each for its own reason —
+
+```
+one alone   (285,340) → (303,363) → (223,363) → (223,263) → (244,283)
+the corner  (245,247) → (303,263) → (303,163) → (283,173)
+the gap     (247,169) → (238,165) → (238,261) facing 0° → (219,288)
+```
+
+— the middle one being exactly the two-bend approach along the body's face that this
+entry predicted and the old construction could not build.
+
+**Left open, and worth watching in the next play-test.** The corner walk searches in
+**metres** while the ladder chooses in **seconds**, because what a leg costs in time
+depends on the front the regiment arrives on and therefore on the leg before it, which
+is not something Dijkstra may be handed. So it can return a route that is short and
+badly wheeled — the isolated Spearmen is answered by going right round the far side at
+**69 s against 36 s** straight, where a two-bend route past the near corner looks
+shorter by eye. The fix, if the recordings say it matters, is to search over
+(point, front) pairs rather than points.
 
 ---
 

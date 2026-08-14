@@ -45,10 +45,16 @@ namespace BattleChess.Rules
         public static readonly IWayRound PastEverythingInTheWay = new PastEverything();
         public static readonly IWayRound RoundAndRoundAgain = new RoundTwice();
         public static readonly IWayRound StandOffOrBendAgain = new EitherWay();
+        public static readonly IWayRound RoundTheCornersOfIt = new RoundTheCorners();
+        public static readonly IWayRound WhicheverGetsThere = new AnyOfThem();
 
         /// <summary>Every way of looking, for the harness that compares them.</summary>
         public static IReadOnlyList<IWayRound> All { get; } =
-            new[] { PastTheFirstThing, PastEverythingInTheWay, RoundAndRoundAgain, StandOffOrBendAgain };
+            new[]
+            {
+                PastTheFirstThing, PastEverythingInTheWay, RoundAndRoundAgain,
+                StandOffOrBendAgain, RoundTheCornersOfIt, WhicheverGetsThere
+            };
 
         /// <summary>What a march uses when nobody says otherwise.</summary>
         /// <remarks>
@@ -97,7 +103,44 @@ namespace BattleChess.Rules
         /// tests that still run.
         /// </para>
         /// </remarks>
-        public static IWayRound Default { get; } = StandOffOrBendAgain;
+        public static IWayRound Default { get; } = WhicheverGetsThere;
+
+        /// <summary>
+        /// Try the aiming rules first and the corner walk when they find
+        /// nothing; take the cheaper when both do.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M28.</b> The corner walk is strictly more capable — it can express
+        /// routes the aiming rules cannot build at any parameter — but it is not
+        /// strictly better, because it prices its search in metres and a short
+        /// arc chosen for its wheel can beat a shorter walk that reverses twice.
+        /// So they compete, in seconds, exactly as arching and crabbing do.
+        /// </para>
+        /// <para>
+        /// The aiming rules are asked first and their answer used when the corner
+        /// walk finds nothing, so the common crowd keeps the routes it already
+        /// had and the tables that chose between them still mean what they said.
+        /// </para>
+        /// </remarks>
+        private sealed class AnyOfThem : IWayRound
+        {
+            public string Name => "aim, or walk the corners";
+
+            public IReadOnlyList<Vec2>? Round(BattleState battle, UnitInstance unit, Vec2 destination)
+            {
+                IReadOnlyList<Vec2>? aimed = StandOffOrBendAgain.Round(battle, unit, destination);
+                IReadOnlyList<Vec2>? walked = RoundTheCornersOfIt.Round(battle, unit, destination);
+
+                if (aimed == null) return walked;
+                if (walked == null) return aimed;
+
+                return Marching.SecondsToWalk(battle, unit, walked) <
+                       Marching.SecondsToWalk(battle, unit, aimed)
+                    ? walked
+                    : aimed;
+            }
+        }
 
         /// <summary>
         /// Stand off further, or bend again — whichever gets there, and the
@@ -135,6 +178,217 @@ namespace BattleChess.Rules
                 return Marching.SecondsToWalk(battle, unit, bent) < Marching.SecondsToWalk(battle, unit, off)
                     ? bent
                     : off;
+            }
+        }
+
+        /// <summary>
+        /// Walk the corners of what is in the way, however many bends it takes.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M28</b>, and it replaces guessing an aiming point with looking at
+        /// the shape. Every strategy above aims <i>one</i> point perpendicular to
+        /// the line of march, offset from a blocker's centre — and that
+        /// construction has now been patched three times ([M19a](../../../../docs/DECISIONS.md)'s
+        /// margin, standing off in steps, and [M27](../../../../docs/DECISIONS.md)'s
+        /// corridors) with each fix uncovering the next arrangement it cannot
+        /// describe.
+        /// </para>
+        /// <para>
+        /// The one that broke it is the simplest arrangement in the game.
+        /// Recorded 14 August: <b>a single Spearmen regiment alone in open
+        /// ground</b>, sitting almost exactly halfway along a 71 m march, and
+        /// every order across it shouldered through. Measured, the second leg of
+        /// a one-bend detour was blocked at <i>every</i> stand-off from 46 m out
+        /// to 186 m, while the destination itself was perfectly clear. The place
+        /// was fine; only the approach clipped. The route that works comes in
+        /// along the body's face — which is two bends, and one waypoint cannot
+        /// express two bends at any parameter value.
+        /// </para>
+        /// <para>
+        /// So: grow each body by the mover's own reach, take the corners of what
+        /// that leaves, and find the cheapest way from here to there through
+        /// them. It is a search, which [M10](../../../../docs/DECISIONS.md)
+        /// treats as the escape hatch — but over a graph of <b>a few dozen
+        /// corners</b> rather than four thousand grid cells, and only on the rung
+        /// the ordinary march never reaches. The corners are where a route can
+        /// bend; nowhere else is.
+        /// </para>
+        /// </remarks>
+        private sealed class RoundTheCorners : IWayRound
+        {
+            /// <summary>How many bodies' corners are worth considering.</summary>
+            /// <remarks>
+            /// A bound on the work rather than a rule about routing. The graph is
+            /// four corners a body plus the two ends, so six bodies is 26 nodes —
+            /// small enough that the cost is in the leg checks, and those are the
+            /// same sweep every other strategy already runs.
+            /// </remarks>
+            private const int MostBodies = 6;
+
+            public string Name => "round the corners";
+
+            public IReadOnlyList<Vec2>? Round(BattleState battle, UnitInstance unit, Vec2 destination)
+            {
+                Vec2 travel = destination - unit.Position;
+                float length = travel.Length;
+
+                if (length <= 0f) return null;
+
+                var nodes = new List<Vec2> { unit.Position, destination };
+
+                // Grown by the mover's own reach, taken as its half-diagonal so
+                // the figure does not depend on which way it happens to be
+                // pointing on the leg — the one thing that varies leg by leg and
+                // cannot be known while the route is still being chosen.
+                float reach = MathF.Sqrt(
+                    unit.Footprint.Width * unit.Footprint.Width +
+                    unit.Footprint.Depth * unit.Footprint.Depth) * 0.5f + MarginMetres;
+
+                int taken = 0;
+
+                foreach (UnitInstance other in NearestFirst(battle, unit, destination, length))
+                {
+                    if (taken++ >= MostBodies) break;
+
+                    Facing front = other.Facing;
+
+                    var ahead = new Vec2(MathF.Cos(front.Radians), MathF.Sin(front.Radians));
+                    var beside = new Vec2(-ahead.Y, ahead.X);
+
+                    float deep = other.Footprint.Depth * 0.5f + reach;
+                    float wide = other.Footprint.Width * 0.5f + reach;
+
+                    for (int i = -1; i <= 1; i += 2)
+                    for (int j = -1; j <= 1; j += 2)
+                        nodes.Add(other.Position + ahead * (deep * i) + beside * (wide * j));
+                }
+
+                if (nodes.Count <= 2) return null;
+
+                return Cheapest(battle, unit, nodes);
+            }
+
+            /// <summary>
+            /// Ours, nearest the line of march first — so the cap falls on the
+            /// bodies least likely to matter.
+            /// </summary>
+            private static List<UnitInstance> NearestFirst(
+                BattleState battle, UnitInstance unit, Vec2 destination, float length)
+            {
+                Vec2 along = (destination - unit.Position) / length;
+
+                var found = new List<UnitInstance>();
+                var away = new List<float>();
+
+                foreach (UnitInstance other in battle.UnitsOnField())
+                {
+                    if (ReferenceEquals(other, unit)) continue;
+                    if (other.Owner != unit.Owner) continue;
+
+                    Vec2 offset = other.Position - unit.Position;
+
+                    // Distance to the line of march, clamped to the stretch of it
+                    // that is actually being walked.
+                    float ahead = MathF.Max(0f, MathF.Min(length, Vec2.Dot(offset, along)));
+
+                    found.Add(other);
+                    away.Add(Vec2.Distance(other.Position, unit.Position + along * ahead));
+                }
+
+                // Ascending id within equal distance, because two bodies the same
+                // way off must not order themselves by whatever the field
+                // happened to return.
+                var order = new int[found.Count];
+                for (int i = 0; i < order.Length; i++) order[i] = i;
+
+                Array.Sort(order, (a, b) =>
+                {
+                    int byDistance = away[a].CompareTo(away[b]);
+                    return byDistance != 0 ? byDistance : found[a].Id.Value.CompareTo(found[b].Id.Value);
+                });
+
+                var sorted = new List<UnitInstance>(found.Count);
+                foreach (int i in order) sorted.Add(found[i]);
+
+                return sorted;
+            }
+
+            /// <summary>
+            /// The cheapest walk from the first node to the second through any of
+            /// the rest.
+            /// </summary>
+            /// <remarks>
+            /// Plain Dijkstra over a couple of dozen points, priced in metres.
+            /// Metres and not seconds, deliberately: what a leg costs in time
+            /// depends on the front the regiment arrives on, which depends on the
+            /// leg before it, and a cost that depends on the path taken is not
+            /// something Dijkstra may be handed. The route that comes back is
+            /// then priced properly in seconds by the ladder, against the other
+            /// rungs, which is where the comparison belongs.
+            /// </remarks>
+            private static IReadOnlyList<Vec2>? Cheapest(
+                BattleState battle, UnitInstance unit, List<Vec2> nodes)
+            {
+                int count = nodes.Count;
+
+                var best = new float[count];
+                var cameFrom = new int[count];
+                var settled = new bool[count];
+
+                for (int i = 0; i < count; i++)
+                {
+                    best[i] = float.MaxValue;
+                    cameFrom[i] = -1;
+                }
+
+                best[0] = 0f;
+
+                for (int step = 0; step < count; step++)
+                {
+                    int at = -1;
+
+                    for (int i = 0; i < count; i++)
+                        if (!settled[i] && best[i] < float.MaxValue && (at < 0 || best[i] < best[at]))
+                            at = i;
+
+                    if (at < 0) break;
+                    if (at == 1) break;
+
+                    settled[at] = true;
+
+                    for (int to = 0; to < count; to++)
+                    {
+                        if (settled[to] || to == at) continue;
+
+                        float step2 = Vec2.Distance(nodes[at], nodes[to]);
+
+                        if (best[at] + step2 >= best[to]) continue;
+
+                        // The expensive question, asked last and only when the
+                        // answer could change the route.
+                        if (!Marching.IsClearLeg(battle, unit, nodes[at], nodes[to], unit.Facing)) continue;
+
+                        best[to] = best[at] + step2;
+                        cameFrom[to] = at;
+                    }
+                }
+
+                if (cameFrom[1] < 0) return null;
+
+                var back = new List<Vec2>();
+
+                for (int at = 1; at >= 0; at = cameFrom[at])
+                {
+                    back.Add(nodes[at]);
+                    if (at == 0) break;
+                }
+
+                back.Reverse();
+
+                // One hop is the straight line, which rung one has already
+                // refused. Nothing to report.
+                return back.Count > 2 ? back : null;
             }
         }
 
