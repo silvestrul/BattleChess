@@ -416,5 +416,57 @@ namespace BattleChess.Tests.Battle
                 $"The planner announced itself {said} times over twelve turns. These are decisions and " +
                 "should be said when they are taken.");
         }
+
+        [Fact]
+        public void AnArchIntoATightChannelIsNotVetoedIntoAStandstill()
+        {
+            // A behaviour guard, and honest about being only that: it passes
+            // with the steering veto restored as well as removed, because the
+            // "hemmed in" branch is never reached here — measured, it fires zero
+            // times. Two attempts at a synthetic arrangement that does reach it
+            // both failed, so the recorded freeze is **not** reproduced by any
+            // test. See finding 10.
+            //
+            // What it does hold is the outcome: a regiment sent through a
+            // channel barely wider than it is gets there.
+            var field = new Battlefield("plains", 35000);
+
+            // A 46 m gap for a 40 m body, set 70 m north of the line of march so
+            // the route has to bend into it.
+            const float gap = 46f, offset = 70f;
+            float inner = gap * 0.5f + 20f;
+
+            foreach (float side in new[] { 1f, -1f })
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    UnitInstance wall = field.Add(
+                        0, "spearmen",
+                        field.Centre + new Vec2(0f, offset + side * (inner + i * 40f)),
+                        Facing.East);
+
+                    Battlefield.Hold(wall);
+                }
+            }
+
+            UnitInstance mover = field.Add(0, "swordsmen", field.Centre - new Vec2(300f, 0f), Facing.East);
+            Vec2 destination = field.Centre + new Vec2(300f, 0f);
+
+            var log = new Heard();
+            field.March(mover, destination, log: log);
+
+            Listen(field, turns: 20, into: log);
+
+            float left = Vec2.Distance(mover.Position, destination);
+
+            _out.WriteLine($"{left:0} m short; gave up {log.Saying("cannot get to where it was sent")} " +
+                           $"times, hemmed {log.Saying("hemmed in")}.");
+
+            Assert.Equal(0, log.Saying("cannot get to where it was sent"));
+
+            Assert.True(left < 80f,
+                $"It is {left:0} m short. Steering may adjust a step; it must not veto one the planner " +
+                "has already checked and found walkable.");
+        }
     }
 }

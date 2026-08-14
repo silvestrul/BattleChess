@@ -486,6 +486,51 @@ green before it, are untouched.
 
 ---
 
+## 10. Steering vetoed a checked plan, and three more from the same play-test
+
+From `logs/battle-20260814-102058.log` and a screenshot, 14 Aug 2026. Four faults,
+one fixed.
+
+**a. The freeze came back, by a different door — FIXED, not reproduced.**
+
+```
+1579  U4 is going round its own Spearmen          <- arch planned, 3 waypoints
+1622  X hemmed in by its own Swordsmen            <- steering vetoes it
+1637  > not getting through, trying another way round
+1653  > not getting through, trying another way round
+1669  > not getting through, trying another way round
+1685  X cannot get to where it was sent, stopped 262 m short
+```
+
+The same fault fixed for crabbed legs one pass earlier, one rung over. Steering was
+told to trust a leg only when it was a crab or a press-through; an **arched** leg
+carries neither flag, so it was second-guessed exactly as the crab used to be. The
+rule is now that **steering may adjust a step but may not veto one** — the planner
+looked at the whole line, this rule sees only that friends are close right now.
+
+**Two attempts at a synthetic reproduction both failed** — the `hemmed in` branch
+fires zero times in either arrangement. The mechanism is certain from the log (that
+message is emitted immediately before the return that stops the regiment) but no
+test discriminates, so the next play-test is the verification. The behaviour guard
+that exists says so in its own comment.
+
+**b. Rung three fires far too readily — open.** Five press-throughs in 126 lines,
+including on a 99 m march with a single regiment nearby. It is meant to be the last
+resort and is behaving like the common case. Cause is almost certainly that
+`ArchAround` is one obstruction deep and requires both its legs to be *entirely*
+clear, which fails constantly in a crowded start area — so a way round that plainly
+exists is never found and the ladder drops to shouldering past.
+
+**c. The wheels are enormous — open, and this is [T2](DECISIONS.md).** Wheels of
+170°, 150°, 147°, 146° and 129° in one short game, each 24 to 42 ticks at 4°/s.
+The designer has now seen it. T2 was parked pending exactly this judgement.
+
+**d. The route line reads as nonsense for a cast — open, cosmetic.** `0 cells
+reduced to 2 waypoints, 0 explored` is what a route that never touched the search
+now prints. It should say it walked straight there.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

@@ -437,12 +437,26 @@ namespace BattleChess.Rules
             // Boxed in on both sides as well as in front. Said on a counter
             // rather than every tick: it persists for as long as they all stand
             // there, and a line of it every second would bury everything else.
+            // Boxed in on both sides as well as in front — and it goes anyway.
+            //
+            // Steering may adjust a step; it may not veto one. The planner
+            // looked at the whole line and found it walkable; this rule knows
+            // only that friends are close on either side right now, which is
+            // exactly what threading a gap or arching past a neighbour looks
+            // like from here. Standing still was the one answer that could not
+            // be right, and it is what a recorded game did: an arch was planned,
+            // this called it hemmed in, and the march was abandoned 262 m short
+            // having never been in any trouble.
+            //
+            // The same fault was fixed for crabbed legs one pass earlier by
+            // marking them trusted. That was too narrow: what deserves the trust
+            // is any line the planner has checked, which is all of them.
             log.Blocked("Move",
-                $"{unit.Def.DisplayName} is hemmed in by its own {blocker.Def.DisplayName} with no way " +
-                "round either flank — move one of them.",
+                $"{unit.Def.DisplayName} is squeezing between its own {blocker.Def.DisplayName} and " +
+                "whatever is on its other flank — no room either side, so it is going through the gap.",
                 unit.Id);
 
-            return unit.Position;
+            return next;
         }
 
         /// <summary>
