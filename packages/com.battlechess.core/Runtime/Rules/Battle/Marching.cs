@@ -84,6 +84,13 @@ namespace BattleChess.Rules
             {
                 IReadOnlyList<Vec2>? arch = ArchAround(battle, unit, destination);
                 if (arch != null) return Straight(arch);
+
+                // M14: full width has failed, so try it side-on. Same line, same
+                // ground, a body twenty metres across instead of forty.
+                IReadOnlyList<Vec2>? threaded =
+                    CrabThrough(battle, unit, destination, out Facing?[]? hold);
+
+                if (threaded != null) return Straight(threaded, hold);
             }
 
             // Rungs 3 and 4 are not built. Until they are, the search is what
@@ -102,14 +109,109 @@ namespace BattleChess.Rules
         /// </remarks>
         private const float TangentMarginMetres = 8f;
 
-        private static PathResult Straight(IReadOnlyList<Vec2> waypoints)
+        private static PathResult Straight(IReadOnlyList<Vec2> waypoints, Facing?[]? hold = null)
         {
             float total = 0f;
 
             for (int i = 1; i < waypoints.Count; i++)
                 total += Vec2.Distance(waypoints[i - 1], waypoints[i]);
 
-            return PathResult.Success(waypoints, Array.Empty<Coord>(), total, total, cellsExplored: 0);
+            var route = PathResult.Success(waypoints, Array.Empty<Coord>(), total, total, cellsExplored: 0);
+
+            LastHold = hold;
+            return route;
+        }
+
+        /// <summary>
+        /// The front the last plan asked to be held, if it asked for one.
+        /// </summary>
+        /// <remarks>
+        /// A seam, and an ugly one. <see cref="PathResult"/> lives in Contracts
+        /// and describes a line across ground; which way a regiment faces while
+        /// walking it is a rules question and has no business in that type. This
+        /// hands the answer to the caller that just asked, which is every caller
+        /// there is, and it is read on the next line every time.
+        /// </remarks>
+        public static Facing?[]? LastHold { get; private set; }
+
+        /// <summary>
+        /// Whether the straight line works for a body turned side-on to it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Travelling along its own frontage, a regiment presents its depth to
+        /// the way it is going — twenty metres rather than forty — so a gap that
+        /// refuses a march admits a crab. Setting one up means turning, because
+        /// presenting the narrow side and facing square to the line of travel
+        /// are the same thing.
+        /// </para>
+        /// <para>
+        /// Both perpendiculars are the same shape, so the one nearer the front
+        /// the regiment already holds is taken: the manoeuvre is expensive
+        /// enough in pace without turning the long way into it as well.
+        /// </para>
+        /// </remarks>
+        private static IReadOnlyList<Vec2>? CrabThrough(
+            BattleState battle, UnitInstance unit, Vec2 destination, out Facing?[]? hold)
+        {
+            hold = null;
+
+            Vec2 travel = destination - unit.Position;
+            float length = travel.Length;
+            if (length <= 0f) return null;
+
+            Vec2 along = travel / length;
+            Facing straight = Facing.FromVector(travel);
+
+            // Both perpendiculars are the same shape, so take the one nearer the
+            // front already held: the manoeuvre is expensive enough in pace
+            // without turning the long way into it as well.
+            Facing left = Facing.FromRadians(straight.Radians + MathF.PI * 0.5f);
+            Facing right = Facing.FromRadians(straight.Radians - MathF.PI * 0.5f);
+
+            bool leftIsNearer =
+                Facing.AbsoluteDelta(unit.Facing, left) <= Facing.AbsoluteDelta(unit.Facing, right);
+
+            Facing sideOn = leftIsNearer ? left : right;
+
+            if (!IsClearLine(battle, unit, unit.Position, destination, sideOn))
+            {
+                sideOn = leftIsNearer ? right : left;
+                if (!IsClearLine(battle, unit, unit.Position, destination, sideOn)) return null;
+            }
+
+            // Where the squeeze actually is. The regiment marches up to it
+            // facing where it is going, goes through side-on, and comes back
+            // onto its march afterwards — "turn round for the crabbing only".
+            // Crabbing the whole way would arrive at the far end still side-on
+            // and at two fifths pace for a journey that never needed it.
+            UnitInstance? tight =
+                FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out float upTo);
+
+            if (tight == null) return null;
+
+            float past = tight.Shape.ProjectedRadius(along) + TangentMarginMetres;
+
+            float entry = MathF.Max(0f, upTo - TangentMarginMetres);
+            float exit = MathF.Min(length, upTo + 2f * past);
+
+            // The squeeze runs the whole way, so there is nothing to come back
+            // onto and the simple form is the honest one.
+            if (entry <= 0f && exit >= length)
+            {
+                hold = new Facing?[] { null, sideOn };
+                return new[] { unit.Position, destination };
+            }
+
+            hold = new Facing?[] { null, null, sideOn, null };
+
+            return new[]
+            {
+                unit.Position,
+                unit.Position + along * entry,
+                unit.Position + along * exit,
+                destination
+            };
         }
 
         /// <summary>
@@ -119,11 +221,8 @@ namespace BattleChess.Rules
         /// <para>
         /// <b>M18</b> rung two. Two candidates and no more: past one end of the
         /// obstruction or past the other, aimed at its tangent rather than at
-        /// some guessed angle, so the way round hugs what it is avoiding
-        /// instead of swinging wide of it. A fan of fixed bearings would have to
-        /// be either coarse enough to miss the gap or fine enough to be
-        /// expensive, and neither is necessary when the thing to go round is
-        /// right there and has a known shape.
+        /// some guessed angle, so the way round hugs what it is avoiding instead
+        /// of swinging wide of it.
         /// </para>
         /// <para>
         /// Scored by total distance, which is <b>M17</b>: among lines that work,
@@ -135,8 +234,7 @@ namespace BattleChess.Rules
         /// <para>
         /// One obstruction deep, deliberately. Going round the thing behind the
         /// thing behind the thing is a search, and there is already a search for
-        /// that. This is the cheap answer to the common case: a single body
-        /// standing where you wanted to walk.
+        /// that.
         /// </para>
         /// </remarks>
         private static IReadOnlyList<Vec2>? ArchAround(BattleState battle, UnitInstance unit, Vec2 destination)
@@ -163,9 +261,9 @@ namespace BattleChess.Rules
             IReadOnlyList<Vec2>? best = null;
             float shortest = float.MaxValue;
 
-            // One side then the other, and never in an order that depends on
-            // where anybody happens to be standing — two regiments equally far
-            // either way must both pick the same side every time this is asked,
+            // One side then the other, in an order that never depends on where
+            // anybody happens to be standing — two ways round that are equally
+            // good must be picked between the same way every time this is asked,
             // or the route flickers between them at the re-planning cadence.
             for (int side = 0; side < 2; side++)
             {

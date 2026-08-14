@@ -59,6 +59,30 @@ namespace BattleChess.Rules
         private const float PlacementMovedMetres = 1f;
 
         /// <summary>
+        /// How far off the front a leg asks for still counts as coming round to
+        /// it, in radians.
+        /// </summary>
+        private const float StillComingRound = 0.09f;
+
+        /// <summary>
+        /// Spreads a crab front across the legs of a plan that asked for one.
+        /// </summary>
+        /// <remarks>
+        /// Every leg of a crabbed plan is crabbed, because the plan is a single
+        /// straight line — there is nowhere yet for a route that crabs part of
+        /// the way and marches the rest, and no rule has asked for one.
+        /// </remarks>
+        private static Facing?[]? HoldFor(PathResult path, Facing? crab)
+        {
+            if (!crab.HasValue) return null;
+
+            var hold = new Facing?[path.Waypoints.Count];
+            for (int i = 0; i < hold.Length; i++) hold[i] = crab;
+
+            return hold;
+        }
+
+        /// <summary>
         /// How far an aggressive unit will chase from where it was last ordered.
         /// </summary>
         /// <remarks>
@@ -193,7 +217,28 @@ namespace BattleChess.Rules
             // stall, and the harder a regiment worked at getting past something
             // the sooner it was told to give up. Along the route, the way round
             // *is* the route, so following it counts and thrashing does not.
-            float toGo = unit.Route!.RemainingDistance(unit.Position);
+            // Coming round is not standing still. A regiment that has to thread
+            // a gap side-on must turn ninety degrees before it can start, and
+            // at five degrees a second that is eighteen ticks against the
+            // detector's patience of fifteen — so the manoeuvre was declared a
+            // stall three ticks before it could possibly have begun. This is
+            // the other half of finding 8, and it only appeared once crabbing
+            // gave a regiment a reason to stand still on purpose.
+            // Either front will do it: the one a crabbed leg asks for, or the
+            // line of march an ordinary one implies. Coming off a crab is the
+            // same ninety degrees as going onto it, and excusing only the way in
+            // left a regiment declared stuck the moment it had finished getting
+            // through — which is the fault, arriving one waypoint later.
+            Facing? holding = unit.Route!.HoldThisLeg;
+
+            if (holding.HasValue &&
+                Facing.AbsoluteDelta(unit.Facing, holding.Value) > StillComingRound)
+            {
+                unit.TicksWithoutProgress = 0;
+                return;
+            }
+
+            float toGo = unit.Route.RemainingDistance(unit.Position);
 
             if (toGo < unit.NearestApproach - ProgressMetres)
             {
@@ -263,7 +308,7 @@ namespace BattleChess.Rules
                 return;
             }
 
-            unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false);
+            unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false, Marching.LastHold);
             unit.ForgetProgress();
 
             log.Decision("Move",

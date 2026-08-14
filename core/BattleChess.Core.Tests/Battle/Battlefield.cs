@@ -181,12 +181,13 @@ namespace BattleChess.Tests.Battle
             unit.GiveOrder(UnitOrder.MoveTo(destination, bearing: bearing), unit.Position);
 
             PathResult path = Marching.PlanTo(State, unit, _pathfinder, destination);
+            Facing?[]? hold = Marching.LastHold;
 
             if (!path.Found || path.Waypoints.Count < 2)
                 throw new InvalidOperationException(
                     $"No route for {unit.Def.DisplayName} to {destination}: {path.Failure} {path.FailureDetail}");
 
-            unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false);
+            unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false, hold);
         }
 
         /// <summary>Leaves a unit standing where it is: it will fight, but never follow.</summary>

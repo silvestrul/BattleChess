@@ -634,6 +634,14 @@ namespace BattleChess.Rules
                 ? FrontWhileMarching(battle, unit, route, marchBearing)
                 : marchBearing;
 
+            // A leg that has to be crabbed says so, and it overrides everything
+            // an ordinary march would want. Nothing further is needed to make it
+            // slow: the pace penalty is already charged on the angle between the
+            // front and the line of march, so holding a front square to the way
+            // it is going costs about three fifths of its speed by the rule that
+            // was already there.
+            if (route.HoldThisLeg.HasValue) desired = route.HoldThisLeg.Value;
+
             // The last hundred metres of a charge. The order system has already
             // aimed this march at a slot squarely off one of the enemy's faces;
             // this is the other half of the same manoeuvre, bringing the front
