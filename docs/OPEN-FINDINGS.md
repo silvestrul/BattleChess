@@ -857,6 +857,62 @@ where it happens most. It was invisible until the fall-through learned to say it
 
 ---
 
+## 17. Three faults in one recording — `logs/battle-20260814-152243.log`
+
+*"Something is wrong with pathfinding — stuttering, going through other armies and
+weird pathing."* One cavalry regiment, twelve orders, and the new [W6](DECISIONS.md)
+lines make all three legible without a reproduction.
+
+**a. The search does not know friendly regiments exist, so falling off the ladder
+silently undoes the whole ladder.** `IPathfinder.FindPath(Vec2, Vec2, MovementType)`
+takes no unit and no battle state — it cannot see a single friendly body. So when
+rungs 1–3 all fail, rung 5 hands back the straight line the sweep has just rejected:
+
+```
+1481 > could not walk, bend or shoulder its way there, so the search answered:
+       by (303,170) → (204,250), 127 m, 415 cells explored.
+1506 X Cavalry at (284,186) ... is standing in its own Swordsmen at (263,213)
+```
+
+Twice in this recording, and both times the regiment was standing in one of its own
+within thirty ticks. Worse, that plan carries `PressedThrough: false`, so the contact
+rules do not know it is a deliberate passage: the shuffle fights it and
+[M1a](DECISIONS.md) shoves the mover sideways every tick. **That is a stutter with a
+named cause**, and a better candidate than finding 16a. It is also 415 cells explored
+to rediscover a straight line, which is [M10](DECISIONS.md)'s original complaint.
+
+**b. Rung 2 has no ceiling, so a way round became a different journey.**
+
+```
+1619 > going round its own Archers rather than through it — 100 s against 62 s
+       straight. by (204,250) → (132,110) → (303,172).
+       Passing to the right, 154 m off the straight line.
+1619 > route (direct): 339 m walked
+```
+
+A 126 m march answered with a 339 m route bending 154 m off the line, in roughly the
+opposite direction to the destination — the yellow V in the screenshot. `PastEverything`
+stands off in steps of half a frontage, `Tries = 6`, so the aiming point can be
+**148 m** from the blocker's centre; the recorded one was 131 m, the fourth step. The
+planner priced both candidates and printed both numbers, and **took the one that cost
+61% more**, because nothing anywhere compares a detour against the journey it is a
+detour from. Rung 2 comes before rung 3 in [M18](DECISIONS.md), and strict order with
+no ceiling means an arbitrarily bad way round beats a good press-through.
+
+Not reproduced at the recorded coordinates — a five-regiment line reaches rung 3
+instead, matching tick 1379 exactly rather than 1619. The defect is structural and the
+code printed its own arithmetic, so it is recorded on that evidence rather than held
+open pending an arrangement.
+
+**c. Every order in the recording was an almost complete about-face, and the wheel ate
+the march.** Twelve orders, wheels of 121, 138, 153, 145, 167, 178, 157, 176, 173, 174,
+178, 179 degrees — at 3°/s that is 40 to 60 ticks against marches lasting 63 to 96
+seconds. Achieved pace fell from 3.6 m/s to 2.1 against the 4.8 the ground allows.
+This is **[T2](DECISIONS.md)**, still the designer's open call, and it is now the
+largest single term in how slow the cavalry looks.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
