@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -24,12 +24,21 @@ namespace BattleChess.Rules
     /// nobody had.
     /// </para>
     /// <para>
-    /// Deliberately conservative for now: the shortcut fires <b>only</b> when
-    /// the line is completely clear, and anything at all in the way — ground or
-    /// men, friendly or not — falls through to exactly the code that ran before.
-    /// Arching, crabbing and the rest of <see href="M18">the ladder</see> are
-    /// the next pass. This one changes nothing except how a clear march is
-    /// planned, which is what makes it safe to land on its own.
+    /// Two rungs of <b>M18</b>'s ladder are here: the straight line, and going
+    /// round one of its own. Crabbing and passing through are not, and until
+    /// they are, anything this cannot answer falls through to the search
+    /// exactly as before.
+    /// </para>
+    /// <para>
+    /// <b>Enemies are not obstacles to a plan at all</b>, which is a departure
+    /// from M15a worth stating. As walls they made every charge arrive by
+    /// walking politely round the regiment it had been sent to break — five
+    /// tests at once. But the deeper reason is the one M4 already gives for
+    /// terrain: a route that quietly goes round an enemy is overruling the line
+    /// the player drew, and whether to cross a formed enemy's front is the most
+    /// consequential decision in the game to take out of their hands. So an
+    /// enemy on the line is marched into, and halting or fighting is settled
+    /// where it always was.
     /// </para>
     /// </remarks>
     public static class Marching
@@ -63,19 +72,117 @@ namespace BattleChess.Rules
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
+            // Rung 1: straight there.
             if (IsClearLine(battle, unit, unit.Position, destination, unit.Facing))
-            {
-                float straight = Vec2.Distance(unit.Position, destination);
+                return Straight(new[] { unit.Position, destination });
 
-                return PathResult.Success(
-                    new[] { unit.Position, destination },
-                    Array.Empty<Coord>(),
-                    straight,
-                    straight,
-                    cellsExplored: 0);
+            // Rung 2: round whatever is in the way — but only for a march.
+            // Closing with an enemy is O5's business and it says centre first,
+            // then sidestep to share the face; arching an attack in would put
+            // the two rules in charge of the same approach.
+            if (unit.Order.Kind != OrderKind.Attack)
+            {
+                IReadOnlyList<Vec2>? arch = ArchAround(battle, unit, destination);
+                if (arch != null) return Straight(arch);
             }
 
+            // Rungs 3 and 4 are not built. Until they are, the search is what
+            // answers — which is also what answered before any of this.
             return pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
+        }
+
+        /// <summary>
+        /// Room left beside whatever is being gone round, in metres.
+        /// </summary>
+        /// <remarks>
+        /// <b>M19a.</b> A line that grazes the corner of what it is going round
+        /// is a line that fails on the first metre of drift, and a march drifts
+        /// constantly — it is being pushed about by crowding, by terrain and by
+        /// its own turning circle. Aim past the corner, not at it.
+        /// </remarks>
+        private const float TangentMarginMetres = 8f;
+
+        private static PathResult Straight(IReadOnlyList<Vec2> waypoints)
+        {
+            float total = 0f;
+
+            for (int i = 1; i < waypoints.Count; i++)
+                total += Vec2.Distance(waypoints[i - 1], waypoints[i]);
+
+            return PathResult.Success(waypoints, Array.Empty<Coord>(), total, total, cellsExplored: 0);
+        }
+
+        /// <summary>
+        /// Goes round the first thing in the way, by whichever side costs less.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M18</b> rung two. Two candidates and no more: past one end of the
+        /// obstruction or past the other, aimed at its tangent rather than at
+        /// some guessed angle, so the way round hugs what it is avoiding
+        /// instead of swinging wide of it. A fan of fixed bearings would have to
+        /// be either coarse enough to miss the gap or fine enough to be
+        /// expensive, and neither is necessary when the thing to go round is
+        /// right there and has a known shape.
+        /// </para>
+        /// <para>
+        /// Scored by total distance, which is <b>M17</b>: among lines that work,
+        /// take the one that loses least to going round. Terrain speed is not in
+        /// it and must not be — marching into a swamp is a decision the player
+        /// made, and a route that quietly took the dry way would be overruling
+        /// an order rather than carrying it out.
+        /// </para>
+        /// <para>
+        /// One obstruction deep, deliberately. Going round the thing behind the
+        /// thing behind the thing is a search, and there is already a search for
+        /// that. This is the cheap answer to the common case: a single body
+        /// standing where you wanted to walk.
+        /// </para>
+        /// </remarks>
+        private static IReadOnlyList<Vec2>? ArchAround(BattleState battle, UnitInstance unit, Vec2 destination)
+        {
+            UnitInstance? blocker =
+                FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
+
+            // Stopped by ground rather than by anybody. Going round terrain is
+            // what the search is genuinely good at, and guessing at a tangent
+            // for a shape with no centre would be guessing.
+            if (blocker == null) return null;
+
+            Vec2 travel = destination - unit.Position;
+            if (travel.IsNearZero) return null;
+
+            Vec2 across = new Vec2(-travel.Y, travel.X).Normalised();
+
+            var body = new OrientedRect(unit.Position, unit.Facing, unit.Footprint);
+
+            float beside = blocker.Shape.ProjectedRadius(across)
+                         + body.ProjectedRadius(across)
+                         + TangentMarginMetres;
+
+            IReadOnlyList<Vec2>? best = null;
+            float shortest = float.MaxValue;
+
+            // One side then the other, and never in an order that depends on
+            // where anybody happens to be standing — two regiments equally far
+            // either way must both pick the same side every time this is asked,
+            // or the route flickers between them at the re-planning cadence.
+            for (int side = 0; side < 2; side++)
+            {
+                Vec2 through = blocker.Position + (side == 0 ? across : -across) * beside;
+
+                if (!IsClearLine(battle, unit, unit.Position, through, unit.Facing)) continue;
+                if (!IsClearLine(battle, unit, through, destination, unit.Facing)) continue;
+
+                float cost = Vec2.Distance(unit.Position, through) + Vec2.Distance(through, destination);
+
+                if (cost >= shortest) continue;
+
+                shortest = cost;
+                best = new[] { unit.Position, through, destination };
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -102,12 +209,40 @@ namespace BattleChess.Rules
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
-                if (ReferenceEquals(other, unit)) continue;
+                if (!IsInTheWayOf(unit, other)) continue;
 
                 if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Whether one regiment counts as an obstacle to another when a route is
+        /// being planned.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M15a</b>, and it is load-bearing rather than a refinement. An
+        /// enemy is only in the way of a regiment that was going somewhere else.
+        /// To one told to advance or to press, an enemy standing on the line is
+        /// not an obstruction at all — going through it <i>is</i> the order, and
+        /// that is what `TryFightWhatBlocks` exists to carry out.
+        /// </para>
+        /// <para>
+        /// Learnt by breaking five tests at once. Routing round enemies without
+        /// this made charges arrive by walking politely round the regiment they
+        /// had been sent to break, cavalry decline to be held by cavalry, and a
+        /// regiment that had fought its way past somebody never fight at all.
+        /// A rule that quietly turns every attack into a detour does not look
+        /// like a pathfinding change from the outside.
+        /// </para>
+        /// </remarks>
+        private static bool IsInTheWayOf(UnitInstance unit, UnitInstance other)
+        {
+            if (ReferenceEquals(other, unit)) return false;
+
+            return other.Owner == unit.Owner;
         }
 
         private static bool GroundIsClear(
@@ -149,7 +284,7 @@ namespace BattleChess.Rules
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
-                if (ReferenceEquals(other, unit)) continue;
+                if (!IsInTheWayOf(unit, other)) continue;
 
                 if (!Sweep.FirstTouch(body, travel, other.Shape, out float reach)) continue;
 

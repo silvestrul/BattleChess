@@ -1,3 +1,4 @@
+﻿using System;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -50,25 +51,54 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void ARegimentSquarelyInTheWayFallsBackToTheSearch()
+        public void OneOfItsOwnInTheWayIsArchedRoundWithoutSearching()
         {
             var field = new Battlefield("plains", 31100);
 
             UnitInstance unit = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East);
 
             // Planted halfway along, square across the line of march.
-            field.Add(0, "spearmen", field.Centre, Facing.East);
+            UnitInstance inTheWay = field.Add(0, "spearmen", field.Centre, Facing.East);
 
+            Vec2 destination = field.Centre + new Vec2(250f, 0f);
+
+            PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, destination);
+
+            foreach (Vec2 point in route.Waypoints) _out.WriteLine($"  ({point.X:0}, {point.Y:0})");
+            _out.WriteLine($"{route.CellsExplored} cells explored, {route.Distance:0} m.");
+
+            Assert.True(route.Found);
+
+            // Three points: here, past them, and there. The middle one is the
+            // whole of what "arch" means.
+            Assert.Equal(3, route.Waypoints.Count);
+
+            Assert.Equal(0, route.CellsExplored);
+
+            // And it genuinely goes round rather than nominally — the way point
+            // has to be clear of the body it is avoiding, not merely different
+            // from the straight line.
+            Vec2 through = route.Waypoints[1];
+            float aside = MathF.Abs(through.Y - inTheWay.Position.Y);
+
+            Assert.True(aside > inTheWay.Footprint.Width * 0.5f,
+                $"The way round passes {aside:0} m off their centre, and they are " +
+                $"{inTheWay.Footprint.Width:0} m wide. That is not going round them.");
+        }
+
+        [Fact]
+        public void GroundItCannotCrossIsStillTheSearchesProblem()
+        {
+            var field = new Battlefield("plains", 31150);
+
+            UnitInstance unit = field.Add(0, "swordsmen", field.Centre - new Vec2(250f, 0f), Facing.East);
+
+            // Nothing standing anywhere: if this comes back as a straight line
+            // the arch is not being reached at all and the test above proves
+            // less than it looks like it does.
             PathResult route = Marching.PlanTo(field.State, unit, field.Pathfinder, field.Centre + new Vec2(250f, 0f));
 
-            _out.WriteLine($"{route.Waypoints.Count} waypoints, {route.CellsExplored} cells explored.");
-
-            // The shortcut must not fire. What the search then does about it is
-            // the next pass's business — here it only matters that the question
-            // got asked of something that can answer it.
-            Assert.True(route.CellsExplored > 0,
-                "A regiment standing across the line was not noticed, so the march was planned straight " +
-                "through it.");
+            Assert.Equal(2, route.Waypoints.Count);
         }
 
         [Fact]
