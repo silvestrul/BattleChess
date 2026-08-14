@@ -824,6 +824,39 @@ log the way findings 13 and 14 were.
 
 ---
 
+## 16. Two things the new logging measured on its first run
+
+Not reports — [W6](DECISIONS.md) was built, and these fell out of watching it run
+against `LogVolumeTests`' twelve-turn battle. Both are recorded because they are
+cheap to lose and neither is in scope for the logging pass.
+
+**a. A pair hovering at the grazing tolerance opens and closes a collision every
+tick or two — and that is a candidate mechanism for finding 15b.** The shuffle eases
+two overlapping bodies apart at 1.5 m/s each, [M2](DECISIONS.md) ignores 5% or less
+of contact, and a march is pushing back in the whole time. So the overlap crosses the
+threshold, the shuffle stops, the march closes it again, and the pair oscillates
+across the line. In the recording it read as a burst of one-tick collisions where
+there was in fact one fifty-tick shove.
+
+The **log** was given hysteresis for it — a collision opens above the tolerance and
+is not called closed until the two are genuinely apart — and that is reporting only:
+the rule below it still turns on the tolerance alone, unchanged. Which means the
+oscillation is still there in the movement, invisible again, and it is the right
+shape for *"they still stutter a bit when they would hit the edges of some units"*.
+The obvious next move is to give the **rule** the same hysteresis and measure it the
+way the berth attempt was measured — remembering that the berth attempt measured
+worse and was thrown away.
+
+**b. An attack's final approach falls to the search on every re-plan.** Rung 2 is
+skipped for `OrderKind.Attack` by design (closing with an enemy is [O5](DECISIONS.md)'s
+business), so once the straight line fails there is nothing between it and the
+pathfinder. Measured: one pair of swordsmen closing the last hundred metres called
+the search ten times in twelve turns, at 308, 257, 229, 186, 159, 74 and 67 cells.
+That is precisely what [M10](DECISIONS.md) exists to avoid, on the one manoeuvre
+where it happens most. It was invisible until the fall-through learned to say itself.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

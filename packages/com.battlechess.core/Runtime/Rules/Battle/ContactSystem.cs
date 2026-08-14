@@ -70,14 +70,53 @@ namespace BattleChess.Rules
             // Ascending unit id throughout, so the same seed resolves contacts
             // in the same order every run.
             foreach (UnitInstance unit in battle.UnitsOnField())
+                unit.LappingNow.Clear();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
             {
                 if (!unit.IsFighting) continue;
 
-                ApplyOverlapDisorder(battle, unit, log);
+                ApplyOverlapDisorder(battle, unit, tick, log);
 
                 if (unit.IsMarching)
                     ApplyZoneOfControl(battle, unit, tick, log);
             }
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+                ReportWhoItIsClearOfAgain(battle, unit, tick, log);
+        }
+
+        /// <summary>
+        /// Says when two of its own have finally got off each other's ground,
+        /// and how long it took.
+        /// </summary>
+        /// <remarks>
+        /// The other half of the collision record, and the half that turns it
+        /// into a measurement. A collision that opens and closes in two ticks is
+        /// a corner clipped going round; one that runs for two hundred is a
+        /// regiment carrying somebody across the field, and only the duration
+        /// tells them apart.
+        /// </remarks>
+        private static void ReportWhoItIsClearOfAgain(
+            BattleState battle, UnitInstance unit, int tick, IBattleLog log)
+        {
+            foreach (UnitInstance.Lap was in unit.StandingIn)
+            {
+                bool still = false;
+
+                foreach (UnitInstance.Lap now in unit.LappingNow)
+                    if (now.Other == was.Other) { still = true; break; }
+
+                if (still) continue;
+
+                log.Info("Contact",
+                    $"{unit.Def.DisplayName} is clear of its own {battle.Get(was.Other).Def.DisplayName} " +
+                    $"again after {tick - was.Since} {(tick - was.Since == 1 ? "tick" : "ticks")}.",
+                    unit.Id);
+            }
+
+            unit.StandingIn.Clear();
+            unit.StandingIn.AddRange(unit.LappingNow);
         }
 
         /// <summary>
@@ -335,7 +374,8 @@ namespace BattleChess.Rules
         /// about — whether these two bodies of men are occupying the same
         /// ground.
         /// </remarks>
-        private static void ApplyOverlapDisorder(BattleState battle, UnitInstance unit, IBattleLog log)
+        private static void ApplyOverlapDisorder(
+            BattleState battle, UnitInstance unit, int tick, IBattleLog log)
         {
             foreach (UnitInstance other in battle.UnitsOnField())
             {
@@ -349,8 +389,22 @@ namespace BattleChess.Rules
                 // grazing tolerance they are neighbours and are left alone —
                 // which is what lets a line be drawn up flush rather than with
                 // daylight between every pair.
-                if (OrientedRect.OverlapFraction(unit.Shape, other.Shape) <= OrderSystem.GrazingTolerance)
-                    continue;
+                float overlap = OrientedRect.OverlapFraction(unit.Shape, other.Shape);
+
+                // W6. Recorded on the tick it opens, once, with everything that
+                // decides what happens next — so that a report of "it went
+                // through them" can be looked up rather than reproduced.
+                //
+                // Before the tolerance test, not after, because the reporting
+                // needs to see the ticks the rule ignores. Two bodies hovering
+                // either side of the threshold — which is exactly what the
+                // shuffle produces, since it eases them apart at a metre and a
+                // half a second — otherwise open and close a fresh collision
+                // every tick or two, and a single forty-tick shove reads as
+                // twenty separate ones.
+                bool isNew = TrackTheCollision(unit, other, overlap, tick, log);
+
+                if (overlap <= OrderSystem.GrazingTolerance) continue;
 
                 // Read fresh each time round: the pair before this one may have
                 // just moved this unit.
@@ -363,11 +417,24 @@ namespace BattleChess.Rules
                 {
                     unit.Organization -= FriendlyOverlapDisorderPerTick;
                     other.Organization -= FriendlyOverlapDisorderPerTick;
+
+                    if (isNew)
+                        log.Info("Contact",
+                            $"That one is being forced through rather than moved with, so both are " +
+                            $"losing {FriendlyOverlapDisorderPerTick:0.0000} of order a tick while it lasts.",
+                            unit.Id);
                 }
 
                 // Men running are not making room for anybody, and holding a
                 // rout off its own reserves would dam it against them.
-                if (unit.State == UnitState.Routing || other.State == UnitState.Routing) continue;
+                if (unit.State == UnitState.Routing || other.State == UnitState.Routing)
+                {
+                    if (isNew)
+                        log.Info("Contact",
+                            "Neither is being shuffled aside — men running do not make room.", unit.Id);
+
+                    continue;
+                }
 
                 // A march that has deliberately given up on keeping clear is
                 // entitled to the overlap — that is the whole of M18's third
@@ -395,7 +462,15 @@ namespace BattleChess.Rules
                 // one of those the regiment standing still was taking half a
                 // step a tick from somebody else's march.
                 if (unit.Route?.PressingThrough == true || other.Route?.PressingThrough == true)
+                {
+                    if (isNew)
+                        log.Info("Contact",
+                            "Neither is being shuffled aside — that passage was planned, and a regiment " +
+                            "that was not told to move does not give ground for one that was.",
+                            unit.Id);
+
                     continue;
+                }
 
                 float step = ShufflingApartSpeed * BattleClock.SecondsPerTick;
                 Vec2 push = apart.Normalised() * step;
@@ -416,18 +491,103 @@ namespace BattleChess.Rules
                 if (weAreMarching && !theyAre)
                 {
                     unit.Position = KeepInsideTheField(battle, unit, unit.Position + push * 2f);
+
+                    if (isNew)
+                        log.Info("Contact",
+                            $"{unit.Def.DisplayName} is the one marching, so it takes the whole " +
+                            $"correction at {ShufflingApartSpeed * 2f:0.0} m/s and " +
+                            $"{other.Def.DisplayName} gives no ground.",
+                            unit.Id);
                 }
                 else if (theyAre && !weAreMarching)
                 {
                     other.Position = KeepInsideTheField(battle, other, other.Position - push * 2f);
+
+                    if (isNew)
+                        log.Info("Contact",
+                            $"{other.Def.DisplayName} is the one marching, so it takes the whole " +
+                            $"correction at {ShufflingApartSpeed * 2f:0.0} m/s and " +
+                            $"{unit.Def.DisplayName} gives no ground.",
+                            unit.Id);
                 }
                 else
                 {
                     unit.Position = KeepInsideTheField(battle, unit, unit.Position + push);
                     other.Position = KeepInsideTheField(battle, other, other.Position - push);
+
+                    if (isNew)
+                        log.Info("Contact",
+                            $"{(weAreMarching ? "Both are marching" : "Neither was told to move")}, so they " +
+                            $"share the correction and edge apart at {ShufflingApartSpeed:0.0} m/s each.",
+                            unit.Id);
                 }
             }
         }
+
+        /// <summary>
+        /// Records two of its own sharing ground, on the tick it starts.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>W6.</b> The event the whole movement pass has been about, and
+        /// until now the one event nothing wrote down. Every play-test report
+        /// since the ladder was built has been some form of "it went through
+        /// them", and every one of them had to be reproduced from scratch,
+        /// because a recording of the battle in which it happened contained no
+        /// evidence that it had.
+        /// </para>
+        /// <para>
+        /// Once per collision rather than once per tick, on the same rule as
+        /// every other line here: this is an event, and an event repeated sixty
+        /// times a minute buries the rest of the recording. What follows it —
+        /// who gives ground, what it costs — is said on the same tick, so a
+        /// collision reads as one paragraph.
+        /// </para>
+        /// </remarks>
+        /// <returns>Whether this is the tick the collision began.</returns>
+        private static bool TrackTheCollision(
+            UnitInstance unit, UnitInstance other, float overlap, int tick, IBattleLog log)
+        {
+            int since = tick;
+            bool wasLapping = false;
+
+            foreach (UnitInstance.Lap was in unit.StandingIn)
+                if (was.Other == other.Id)
+                {
+                    since = was.Since;
+                    wasLapping = true;
+                    break;
+                }
+
+            // Hysteresis, and only in the bookkeeping — the rule below still
+            // turns on the tolerance alone. A collision opens when the two are
+            // properly into each other and is not called closed until they are
+            // genuinely apart, so a pair being eased out of one another does not
+            // read as a burst of separate incidents.
+            if (overlap <= 0f) return false;
+            if (!wasLapping && overlap <= OrderSystem.GrazingTolerance) return false;
+
+            unit.LappingNow.Add(new UnitInstance.Lap(other.Id, since));
+
+            if (wasLapping) return false;
+
+            log.Blocked("Contact",
+                $"{unit.Def.DisplayName} at ({unit.Position.X:0},{unit.Position.Y:0}) facing " +
+                $"{unit.Facing.Degrees:0}° is standing in its own {other.Def.DisplayName} at " +
+                $"({other.Position.X:0},{other.Position.Y:0}) facing {other.Facing.Degrees:0}° — " +
+                $"{overlap:0.00} of a body overlapping, centres {Vec2.Distance(unit.Position, other.Position):0} m apart. " +
+                $"{WhatItWasDoing(unit)}; {WhatItWasDoing(other)}.",
+                unit.Id);
+
+            return true;
+        }
+
+        /// <summary>What one of the two was doing when they met.</summary>
+        private static string WhatItWasDoing(UnitInstance unit) =>
+            unit.IsMarching
+                ? $"{unit.Def.DisplayName} is marching to ({unit.Route!.Destination.X:0},{unit.Route.Destination.Y:0})" +
+                  (unit.Route.PressingThrough ? " and pressing through" : string.Empty)
+                : $"{unit.Def.DisplayName} is standing";
 
         /// <summary>
         /// Holds a shuffle inside the map and off ground the unit cannot stand

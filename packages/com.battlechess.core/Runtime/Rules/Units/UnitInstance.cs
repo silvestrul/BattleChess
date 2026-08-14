@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -349,6 +350,65 @@ namespace BattleChess.Rules
             TicksInsideItsOwn = 0;
         }
 
+        // ---- Who it is standing in --------------------------------------------
+
+        /// <summary>
+        /// One of its own whose ground this regiment is currently sharing, and
+        /// the tick it started.
+        /// </summary>
+        public readonly struct Lap
+        {
+            public Lap(UnitId other, int since)
+            {
+                Other = other;
+                Since = since;
+            }
+
+            public readonly UnitId Other;
+            public readonly int Since;
+        }
+
+        /// <summary>
+        /// The friendly regiments this one was standing in as of last tick.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>W6.</b> Bookkeeping for the log and nothing else — no rule reads
+        /// it. Two of its own sharing ground is the single thing M1 spent the
+        /// project forbidding and the thing every play-test report has been
+        /// about, and it was <b>completely silent</b>: the overlap cost, the
+        /// shuffle apart and the yield rule all ran without a word. A collision
+        /// could only be inferred from the press-through line, which covers the
+        /// one case the planner <i>meant</i> — so every accidental overlap, which
+        /// is all the interesting ones, left no trace at all.
+        /// </para>
+        /// <para>
+        /// A list rather than a single id because a regiment in a line laps its
+        /// neighbours on both sides, and rather than a set because rules code
+        /// does not iterate anything whose order is a hash (the determinism rule
+        /// in M0). Built in ascending id order, so it is stable.
+        /// </para>
+        /// </remarks>
+        public List<Lap> StandingIn { get; } = new List<Lap>();
+
+        /// <summary>Where this tick's laps are gathered before being compared with last tick's.</summary>
+        public List<Lap> LappingNow { get; } = new List<Lap>();
+
+        /// <summary>
+        /// Which rung of M18's ladder last answered for this regiment: 1 straight,
+        /// 2 round it, 3 threaded side-on, 4 through its own, 5 the search.
+        /// </summary>
+        /// <remarks>
+        /// For the log and nothing else — no rule reads it, and it must not
+        /// become one, because a plan that depended on what the last plan said
+        /// would stop being a function of the field. Kept so the ladder reports
+        /// its answer when the answer <i>changes</i>: M11 re-plans on a cadence,
+        /// so a regiment walking across open ground re-decides "straight there"
+        /// dozens of times, and saying so every time buried the recording under
+        /// itself.
+        /// </remarks>
+        public int LastRung { get; set; }
+
         /// <summary>The friendly regiment this one is currently working its way round.</summary>
         /// <remarks>
         /// Kept so the choice of side is made once and then held. Deciding it
@@ -438,6 +498,11 @@ namespace BattleChess.Rules
             FailedReplans = 0;
             GoingRound = UnitId.None;
             ForcedIntoThisFight = false;
+
+            // A fresh order gets the ladder's answer said out loud again, even
+            // if it is the same answer. "Still walking straight" is not news
+            // within one march; it is on a new one.
+            LastRung = 0;
 
             if (order.StanceOverride.HasValue)
                 Stance = order.StanceOverride.Value;

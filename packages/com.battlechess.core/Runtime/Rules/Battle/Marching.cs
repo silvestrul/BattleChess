@@ -123,7 +123,35 @@ namespace BattleChess.Rules
             Facing alongIt = AlongTheLine(unit.Position, destination, unit.Facing);
 
             if (IsClearLine(battle, unit, unit.Position, destination, alongIt))
-                return Straight(new[] { unit.Position, destination });
+            {
+                var line = new[] { unit.Position, destination };
+
+                // W6. The dullest rung, and it still says itself — but only when
+                // it is news. A reader working out why a regiment went where it
+                // did needs to know the ladder stopped at the first rung,
+                // otherwise the absence of a line is ambiguous between "walked
+                // straight there" and "the planner was never asked".
+                //
+                // Once per answer rather than once per plan, because M11 re-plans
+                // on a cadence and a march across open ground is re-decided
+                // dozens of times without anything having changed. Said
+                // unconditionally it was 218 of 297 lines in a twelve-turn
+                // battle, and `NoSingleRuleDrownsOutTheRest` failed the build for
+                // it — correctly. What is worth writing down is that the answer
+                // <i>became</i> the straight line: a regiment that has finished
+                // getting round something and can see its destination again is
+                // an event, and a regiment still walking is not.
+                if (unit.LastRung != 1)
+                    log?.Info("Move",
+                        $"{unit.Def.DisplayName} is walking straight there — {Route(line)}, " +
+                        $"{Vec2.Distance(unit.Position, destination):0} m clear, " +
+                        $"{SecondsToWalk(battle, unit, line):0} s.",
+                        unit.Id);
+
+                unit.LastRung = 1;
+
+                return Straight(line);
+            }
 
             // Rung 2: round whatever is in the way — but only for a march.
             // Closing with an enemy is O5's business and it says centre first,
@@ -176,14 +204,25 @@ namespace BattleChess.Rules
                     {
                         Say(log, unit, blocking,
                             "is going round its own {0} rather than through it",
-                            arching, straight);
+                            arching, straight, arch!, destination,
+                            crabbing < float.MaxValue
+                                ? $" Threading it side-on would have cost {crabbing:0} s."
+                                : " There was no gap to thread.");
+
+                        unit.LastRung = 2;
 
                         return Straight(arch!);
                     }
 
                     Say(log, unit, blocking,
                         "is turning side-on to thread a gap beside its own {0} — its front will not fit",
-                        crabbing, straight);
+                        crabbing, straight, threaded!, destination,
+                        arching < float.MaxValue
+                            ? $" Arching round would have cost {arching:0} s."
+                            : " There was no way round it.",
+                        hold);
+
+                    unit.LastRung = 3;
 
                     return Straight(threaded!, hold);
                 }
@@ -211,7 +250,10 @@ namespace BattleChess.Rules
                     // tried first.
                     Say(log, unit, InTheWay(battle, unit, destination),
                         "is pushing through its own {0} — no way round it and no gap to thread.",
-                        null, null);
+                        null, null, new[] { unit.Position, destination }, destination,
+                        WhatItWillWalkThrough(battle, unit, unit.Position, destination, alongIt));
+
+                    unit.LastRung = 4;
 
                     return Straight(new[] { unit.Position, destination }, through: true);
                 }
@@ -219,7 +261,29 @@ namespace BattleChess.Rules
 
             // Rungs 3 and 4 are not built. Until they are, the search is what
             // answers — which is also what answered before any of this.
-            return new Plan(pathfinder.FindPath(unit.Position, destination, unit.Def.Movement), null, false);
+            PathResult searched = pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
+
+            // W6. The one rung nobody could see. Everything above says which
+            // answer it gave; falling off the bottom of the ladder said nothing
+            // at all, so a route that came back bent for reasons the ladder
+            // never had looked exactly like one the ladder had chosen.
+            //
+            // On the change, like rung one and for the same reason. An attack
+            // closing the last hundred metres falls here on every re-plan —
+            // measured, ten times in a twelve-turn battle for a single pair of
+            // swordsmen — and it is the same fact each time.
+            if (unit.LastRung != 5)
+                log?.Decision("Move",
+                    $"{unit.Def.DisplayName} could not walk, bend or shoulder its way there, so the search " +
+                    (searched.Found
+                        ? $"answered: {Route(searched.Waypoints)}, {searched.Distance:0} m, " +
+                          $"{searched.CellsExplored} cells explored."
+                        : $"was asked and found nothing. {searched.FailureDetail} [{searched.Failure}]"),
+                    unit.Id);
+
+            unit.LastRung = 5;
+
+            return new Plan(searched, null, false);
         }
 
         /// <summary>
@@ -349,17 +413,127 @@ namespace BattleChess.Rules
         /// </param>
         private static void Say(
             IBattleLog? log, UnitInstance unit, UnitInstance? blocker, string what,
-            float? seconds, float? straight)
+            float? seconds, float? straight, IReadOnlyList<Vec2> route, Vec2 destination,
+            string alsoConsidered, IReadOnlyList<Facing?>? hold = null)
         {
             if (log == null) return;
 
             string cost = seconds.HasValue && straight.HasValue
                 ? $" — {seconds.Value:0} s against {straight.Value:0} s straight."
-                : string.Empty;
+                : ".";
 
             log.Decision("Move",
-                $"{unit.Def.DisplayName} " + string.Format(what, blocker?.Def.DisplayName ?? "own troops") + cost,
+                $"{unit.Def.DisplayName} " +
+                string.Format(what, blocker?.Def.DisplayName ?? "own troops") + cost +
+                $" {Route(route, hold)}.{Aside(route, unit.Position, destination)}{alsoConsidered}",
                 unit.Id);
+        }
+
+        /// <summary>
+        /// The route itself, written out, with the front each leg is walked on
+        /// where a leg asks for one.
+        /// </summary>
+        /// <remarks>
+        /// <b>W6.</b> Every rung of the ladder used to name itself and none of
+        /// them named the line. That is the wrong half: which rung answered is a
+        /// one-word summary of a decision whose substance is <i>where it decided
+        /// to walk</i>, and without the waypoints a report that "the arcs are too
+        /// wide" or "it went through them" could not be checked against anything.
+        /// Findings 13 and 14 were both cracked by pulling coordinates out of the
+        /// recording; both times the coordinates had to come from a line written
+        /// for another purpose.
+        /// </remarks>
+        private static string Route(IReadOnlyList<Vec2> waypoints, IReadOnlyList<Facing?>? hold = null)
+        {
+            var line = new System.Text.StringBuilder("by ");
+
+            for (int i = 0; i < waypoints.Count; i++)
+            {
+                if (i > 0) line.Append(" → ");
+
+                line.Append($"({waypoints[i].X:0},{waypoints[i].Y:0})");
+
+                // Named on the leg that ends here, which is the leg it is the
+                // front for.
+                if (hold != null && i < hold.Count && hold[i].HasValue)
+                    line.Append($" facing {hold[i]!.Value.Degrees:0}°");
+            }
+
+            return line.ToString();
+        }
+
+        /// <summary>
+        /// Which side of the straight line a route passes, and how far off it
+        /// goes.
+        /// </summary>
+        /// <remarks>
+        /// The two questions a detour actually raises. "Left, 24 m off" is
+        /// checkable against the screen in a way that a list of coordinates is
+        /// not, and how far off it swings is the whole of the standing complaint
+        /// that routes sit further from the direct line than they need to.
+        /// </remarks>
+        private static string Aside(IReadOnlyList<Vec2> route, Vec2 from, Vec2 destination)
+        {
+            Vec2 direct = destination - from;
+            float length = direct.Length;
+
+            if (length <= 0f || route.Count <= 2) return string.Empty;
+
+            Vec2 along = direct / length;
+
+            // Positive is left of the line of march, by the usual convention
+            // that x turns into y through a quarter turn anticlockwise.
+            float furthest = 0f;
+
+            for (int i = 1; i < route.Count - 1; i++)
+            {
+                Vec2 offset = route[i] - from;
+                float side = along.X * offset.Y - along.Y * offset.X;
+
+                if (MathF.Abs(side) > MathF.Abs(furthest)) furthest = side;
+            }
+
+            if (MathF.Abs(furthest) < 0.5f) return string.Empty;
+
+            return $" Passing to the {(furthest > 0f ? "left" : "right")}, " +
+                   $"{MathF.Abs(furthest):0} m off the straight line.";
+        }
+
+        /// <summary>
+        /// Who a march is about to walk into, and how far into the first of them
+        /// it is already standing.
+        /// </summary>
+        /// <remarks>
+        /// Only asked when rung three has answered — which is the one case where
+        /// what gets walked through is the point rather than an aside. The
+        /// overlap it is starting from is the part that matters most: a regiment
+        /// that sets off already inside somebody is the shape of finding 15, and
+        /// it took a play-test, a recording and a reproduction to see it because
+        /// no line anywhere reported it.
+        /// </remarks>
+        private static string WhatItWillWalkThrough(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing)
+        {
+            var body = new OrientedRect(from, facing, unit.Footprint);
+            Vec2 travel = to - from;
+
+            int met = 0;
+            string lapped = string.Empty;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (!IsInTheWayOf(unit, other)) continue;
+
+                float overlap = OrientedRect.OverlapFraction(body, other.Shape);
+
+                if (overlap > 0f && lapped.Length == 0)
+                    lapped = $" It sets off already standing in {other.Def.DisplayName}, " +
+                             $"{overlap:0.00} of a body deep.";
+
+                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) met++;
+            }
+
+            return $" {met} of its own on that line.{lapped}";
         }
 
 
