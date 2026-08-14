@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -581,7 +581,7 @@ namespace BattleChess.Rules
 
             Vec2 aim = NearestReachable(battle, unit, want, unit.Position);
 
-            PathResult path = _pathfinder.FindPath(unit.Position, aim, unit.Def.Movement);
+            PathResult path = Marching.PlanTo(battle, unit, _pathfinder, aim);
 
             if (!path.Found || path.Waypoints.Count < 2)
             {

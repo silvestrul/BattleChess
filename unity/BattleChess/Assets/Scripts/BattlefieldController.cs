@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using BattleChess.Contracts;
 using BattleChess.Rules;
@@ -1589,7 +1589,10 @@ namespace BattleChess.Unity
                 destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
             }
 
-            PathResult path = pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
+            // M10: the straight line first, the search only if something is
+            // genuinely in the way. Most player orders across open ground now
+            // never reach the pathfinder at all.
+            PathResult path = Marching.PlanTo(_battle, unit, pathfinder, destination);
 
             // The route overlay and the drawn line show one march. Ordering a
             // wing would have six of them fight over the same LineRenderer and

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules;
@@ -81,6 +81,9 @@ namespace BattleChess.Tests.Battle
 
         private readonly List<int> _armies = new List<int>();
         private readonly IPathfinder _pathfinder;
+
+        /// <summary>The route planner, so tests can ask it what it did.</summary>
+        public IPathfinder Pathfinder => _pathfinder;
 
         public GridTerrainMap Map { get; }
 
@@ -177,7 +180,7 @@ namespace BattleChess.Tests.Battle
             unit.Stance = stance;
             unit.GiveOrder(UnitOrder.MoveTo(destination, bearing: bearing), unit.Position);
 
-            PathResult path = _pathfinder.FindPath(unit.Position, destination, unit.Def.Movement);
+            PathResult path = Marching.PlanTo(State, unit, _pathfinder, destination);
 
             if (!path.Found || path.Waypoints.Count < 2)
                 throw new InvalidOperationException(
