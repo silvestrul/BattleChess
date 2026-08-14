@@ -913,6 +913,41 @@ largest single term in how slow the cavalry looks.
 
 ---
 
+## 18. Nothing ever aims at the middle of a gap — REPRODUCED
+
+`logs/battle-20260814-214159.log`, tick 1547, and it is the fourth report in a row of
+*"it goes through units"*. Reproduced first try off the recorded coordinates by
+`GapInTheLineTests.AGapWideEnoughToThreadIsThreaded`, which is skipped rather than
+deleted because it fails for exactly the right reason.
+
+```
+1547 > pushing through its own Swordsmen — no way round it and no gap to thread.
+       by (247,169) → (219,288). 2 of its own on that line.
+1574 X Cavalry ... standing in its own Archers at (213,213) facing 0°
+```
+
+Archers at (213,213) and Swordsmen at (263,213), both facing east, so both are 20 m
+deep and **there is a 30 m gap between them**. The cavalry is standing *in* that gap
+and is sent straight down it. Side-on it is **20 m** across. It fits with five metres
+either side, and it shouldered through instead.
+
+**Why.** Both rung-two strategies aim relative to a *single* blocker's centre, offset
+by that blocker's half-depth plus the mover's half-width plus the margin. The useful
+aiming point in a formed line is the **midpoint between two neighbours**, and it is
+never a candidate. Crabbing is no help either: it turns side-on along the line **as
+drawn** rather than shifting the line into the space, and here the drawn line clips
+the Archers by about a metre.
+
+So a 30 m gap and a 20 m body produce *"no way round it and no gap to thread"*.
+
+**This reorders the work.** [M26](DECISIONS.md), the costed rung 2/3 comparison, would
+have made this case **worse** — pressing through here is genuinely cheap, and a
+comparison would have chosen it more confidently. The fault is not that the ladder
+weighs the rungs wrongly; it is that the right route was never generated for it to
+weigh. Gap-aiming comes first, and M26 is re-measured after.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
