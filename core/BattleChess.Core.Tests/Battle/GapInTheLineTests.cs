@@ -42,6 +42,68 @@ namespace BattleChess.Tests.Battle
             return field;
         }
 
+
+        /// <summary>
+        /// Finding 19, from `logs/battle-20260814-225633.log` tick 2609 — the
+        /// same symptom as 18 and a different cause again.
+        /// </summary>
+        /// <remarks>
+        /// <code>
+        /// 2609 > pushing through its own Swordsmen — no way round it and no gap
+        ///        to thread. by (245,247) → (283,173). 1 of its own on that line.
+        /// </code>
+        /// An 84 m hop diagonally past <b>one</b> body, with the destination only
+        /// 45 m from that body's centre. Measured: the sweep meets the Swordsmen
+        /// after <b>6 m</b>, and the second leg of the detour is blocked at
+        /// <b>every</b> stand-off from 46 m out to 186 m — while the destination
+        /// itself is clear (<c>FormationFits</c> true). The place is fine; only
+        /// the approach clips.
+        /// </remarks>
+        private static Battlefield TheShortHopPastACorner(
+            out UnitInstance cavalry, out Vec2 destination)
+        {
+            var field = new Battlefield("plains", 225633);
+
+            Battlefield.Hold(field.Add(0, "horsearchers", new Vec2(163f, 213f), Facing.FromDegrees(0f)));
+            Battlefield.Hold(field.Add(0, "archers", new Vec2(213f, 213f), Facing.FromDegrees(0f)));
+            Battlefield.Hold(field.Add(0, "swordsmen", new Vec2(263f, 213f), Facing.FromDegrees(0f)));
+
+            // 179° off the line it is about to walk, as the recording reports.
+            cavalry = field.Add(0, "cavalry", new Vec2(245f, 247f), Facing.FromDegrees(117f));
+
+            destination = new Vec2(283f, 173f);
+
+            return field;
+        }
+
+        [Fact(Skip = "Finding 19 — reproduced and diagnosed, not yet fixed. A one-waypoint detour " +
+                     "cannot express the route this needs, which is a two-bend walk round the body.")]
+        public void AShortHopPastOneCornerGoesRoundTheCorner()
+        {
+            Battlefield field = TheShortHopPastACorner(out UnitInstance cavalry, out Vec2 destination);
+
+            Plan plan = Marching.PlanTo(
+                field.State, cavalry, field.Pathfinder, destination, field.Transcript);
+
+            foreach (string said in field.Transcript.Lines) _out.WriteLine(said);
+
+            // The ground it was sent to is fine — so this is about the approach,
+            // not the destination, and rung three is not covering for a bad order.
+            Assert.True(field.State.FormationFits(cavalry, destination, Facing.FromDegrees(180f)),
+                "The destination itself cannot be stood on, so there is nothing to route to and this " +
+                "measures nothing.");
+
+            Assert.False(
+                Marching.IsClearLine(field.State, cavalry, cavalry.Position, destination,
+                                     Marching.AlongTheLine(cavalry.Position, destination, cavalry.Facing)),
+                "The straight line is clear, so nothing needed avoiding and this measures nothing.");
+
+            Assert.False(plan.PressedThrough,
+                "An 84 m hop past one regiment, with open ground on the far side of it, and the answer " +
+                "was to walk through it. The route it needs comes in from due east along the body's " +
+                "face, which is two bends — and rung two only ever builds one waypoint.");
+        }
+
         [Fact]
         public void AGapWideEnoughToThreadIsThreaded()
         {

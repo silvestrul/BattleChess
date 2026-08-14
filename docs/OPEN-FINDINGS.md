@@ -963,6 +963,52 @@ against a planner that can find these routes at all.
 
 ---
 
+## 19. A one-waypoint detour cannot get round a body you are already touching
+
+`logs/battle-20260814-225633.log` tick 2609, and the honest summary is that
+[M27](DECISIONS.md) fixed the gap case — the corridor at x=238 is used at ticks 1616,
+1706 and 1869 — and a **different** shape was underneath it wearing the same symptom.
+
+```
+2609 > pushing through its own Swordsmen — no way round it and no gap to thread.
+       by (245,247) → (283,173). 1 of its own on that line.
+```
+
+An 84 m hop diagonally past **one** body. Reproduced by
+`GapInTheLineTests.AShortHopPastOneCornerGoesRoundTheCorner`, skipped. Measured, and
+the measurements are what make this a diagnosis rather than a guess:
+
+| | |
+|---|---|
+| The sweep meets the Swordsmen after | **6 m** |
+| Second leg of the detour clear at any stand-off from 46 m to 186 m | **no — every one blocked** |
+| The destination itself | **clear** (`FormationFits` true) |
+| All four ways round return | **null** |
+
+So the *place* is fine and only the *approach* clips. The destination sits 45 m from
+the blocker's centre, and a body 40 m across cannot swing into it diagonally without
+grazing the corner — measured at 76 m along a 96 m leg, clearing x = 273 by nothing at
+all. Standing off further does not help, because the second leg always ends at the same
+too-close point however wide the arc that reaches it.
+
+**The route that works comes in from due east, along the body's face** — where the
+regiment presents its 20 m depth to the Swordsmen instead of its 40 m front. That is a
+**two-bend** route, and every rung-two strategy builds exactly **one** waypoint. The
+construction cannot express the answer.
+
+**What this is really saying.** Aiming a single point perpendicular to the line of
+march has now been patched three times — [M19a](DECISIONS.md)'s margin, stepping out
+in [WaysRound](../packages/com.battlechess.core/Runtime/Rules/Battle/WaysRound.cs),
+and M27's corridors — and each fix uncovered the next arrangement it cannot describe.
+The general answer is to route around the blocker's **inflated rectangle**: expand the
+body by the mover's own reach, walk its corners, and the close destination, the corner
+graze and the gap all fall out of one construction. That is task **#43** ("trajectory
+first, sidestep, and a rectangle that pathfinds") and it is a redesign of rung two
+rather than a patch to it — so it is recorded here rather than attempted in the same
+pass that landed M27.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
