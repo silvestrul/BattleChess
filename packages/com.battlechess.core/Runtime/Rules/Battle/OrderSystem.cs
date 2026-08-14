@@ -33,6 +33,18 @@ namespace BattleChess.Rules
         private const float RepathThresholdMetres = 20f;
 
         /// <summary>
+        /// How near its aim point a regiment has to be before re-planning is
+        /// simply re-arriving, in metres.
+        /// </summary>
+        /// <remarks>
+        /// Wider than the half metre movement calls an arrival, because this is
+        /// not asking "has it got there" but "would planning again achieve
+        /// anything" — and a route two metres long achieves nothing except a
+        /// second arrival in the recording.
+        /// </remarks>
+        private const float StandingCloseEnough = 3f;
+
+        /// <summary>
         /// How far an aggressive unit will chase from where it was last ordered.
         /// </summary>
         /// <remarks>
@@ -524,6 +536,13 @@ namespace BattleChess.Rules
             // which is the entire thing dressing exists to prevent.
             bool shouldDress = WillDressOn(unit, target);
 
+            // Deliberately NOT put behind the re-planning cadence, though that
+            // was the obvious reading of finding 7. A chase is a run of short
+            // routes each of which completes almost at once, so throttling the
+            // "not marching" case to one tick in five made a pursuer move in
+            // bursts with pauses between them: measured, a broken enemy took
+            // 24% losses whether it was chased or left entirely alone. The
+            // repeated work was real; the cadence was the wrong lever for it.
             bool stale = !unit.IsMarching ||
                          shouldDress != unit.DressingBearing.HasValue ||
                          (tick % RepathIntervalTicks == 0 &&
@@ -580,6 +599,12 @@ namespace BattleChess.Rules
             }
 
             Vec2 aim = NearestReachable(battle, unit, want, unit.Position);
+
+            // Already standing where the order wants it. Planning a route of no
+            // length to here would complete on the tick it was made and report
+            // an arrival for it, which is the other half of finding 7: not only
+            // was the work repeated, every repetition announced itself.
+            if (Vec2.Distance(unit.Position, aim) <= StandingCloseEnough) return true;
 
             PathResult path = Marching.PlanTo(battle, unit, _pathfinder, aim);
 

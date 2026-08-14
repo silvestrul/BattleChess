@@ -101,6 +101,54 @@ namespace BattleChess.Tests.Battle
             Assert.Equal(2, route.Waypoints.Count);
         }
 
+        private sealed class Sink : IBattleLog
+        {
+            public int Arrivals;
+            public void Record(in BattleLogEntry entry)
+            {
+                if (entry.Message.Contains("is attacking")) Arrivals++;
+            }
+        }
+
+        [Fact]
+        public void ARegimentThatHasCaughtItsQuarryDoesNotKeepArriving()
+        {
+            var field = new Battlefield("plains", 31400);
+
+            UnitInstance quarry = field.Add(1, "spearmen", field.Centre, Facing.West);
+            Battlefield.Hold(quarry);
+
+            UnitInstance chaser = field.Add(0, "archers", field.Centre - new Vec2(400f, 0f), Facing.East);
+            Battlefield.Press(chaser, quarry);
+
+            var log = new Sink();
+
+            var clock = new BattleClock();
+            foreach (IBattleSystem system in field.Clock.Systems) clock.Add(system);
+
+            for (int tick = 0; tick < BattleClock.TicksPerTurn * 6; tick++)
+                clock.Advance(field.State, log);
+
+            _out.WriteLine($"{log.Arrivals} arrivals over {BattleClock.TicksPerTurn * 6} ticks.");
+
+            // Finding 7, and it is shooters rather than chargers. A regiment
+            // that closes to melee is held by contact and stops re-planning on
+            // its own; one told to attack from a distance halts at its range,
+            // never enters contact, and so re-planned the same route to the
+            // same place every tick — each completing on the tick it was made
+            // and announcing an arrival for it.
+            //
+            // Measured here: 221 re-plans over 360 ticks before, 35 after. The
+            // remainder is real and is recorded as still open — something moves
+            // the aim point by more than a step every ten ticks or so, and it
+            // is not this. The bar is set to catch the return of the every-tick
+            // behaviour, which is what made a recording unreadable, rather than
+            // to claim the whole fault is closed.
+            Assert.True(log.Arrivals < 60,
+                $"It re-planned {log.Arrivals} times in 360 ticks. A regiment already standing where its " +
+                "order wants it is building a route of no length and arriving down it again.");
+        }
+
         [Fact]
         public void ItIsTheBodyThatHasToFitAndNotTheCentreLine()
         {

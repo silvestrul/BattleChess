@@ -324,6 +324,28 @@ The fix is presumably to leave a completed route alone when the order is an
 attack on somebody already in contact, but that is movement work and wants its
 own pass.
 
+
+**Reduced, not closed.** Reproduced in a test at last, and it is **shooters, not
+chargers** — which is why it did not turn up sooner. A regiment that closes to
+melee is held by contact and stops re-planning on its own; one told to attack from
+a distance halts at its range ([O2](DECISIONS.md)), never enters contact, and so
+re-plans the same route to the same place for ever.
+
+Two halves. The order was re-issued although it was already carried out, and each
+re-issue built a route of no length that completed on the tick it was made and
+announced an arrival for it. Guarding on "already standing where the order wants
+it" takes it from **221 re-plans in 360 ticks to 35**.
+
+The remaining 35 are real and unexplained: something moves the aim point by more
+than three metres about once every ten ticks, for a shooter that is standing still
+shooting a stationary target. Not chased further here. The test bar is set to catch
+a return of the every-tick behaviour rather than to claim the fault is closed.
+
+**Also worth recording: throttling this behind the re-planning cadence is wrong**,
+which was the obvious reading and was tried. A chase is a run of short routes each
+completing almost at once, so one-tick-in-five made a pursuer move in bursts with
+pauses — measured, a broken enemy took 24% losses whether it was chased or left
+entirely alone. The repeated work was real; the cadence was the wrong lever.
 ---
 
 ## 8. The stall detector calls a detour a stall, and M13 cannot land without it
