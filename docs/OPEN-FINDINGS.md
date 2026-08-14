@@ -426,6 +426,46 @@ is deliberately going the wrong way for a while.
 
 ---
 
+## 9. Prediction works, and rung two cannot yet choose what to do with it
+
+**Attempted, reverted, not committed.** Pinned by two skipped tests in
+`PredictedPathsTests`.
+
+**M16 itself was straightforward and did work.** Walking a friendly regiment along
+its own route at its own pace, and comparing both bodies where they would be *at
+the same moment* rather than where they stand when the order is given. A regiment
+that will have marched on stopped being planned around, which is the case worth
+having. Only friends are ever predicted, and [M16a](DECISIONS.md) costs nothing to
+honour because enemies are not planning obstacles at all — there is nothing to
+predict them *for*.
+
+**Two things had to change together and only one did.** Prediction has to reach
+`FirstBodyInTheWay` as well as `IsClearLine`, or the planner is certain it is
+blocked and cannot name what by — it then falls through to shouldering past a
+regiment that is not even there yet. Making both predictive fixed the third
+scenario and broke crabbing.
+
+**The cause is a rule I had implemented wrongly and not noticed until prediction
+made it bite.** [M18](DECISIONS.md) rung two is *one* rung — "arching **or**
+crabbing, whichever costs less by M17" — and the code tried arching first and took
+it if it worked. With prediction finding blockers further out, the arch started
+succeeding in cases where crabbing was the better answer, so a regiment walked a
+hundred and sixty metres round a wall it could have slipped through the middle of.
+
+Costing the two against each other was written and did not settle it either: the
+arch measured cheaper than the crab (about 500 against 566, crabbed legs charged at
+two fifths of pace) and *still* should not have been chosen, because the arch was
+not walkable — both tangents put the body across the wall. So either `ArchAround`
+is returning a way round that its own leg checks should have rejected, or those
+checks disagree with the sampled `IsClearLine` they now share. **That is the thing
+to find first**, and it is a disagreement between two answers to the same question,
+which is this project's most common fault by a distance.
+
+Reverted whole rather than left half-landed. Crabbing and rung three, which were
+green before it, are untouched.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
