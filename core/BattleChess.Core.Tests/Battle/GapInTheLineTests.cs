@@ -42,8 +42,7 @@ namespace BattleChess.Tests.Battle
             return field;
         }
 
-        [Fact(Skip = "Finding 18 — reproduced, not yet fixed. Kept red-in-waiting rather than " +
-                     "deleted: it fails for the right reason, first try, off the recorded coordinates.")]
+        [Fact]
         public void AGapWideEnoughToThreadIsThreaded()
         {
             Battlefield field = TheGapItWouldNotThread(out UnitInstance cavalry, out Vec2 destination);
@@ -65,6 +64,19 @@ namespace BattleChess.Tests.Battle
                 Marching.IsClearLine(field.State, cavalry, cavalry.Position, destination,
                                      Marching.AlongTheLine(cavalry.Position, destination, cavalry.Facing)),
                 "The straight line is clear, so no gap needed threading and this measures nothing.");
+
+            // Between the two of them, not round the outside of the pair. Both
+            // avoid a collision and only one of them is threading the gap, so
+            // asserting only "did not press through" would pass on the wrong
+            // behaviour.
+            bool wentBetweenThem = false;
+
+            foreach (Vec2 at in plan.Path.Waypoints)
+                if (at.X > 233f && at.X < 243f) wentBetweenThem = true;
+
+            Assert.True(wentBetweenThem,
+                "It kept clear, but not by going between them — no waypoint is in the gap. " +
+                "Going the long way round the whole pair is a different answer to threading.");
 
             Assert.False(plan.PressedThrough,
                 "There is a 30 m gap between the two of them and the regiment is 20 m across side-on. " +

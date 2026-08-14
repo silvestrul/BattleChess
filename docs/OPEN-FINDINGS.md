@@ -913,7 +913,7 @@ largest single term in how slow the cavalry looks.
 
 ---
 
-## 18. Nothing ever aims at the middle of a gap — REPRODUCED
+## ~~18. Nothing ever aims at the middle of a gap~~ — FIXED ([M27](DECISIONS.md))
 
 `logs/battle-20260814-214159.log`, tick 1547, and it is the fourth report in a row of
 *"it goes through units"*. Reproduced first try off the recorded coordinates by
@@ -940,11 +940,26 @@ the Archers by about a metre.
 
 So a 30 m gap and a 20 m body produce *"no way round it and no gap to thread"*.
 
-**This reorders the work.** [M26](DECISIONS.md), the costed rung 2/3 comparison, would
-have made this case **worse** — pressing through here is genuinely cheap, and a
-comparison would have chosen it more confidently. The fault is not that the ladder
-weighs the rungs wrongly; it is that the right route was never generated for it to
-weigh. Gap-aiming comes first, and M26 is re-measured after.
+**The fix, and the part the first attempt got wrong.** Reading the gaps off a
+projection onto the line of march does *not* work, and measuring it is what showed
+why: at this angle the same 30 m gap projects to **20 m** — exactly the regiment's
+own depth, no room at all. A gap has an axis of its own. So bodies near the march are
+paired up, the clear space between each pair is measured **along the line joining
+them**, and a passage wide enough is walked *square through the gap* rather than along
+the march. The recorded case now plans
+
+```
+by (247,169) → (238,165) → (238,261) facing 0° → (219,288)
+```
+
+— x = 238 is the midpoint of the gap exactly, and the whole detour is 12 m off the
+drawn line. Nearest corridor to that line wins, by [M4](DECISIONS.md).
+
+**And it confirms the reordering.** The threaded route costs 72 s against 45 s for
+walking straight through. [M26](DECISIONS.md), the costed rung 2/3 comparison, would
+have taken the press-through — so shipping it before this would have made the case
+worse, and the pace question it raised is still open and now needs re-measuring
+against a planner that can find these routes at all.
 
 ---
 

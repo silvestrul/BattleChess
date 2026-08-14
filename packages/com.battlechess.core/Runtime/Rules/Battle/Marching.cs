@@ -550,6 +550,164 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
+        /// Room wanted either side of a regiment threading a gap, in metres.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately much smaller than <see cref="TangentMarginMetres"/>. That
+        /// margin is for aiming past a corner from a distance, where drift is the
+        /// enemy; this is for a body walking down a corridor it can see the sides
+        /// of. Asking eight metres either side would have refused the thirty
+        /// metre gap this rule exists to thread.
+        /// </remarks>
+        private const float RoomEitherSideMetres = 2f;
+
+        /// <summary>
+        /// A corridor between two of its own, wide enough to walk down side-on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M27</b>, and the fourth report of *"it goes through units"* in a
+        /// row. Recorded on 14 August: Archers at (213,213) and Swordsmen at
+        /// (263,213), both facing east, both twenty metres deep — <b>thirty
+        /// metres of daylight between them</b>. The cavalry was standing in that
+        /// gap, was sent straight down it, is twenty metres across side-on, and
+        /// shouldered through saying there was no way round and no gap to thread.
+        /// </para>
+        /// <para>
+        /// Every aiming point the planner could generate was tied to <i>one</i>
+        /// body: half its depth, plus half the mover's width, plus the margin,
+        /// stepping outward from its centre. The point that matters in a formed
+        /// line is the <b>midpoint between two neighbours</b>, and nothing ever
+        /// produced one. Crabbing was no help either, because it turned side-on
+        /// along the line <i>as drawn</i> rather than moving the line into the
+        /// space — and the drawn line clipped the Archers by about a metre.
+        /// </para>
+        /// <para>
+        /// So the bodies are projected onto the axis across the march, sorted,
+        /// and the spaces between them read off. Any space that admits the
+        /// regiment side-on is a corridor, and the nearest such corridor to the
+        /// line the player drew wins — because [M4](../../../../docs/DECISIONS.md)
+        /// says the line drawn is the order, and a way round should depart from
+        /// it as little as it can.
+        /// </para>
+        /// <para>
+        /// Only reached once crabbing along the drawn line has failed, so the
+        /// common march never does any of this.
+        /// </para>
+        /// </remarks>
+        private static IReadOnlyList<Vec2>? ThreadAGap(
+            BattleState battle, UnitInstance unit, Vec2 destination, out Facing?[]? hold)
+        {
+            hold = null;
+
+            Vec2 travel = destination - unit.Position;
+            float length = travel.Length;
+
+            if (length <= 0f) return null;
+
+            Vec2 along = travel / length;
+            Facing straight = Facing.FromVector(travel);
+
+            // Ours, near enough to this march to be worth pairing up. Kept as
+            // the bodies themselves rather than as projections, because a gap
+            // has an axis of its own and projecting onto the march destroys it.
+            var near = new List<UnitInstance>();
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (!IsInTheWayOf(unit, other)) continue;
+
+                Vec2 offset = other.Position - unit.Position;
+
+                float ahead = Vec2.Dot(offset, along);
+                float reach = other.Shape.ProjectedRadius(along);
+
+                if (ahead + reach < 0f || ahead - reach > length) continue;
+
+                near.Add(other);
+            }
+
+            if (near.Count < 2) return null;
+
+            float wanted = unit.Footprint.Depth + RoomEitherSideMetres * 2f;
+
+            // Every pair of them, and the passage between the two. Quadratic in
+            // a list that is already only the bodies on this march — a handful,
+            // and only on the rung the common march never reaches.
+            var mouths = new List<(float Off, Vec2 Mouth, Vec2 Far, Facing Front)>();
+
+            for (int i = 0; i < near.Count; i++)
+            for (int j = i + 1; j < near.Count; j++)
+            {
+                UnitInstance a = near[i];
+                UnitInstance b = near[j];
+
+                Vec2 between = b.Position - a.Position;
+                float apart = between.Length;
+
+                if (apart <= 0f) continue;
+
+                Vec2 side = between / apart;
+
+                // The clear space between the two, measured along the line that
+                // joins them — which is the only direction in which "the gap
+                // between these two" means anything.
+                float clear = apart - a.Shape.ProjectedRadius(side) - b.Shape.ProjectedRadius(side);
+
+                if (clear < wanted) continue;
+
+                // A corridor runs square through the gap, not along the march.
+                // That distinction is the whole of this rule: at the recorded
+                // angle the same thirty metre gap projects onto the line of
+                // march as twenty — exactly the regiment's own depth, no room at
+                // all — and threading it means going through the way the gap
+                // faces, then resuming.
+                var axis = new Vec2(-side.Y, side.X);
+
+                if (Vec2.Dot(axis, along) < 0f) axis = new Vec2(-axis.X, -axis.Y);
+
+                // Square to the corridor is side-on to it: the regiment presents
+                // its depth to the walls either side.
+                Facing front = Facing.FromVector(side);
+
+                Vec2 centre = (a.Position + b.Position) * 0.5f;
+
+                float deep = MathF.Max(a.Shape.ProjectedRadius(axis), b.Shape.ProjectedRadius(axis))
+                             + unit.Footprint.Width * 0.5f + TangentMarginMetres;
+
+                Vec2 mouth = centre - axis * deep;
+                Vec2 far = centre + axis * deep;
+
+                // How far this passage sits from the line that was drawn, so the
+                // nearest one is tried first — M4 again: the drawn line is the
+                // order, and a way round departs from it as little as it can.
+                Vec2 offset = centre - unit.Position;
+
+                mouths.Add((MathF.Abs(along.X * offset.Y - along.Y * offset.X), mouth, far, front));
+            }
+
+            if (mouths.Count == 0) return null;
+
+            mouths.Sort((x, y) => x.Off.CompareTo(y.Off));
+
+            foreach ((float _, Vec2 mouth, Vec2 far, Facing front) in mouths)
+            {
+                if (!IsClearLeg(battle, unit, unit.Position, mouth, unit.Facing)) continue;
+                if (!IsClearLine(battle, unit, mouth, far, front, leaving: true)) continue;
+                if (!IsClearLeg(battle, unit, far, destination, front)) continue;
+
+                // Named on the leg it belongs to, as the drawn-line crab does:
+                // square to the corridor going through it, and back onto the
+                // line of march for the run out to the destination.
+                hold = new Facing?[] { null, null, front, straight };
+
+                return new[] { unit.Position, mouth, far, destination };
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Whether the straight line works for a body turned side-on to it.
         /// </summary>
         /// <remarks>
@@ -592,7 +750,12 @@ namespace BattleChess.Rules
             if (!IsClearLine(battle, unit, unit.Position, destination, sideOn))
             {
                 sideOn = leftIsNearer ? right : left;
-                if (!IsClearLine(battle, unit, unit.Position, destination, sideOn)) return null;
+
+                // M27. The line as drawn does not admit the regiment on either
+                // edge — so try moving the line into the space instead of
+                // giving up on it.
+                if (!IsClearLine(battle, unit, unit.Position, destination, sideOn))
+                    return ThreadAGap(battle, unit, destination, out hold);
             }
 
             // Where the squeeze actually is. The regiment marches up to it
