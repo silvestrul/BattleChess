@@ -44,25 +44,99 @@ namespace BattleChess.Rules
         public static readonly IWayRound PastTheFirstThing = new PastTheFirst();
         public static readonly IWayRound PastEverythingInTheWay = new PastEverything();
         public static readonly IWayRound RoundAndRoundAgain = new RoundTwice();
+        public static readonly IWayRound StandOffOrBendAgain = new EitherWay();
 
         /// <summary>Every way of looking, for the harness that compares them.</summary>
         public static IReadOnlyList<IWayRound> All { get; } =
-            new[] { PastTheFirstThing, PastEverythingInTheWay, RoundAndRoundAgain };
+            new[] { PastTheFirstThing, PastEverythingInTheWay, RoundAndRoundAgain, StandOffOrBendAgain };
 
         /// <summary>What a march uses when nobody says otherwise.</summary>
         /// <remarks>
-        /// Chosen by measurement, not by argument. Against six crowds of
-        /// increasing density, the old rule found a way round <b>once</b>; both
-        /// repairs found one four times. What separated them was M17 — how much
-        /// the detour costs — and bending twice around two bodies adds about
-        /// half what standing off further from one does: 26 m against 58 m on
-        /// the densest crowd either could solve. More waypoints, less walking.
-        ///
-        /// The other two are kept rather than deleted. They are the record of
-        /// what was tried, and the table that chose between them is a test that
-        /// still runs.
+        /// <para>
+        /// Chosen by measurement, and <b>changed once by better measurement</b>.
+        /// Against six invented crowds all three were separated only by how far
+        /// the detour ran, so M17 broke the tie and bending twice round two
+        /// bodies won on distance — 26 m against 58 m. That was a real
+        /// comparison of an arrangement nobody plays in.
+        /// </para>
+        /// <para>
+        /// The arrangement everybody plays in is a <b>formed line</b>: regiments
+        /// drawn up shoulder to shoulder, which is what M2 exists to permit, and
+        /// where the way round the neighbour on one side is blocked by the
+        /// neighbour on the other. Taken from a recording in which every one of
+        /// eight press-throughs set off from the same forty metres of ground:
+        /// </para>
+        /// <code>
+        /// gets a regiment out of its own line, out of six:
+        ///   past the first thing           0
+        ///   past everything in the way     6
+        ///   round, and round again         1     &lt;- the old default
+        /// </code>
+        /// <para>
+        /// Standing off further is not a prettier detour, it is the only one
+        /// that exists when both flanks are occupied. But swapping to it wholesale
+        /// only moved the failure: among <i>scattered</i> bodies, standing off far
+        /// enough to clear the first lands on the third, and bending twice is the
+        /// better answer there. Picking either is picking which half of the game
+        /// to be wrong in — which is what the whole table was built to stop.
+        /// </para>
+        /// <para>
+        /// So the fourth candidate runs both and takes the cheaper, and it is
+        /// the only one that is never the worst:
+        /// </para>
+        /// <code>
+        ///                            crowds  pressed  out of a line
+        ///   past the first thing        2       4          0
+        ///   past everything in the way  4       2          6
+        ///   round, and round again      4       2          1
+        ///   stand off, or bend again    4       2          6
+        /// </code>
+        /// <para>
+        /// The other three are kept rather than deleted. They are the record of
+        /// what was tried, and all three tables that chose between them are
+        /// tests that still run.
+        /// </para>
         /// </remarks>
-        public static IWayRound Default { get; } = RoundAndRoundAgain;
+        public static IWayRound Default { get; } = StandOffOrBendAgain;
+
+        /// <summary>
+        /// Stand off further, or bend again — whichever gets there, and the
+        /// cheaper of the two when both do.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Built because the tables said neither of the other two dominates, and
+        /// the failures are in different places. Standing off further is the only
+        /// answer from inside a formed line, where the way round the neighbour
+        /// on one flank is blocked by the neighbour on the other: 6 of 6 against
+        /// 1. Bending twice is the better answer among <i>scattered</i> bodies,
+        /// where standing off far enough to clear the first one lands on the
+        /// third.
+        /// </para>
+        /// <para>
+        /// Picking one is picking which half of the game to be wrong in. Running
+        /// both costs a second cast on the rung that is already the uncommon
+        /// case, and the cheaper wins by [M22](../../../../docs/DECISIONS.md) as
+        /// arching and crabbing already do.
+        /// </para>
+        /// </remarks>
+        private sealed class EitherWay : IWayRound
+        {
+            public string Name => "stand off, or bend again";
+
+            public IReadOnlyList<Vec2>? Round(BattleState battle, UnitInstance unit, Vec2 destination)
+            {
+                IReadOnlyList<Vec2>? off = PastEverythingInTheWay.Round(battle, unit, destination);
+                IReadOnlyList<Vec2>? bent = RoundAndRoundAgain.Round(battle, unit, destination);
+
+                if (off == null) return bent;
+                if (bent == null) return off;
+
+                return Marching.SecondsToWalk(battle, unit, bent) < Marching.SecondsToWalk(battle, unit, off)
+                    ? bent
+                    : off;
+            }
+        }
 
         /// <summary>
         /// The two aiming points either side of a body, and the axis they lie on.

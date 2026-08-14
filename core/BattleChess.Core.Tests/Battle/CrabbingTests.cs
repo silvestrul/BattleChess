@@ -40,8 +40,16 @@ namespace BattleChess.Tests.Battle
         /// right to prefer it, so nothing would ever crab and the test would
         /// pass while proving nothing.
         /// </remarks>
+        /// <param name="blocks">
+        /// How far the wall runs either side of the gap. Two is enough to make
+        /// threading cheaper than walking round; thirteen reaches the edge of
+        /// the field, which is what it now takes to leave a regiment with no way
+        /// round at all — standing off further finds one otherwise, and it is
+        /// right to.
+        /// </param>
         private static Battlefield AWallWithAGapInIt(
-            out UnitInstance mover, out Vec2 destination, float gap, IBattleLog? log = null)
+            out UnitInstance mover, out Vec2 destination, float gap, IBattleLog? log = null,
+            int blocks = 2)
         {
             var field = new Battlefield("plains", 32000);
 
@@ -52,7 +60,7 @@ namespace BattleChess.Tests.Battle
 
             foreach (float side in new[] { 1f, -1f })
             {
-                for (int i = 0; i < 2; i++)
+                for (int i = 0; i < blocks; i++)
                 {
                     UnitInstance wall = field.Add(
                         0, "spearmen", field.Centre + new Vec2(0f, side * (inner + i * 40f)), Facing.East);
@@ -222,7 +230,8 @@ namespace BattleChess.Tests.Battle
             // crabbing must not be attempted — and since the far side is open
             // ground, M18 rung three carries it through instead. Standing there
             // for ever is the one answer that is not allowed.
-            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 10f);
+            Battlefield field = AWallWithAGapInIt(
+                out UnitInstance mover, out Vec2 destination, gap: 10f, blocks: 13);
 
             (float left, _, float squarest) = Run(field, mover, destination, turns: 16);
 
@@ -299,7 +308,8 @@ namespace BattleChess.Tests.Battle
             // either. M1 is a strong preference, not an invariant — overlapping
             // your own men is bad, and standing still until the battle ends is
             // worse.
-            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 0f);
+            Battlefield field = AWallWithAGapInIt(
+                out UnitInstance mover, out Vec2 destination, gap: 0f, blocks: 13);
 
             (float left, _, _) = Run(field, mover, destination, turns: 16);
 
@@ -371,7 +381,8 @@ namespace BattleChess.Tests.Battle
         public void PushingThroughItsOwnIsNeverSilent()
         {
             var log = new Heard();
-            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 0f, log);
+            Battlefield field = AWallWithAGapInIt(
+                out UnitInstance mover, out Vec2 destination, gap: 0f, log, blocks: 13);
 
             Listen(field, turns: 16, into: log);
 
@@ -478,7 +489,8 @@ namespace BattleChess.Tests.Battle
             // accidents — and became a way of walking a holding regiment across
             // the field once a march could press through its own on purpose,
             // every tick, for hundreds of metres.
-            Battlefield field = AWallWithAGapInIt(out UnitInstance mover, out Vec2 destination, gap: 0f);
+            Battlefield field = AWallWithAGapInIt(
+                out UnitInstance mover, out Vec2 destination, gap: 0f, blocks: 13);
 
             var stoodAt = new System.Collections.Generic.Dictionary<UnitId, Vec2>();
 

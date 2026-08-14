@@ -324,6 +324,73 @@ namespace BattleChess.Tests.Battle
                 "to come round onto the line.");
         }
 
+        [Fact]
+        public void ARegimentStandingInItsOwnLineCanStillLeaveIt()
+        {
+            // `logs/battle-20260814-140444.log`, and the arrangement is the
+            // whole point. All eight press-throughs in that recording set off
+            // from the same forty metres of ground — (156..213, 149..171) — and
+            // the thing in the way was always a regiment the cavalry was already
+            // standing shoulder to shoulder with:
+            //
+            //   3230 > Cavalry is pushing through its own Archers — no way round
+            //          it and no gap to thread.
+            //   3230   marching from (203,164) to (345,333) — that line is 50°,
+            //          180° off at 3°/s.
+            //
+            // A line drawn up flush is not a fault, it is what a line is (M2).
+            // The steering has always known that a body you are already touching
+            // cannot be what your next step ran into. The planner never learnt
+            // it, so from inside its own line every candidate leg reported a
+            // collision on the first metre and rung two had nothing to offer.
+            var field = new Battlefield("plains", 50000);
+
+            UnitInstance mover = field.Add(0, "cavalry", field.Centre, Facing.East);
+
+            // Its neighbours in the line, flush either side, and one behind —
+            // forty-two metres apart for a forty-metre frontage, which is the
+            // shoulder-to-shoulder M2 exists to permit.
+            foreach (Vec2 at in new[] { new Vec2(0f, 42f), new Vec2(0f, -42f), new Vec2(-24f, 0f) })
+            {
+                UnitInstance neighbour = field.Add(0, "archers", field.Centre + at, Facing.East);
+                Battlefield.Hold(neighbour);
+            }
+
+            // Away and clear, up and to the right, exactly as drawn.
+            Vec2 destination = field.Centre + new Vec2(142f, 169f);
+
+            _out.WriteLine($"the line is {Facing.FromVector(destination - mover.Position).Degrees:0}°, " +
+                           $"and it is standing on {mover.Facing.Degrees:0}°.\n");
+
+            var pressed = new List<float>();
+
+            _out.WriteLine($"{"standing on",-14}{"rung",-22}");
+            _out.WriteLine(new string('-', 36));
+
+            for (float off = 0f; off < 360f; off += 45f)
+            {
+                mover.Facing = Facing.FromDegrees(off);
+
+                Plan plan = Marching.PlanTo(field.State, mover, field.Pathfinder, destination);
+
+                string rung =
+                    plan.PressedThrough ? "3 — through its own"
+                    : plan.Path.CellsExplored > 0 ? "search"
+                    : plan.Hold != null ? "2 — crabbed"
+                    : plan.Path.Waypoints.Count > 2 ? "2 — round it"
+                    : "1 — straight there";
+
+                _out.WriteLine($"{off,-14:0}{rung,-22}");
+
+                if (plan.PressedThrough) pressed.Add(off);
+            }
+
+            Assert.True(pressed.Count == 0,
+                $"Standing in its own line it shouldered through them at {string.Join("°, ", pressed)}° " +
+                "rather than walking out of it. The neighbours it is drawn up beside are where it is " +
+                "standing, not what is in its way.");
+        }
+
         // ---- M20: the charge covers every tick it applies to ------------------
 
         [Fact]
@@ -336,9 +403,11 @@ namespace BattleChess.Tests.Battle
             // itself proves nothing.
             var field = new Battlefield("plains", 47000);
 
-            // A wall with no way round and no gap, so rung three is the only
-            // answer and the passage is long enough to count.
-            for (int i = -2; i <= 2; i++)
+            // A wall right across the field, so rung three is genuinely the
+            // only answer. Five blocks is not enough any more: standing off
+            // further finds a way round the end of a short wall, and it is
+            // right to.
+            for (int i = -12; i <= 12; i++)
             {
                 UnitInstance wall = field.Add(0, "spearmen", field.Centre + new Vec2(0f, i * 40f), Facing.East);
                 Battlefield.Hold(wall);

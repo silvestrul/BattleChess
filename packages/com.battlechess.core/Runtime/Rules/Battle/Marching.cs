@@ -392,7 +392,7 @@ namespace BattleChess.Rules
         /// enough in pace without turning the long way into it as well.
         /// </para>
         /// </remarks>
-        private static IReadOnlyList<Vec2>? CrabThrough(
+        public static IReadOnlyList<Vec2>? CrabThrough(
             BattleState battle, UnitInstance unit, Vec2 destination, out Facing?[]? hold)
         {
             hold = null;
@@ -506,11 +506,69 @@ namespace BattleChess.Rules
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 if (!IsInTheWayOf(unit, other)) continue;
+                if (WhereItIsStanding(body, travel, other)) continue;
 
                 if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Whether a body is something the regiment is already standing in,
+        /// rather than something its line runs into.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M25.</b> The steering has always known this — <i>"already lapping
+        /// them, so this step cannot be what did it"</i> — and the planner never
+        /// did, which made leaving a formed line impossible to plan.
+        /// </para>
+        /// <para>
+        /// A line stands shoulder to shoulder; that is what a line is and what
+        /// [M2](../../../../docs/DECISIONS.md) exists to permit. Square a
+        /// regiment onto a new bearing in the middle of one and its rectangle
+        /// laps its neighbours before it has moved a metre — a 40 × 20 body
+        /// turned 50° reaches 21.7 m along the old axis where it reached 10.
+        /// The sweep then reported a collision at distance zero on every
+        /// candidate leg, so rung two found nothing on either side, twice over,
+        /// and rung three answered.
+        /// </para>
+        /// <para>
+        /// Recorded: eight press-throughs in one game, every one of them setting
+        /// off from the same forty metres of ground, every one of them blocked
+        /// by a regiment the cavalry was drawn up beside. It reproduces at every
+        /// bearing of the compass.
+        /// </para>
+        /// <para>
+        /// Overlap and not proximity, deliberately. A neighbour merely close by
+        /// is still an obstacle and still gets gone round; what is excused is
+        /// the ground the regiment is already occupying. Getting clear of that
+        /// is the steering's job, and since [M20](../../../../docs/DECISIONS.md)
+        /// and [M1a](../../../../docs/DECISIONS.md) it is a job with a price and
+        /// a rule about who gives way.
+        /// </para>
+        /// <para>
+        /// <b>And overlapping is not enough on its own.</b> Written without the
+        /// second half, this excused a body directly in front as readily as one
+        /// alongside — so two regiments ordered to swap places met in the middle,
+        /// each decided the other was merely where it was standing, and both
+        /// planned straight on. Neither routed round, neither yielded, and they
+        /// leant on each other for the rest of the game. Caught by
+        /// `TwoRegimentsSwappingPlacesDoNotDeadlock`, which is eight months older
+        /// than any of this.
+        /// </para>
+        /// <para>
+        /// The line between the two cases is which way the body lies. Abreast or
+        /// behind is ground you are leaving. Ahead is a regiment you are walking
+        /// into, and no amount of already touching it makes that untrue.
+        /// </para>
+        /// </remarks>
+        private static bool WhereItIsStanding(OrientedRect body, Vec2 along, UnitInstance other)
+        {
+            if (!OrientedRect.Overlaps(body, other.Shape)) return false;
+
+            return Vec2.Dot(other.Position - body.Centre, along) <= 0f;
         }
 
         /// <summary>
@@ -667,6 +725,12 @@ namespace BattleChess.Rules
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 if (!IsInTheWayOf(unit, other)) continue;
+
+                // M25, and asked here too so that "what is in the way" and "is
+                // this line clear" cannot come back with different answers —
+                // otherwise the planner would aim past a body the clearance
+                // check had already excused, or excuse one it was aiming past.
+                if (WhereItIsStanding(body, travel, other)) continue;
 
                 if (!Sweep.FirstTouch(body, travel, other.Shape, out float reach)) continue;
 

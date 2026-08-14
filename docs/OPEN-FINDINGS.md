@@ -715,6 +715,65 @@ Rung-3 frequency across the six comparison crowds is unchanged for the two repai
 
 ---
 
+## 14. Cavalry goes right through units, again — FIXED ([M25](DECISIONS.md))
+
+From `logs/battle-20260814-140444.log` and a screenshot, 14 Aug 2026. The tell was
+in the coordinates: **all eight press-throughs set off from the same forty metres
+of ground** — (156..213, 149..171) — and the thing in the way was always a regiment
+the cavalry was drawn up beside. On screen that is the cluster where Horse Archers,
+Archers, Cavalry and Swordsmen are printed on top of one another.
+
+**a. The planner could not leave a formed line.** A line stands shoulder to
+shoulder; that is what a line is and what [M2](DECISIONS.md) exists to permit.
+Square a regiment onto a new bearing in the middle of one and its rectangle laps
+its neighbours before it has moved a metre — a 40 × 20 body turned 50° reaches
+21.7 m along the old axis where it reached 10. Every candidate leg then reported a
+collision at distance zero, so rung two found nothing on either side and rung three
+answered. It reproduces **at every bearing of the compass**, which is what marks it
+out from finding 13's 90° hole.
+
+**b. Excusing an overlap outright deadlocks a swap.** Written without its second
+half, M25 let two regiments ordered onto each other's ground each decide the other
+was merely where it was standing; both planned straight on, neither yielded, and
+they leant together for the rest of the game. Caught by
+`TwoRegimentsSwappingPlacesDoNotDeadlock`, which is much older than any of this —
+**verified by stashing**, since it passes at `d30d5dc` and failed in the tree. The
+line is which way the body lies: abreast or behind is ground you are leaving.
+
+**c. The way round was chosen on arrangements nobody plays in — FIXED.** With the
+planner able to see out of a line at all, the default still could not get out of
+one. This is the evidence the last two passes said they were waiting for:
+
+```
+                           crowds  pressed  out of a line
+  past the first thing        2       4          0
+  past everything in the way  4       2          6
+  round, and round again      4       2          1     <- was the default
+  stand off, or bend again    4       2          6     <- is now
+```
+
+Swapping to *past everything* wholesale only moved the failure: among scattered
+bodies, standing off far enough to clear the first lands on the third. Picking
+either is picking which half of the game to be wrong in, which is what the table
+was built to stop — so the fourth candidate runs both and takes the cheaper, and is
+the only one that is never worst. The formed-line table is now a test that runs.
+
+**What it bought.** A solid wall two blocks either side is now **gone round** rather
+than shouldered through, and rung three is reached only when the wall runs to the
+edge of the field. Four tests had to be given genuinely impassable arrangements
+because their old ones were no longer impassable — which is the fix, not a
+regression. Crabbing is **not** dead: measured across five gap-and-depth
+arrangements it still wins wherever it is cheaper.
+
+**d. A test was asserting arithmetic, not a rule.** `AShortCrabBeatsALongArch...`
+named which way each of two walls should be passed. Both namings were guesses: on
+one of them the two answers measure 332 s and 328 s, a margin of one per cent. It
+is now `RungTwoTakesWhicheverOfArchingAndCrabbingIsCheaper`, which computes both
+candidates and asserts the plan matches the cheaper — the rule M22a actually
+states, rather than today's rounding.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

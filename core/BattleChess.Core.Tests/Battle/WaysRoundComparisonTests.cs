@@ -57,6 +57,113 @@ namespace BattleChess.Tests.Battle
             return field;
         }
 
+        /// <summary>
+        /// A regiment leaving the line it is drawn up in — taken from a recording.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The arrangement the synthetic crowds above were standing in for, and
+        /// getting wrong. In `logs/battle-20260814-140444.log` every one of eight
+        /// press-throughs set off from the same forty metres of ground, and the
+        /// thing in the way was always a regiment the mover was drawn up beside.
+        /// A line stands shoulder to shoulder — that is what a line is
+        /// (<b>M2</b>) — so the way round the neighbour on one side is blocked by
+        /// the neighbour on the other, and standing off further is the only
+        /// answer that exists.
+        /// </para>
+        /// <para>
+        /// This is the evidence the last pass said it was waiting for before
+        /// touching the default again: *"the comparison arrangements should be
+        /// rebuilt from real battles, or it will be picked wrong a second time
+        /// with equal confidence."* Six crowds invented to reproduce a fault are
+        /// not a battle.
+        /// </para>
+        /// </remarks>
+        private static Battlefield AFormedLine(out UnitInstance mover, out Vec2 destination, int neighbours)
+        {
+            var field = new Battlefield("plains", 36001);
+
+            mover = field.Add(0, "cavalry", field.Centre, Facing.East);
+
+            // Flush either side at forty-two metres for a forty-metre frontage,
+            // then a second rank behind, then wider still.
+            var line = new[]
+            {
+                new Vec2(0f, 42f), new Vec2(0f, -42f), new Vec2(-24f, 0f),
+                new Vec2(0f, 84f), new Vec2(0f, -84f), new Vec2(-24f, 42f),
+            };
+
+            for (int i = 0; i < neighbours && i < line.Length; i++)
+            {
+                UnitInstance beside = field.Add(0, "archers", field.Centre + line[i], Facing.East);
+                Battlefield.Hold(beside);
+            }
+
+            // Away and clear, as drawn on screen.
+            destination = field.Centre + new Vec2(142f, 169f);
+
+            return field;
+        }
+
+        [Fact]
+        public void TheTableOfWhoGetsOutOfItsOwnLine()
+        {
+            _out.WriteLine($"{"beside",-8}{"way round",-30}{"found",-8}{"legs",-6}{"extra m",-9}");
+            _out.WriteLine(new string('-', 62));
+
+            var foundBy = new Dictionary<string, int>();
+
+            for (int beside = 1; beside <= 6; beside++)
+            {
+                foreach (IWayRound way in WaysRound.All)
+                {
+                    Battlefield field = AFormedLine(out UnitInstance mover, out Vec2 destination, beside);
+
+                    IReadOnlyList<Vec2>? round = way.Round(field.State, mover, destination);
+
+                    string legs = round == null ? "-" : (round.Count - 1).ToString();
+                    string extra = "-";
+
+                    if (round != null)
+                    {
+                        float total = 0f;
+                        for (int i = 1; i < round.Count; i++) total += Vec2.Distance(round[i - 1], round[i]);
+
+                        extra = $"{total - Vec2.Distance(mover.Position, destination):0}";
+
+                        foundBy.TryGetValue(way.Name, out int n);
+                        foundBy[way.Name] = n + 1;
+                    }
+
+                    _out.WriteLine($"{beside,-8}{way.Name,-30}{(round != null ? "yes" : "NO"),-8}{legs,-6}{extra,-9}");
+                }
+
+                _out.WriteLine("");
+            }
+
+            _out.WriteLine("got out of the line, out of six:");
+            foreach (IWayRound way in WaysRound.All)
+            {
+                foundBy.TryGetValue(way.Name, out int n);
+                _out.WriteLine($"  {way.Name,-30} {n}");
+            }
+
+            foundBy.TryGetValue(WaysRound.Default.Name, out int chosen);
+
+            int best = 0;
+            foreach (IWayRound way in WaysRound.All)
+            {
+                foundBy.TryGetValue(way.Name, out int n);
+                if (n > best) best = n;
+            }
+
+            Assert.True(chosen >= best,
+                $"The way round in use gets a regiment out of its own line {chosen} times out of six, " +
+                $"where the best of the three manages {best}. This is the arrangement the game is " +
+                "actually played in — every regiment starts in a line — so it is the one the default " +
+                "has to be chosen on.");
+        }
+
         [Fact]
         public void TheTableOfWhoFindsAWayRound()
         {

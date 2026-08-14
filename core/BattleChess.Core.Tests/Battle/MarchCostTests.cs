@@ -180,36 +180,56 @@ namespace BattleChess.Tests.Battle
         }
 
         [Fact]
-        public void AShortCrabBeatsALongArchAndALongCrabDoesNot()
+        public void RungTwoTakesWhicheverOfArchingAndCrabbingIsCheaper()
         {
             // M18 rung two is "arching or crabbing, whichever costs less by M17",
-            // and until now it was "arching, and crabbing only if that fails" —
-            // which is not a comparison at all. One wall is deep enough that
-            // going round it is a long way, so the crab should win; the other is
-            // two blocks, so going round the end is quicker and should.
-            Battlefield deep = AWallWithAGap(out UnitInstance threader, out Vec2 farSide, gap: 30f, blocks: 4);
-            Battlefield thin = AWallWithAGap(out UnitInstance archer, out Vec2 pastIt, gap: 30f, blocks: 1);
+            // and until M22a it was "arching, and crabbing only if that fails" —
+            // which is not a comparison at all.
+            //
+            // Asked as the rule rather than as an outcome, which is the second
+            // go at this test. The first named which way each of two walls
+            // should be passed, and both namings were guesses: on a single block
+            // either side of a 30 m gap the two answers measure 332 s and 328 s,
+            // a margin of one per cent. Asserting an outcome on a near-tie is
+            // asserting that today's arithmetic does not change, not that the
+            // rule holds.
+            _out.WriteLine($"{"gap",-6}{"blocks",-8}{"arch s",-9}{"crab s",-9}{"took",-12}");
+            _out.WriteLine(new string('-', 44));
 
-            Plan threading = Marching.PlanTo(deep.State, threader, deep.Pathfinder, farSide);
-            Plan arching = Marching.PlanTo(thin.State, archer, thin.Pathfinder, pastIt);
+            int compared = 0;
 
-            bool crabbed = threading.Hold != null;
-            bool arched = arching.Hold == null && arching.Path.Waypoints.Count > 2;
+            foreach ((float gap, int blocks) in new[]
+            {
+                (30f, 1), (30f, 2), (30f, 4), (25f, 3), (35f, 2),
+            })
+            {
+                Battlefield field = AWallWithAGap(out UnitInstance mover, out Vec2 to, gap, blocks);
 
-            _out.WriteLine($"deep wall: {threading.Path.Waypoints.Count} waypoints, " +
-                           $"{(crabbed ? "crabbed" : "not crabbed")}, " +
-                           $"{Marching.SecondsToWalk(deep.State, threader, threading.Path.Waypoints, threading.Hold):0} s.");
-            _out.WriteLine($"thin wall: {arching.Path.Waypoints.Count} waypoints, " +
-                           $"{(arched ? "arched" : "not arched")}, " +
-                           $"{Marching.SecondsToWalk(thin.State, archer, arching.Path.Waypoints, arching.Hold):0} s.");
+                IReadOnlyList<Vec2>? arch = WaysRound.Default.Round(field.State, mover, to);
+                IReadOnlyList<Vec2>? crab = Marching.CrabThrough(field.State, mover, to, out Facing?[]? hold);
 
-            Assert.True(crabbed,
-                "Four blocks either side of a 30 m gap, and it chose to walk round the whole wall rather " +
-                "than turn side-on and go through the middle. Rung two is meant to weigh the two.");
+                if (arch == null || crab == null) continue;
 
-            Assert.True(arched,
-                "One block either side, and it turned side-on to thread a gap it could have stepped round " +
-                "in a fraction of the time. The comparison runs the wrong way.");
+                float arching = Marching.SecondsToWalk(field.State, mover, arch);
+                float crabbing = Marching.SecondsToWalk(field.State, mover, crab, hold);
+
+                Plan plan = Marching.PlanTo(field.State, mover, field.Pathfinder, to);
+                bool took = plan.Hold != null;
+
+                _out.WriteLine($"{gap,-6:0}{blocks,-8}{arching,-9:0}{crabbing,-9:0}" +
+                               $"{(took ? "crabbed" : "arched"),-12}");
+
+                compared++;
+
+                Assert.True(took == crabbing < arching,
+                    $"With a {gap:0} m gap and {blocks} blocks either side, crabbing costs {crabbing:0} s " +
+                    $"and arching {arching:0}, and it {(took ? "crabbed" : "arched")}. Rung two takes the " +
+                    "cheaper of the two; it is not a preference for one of them.");
+            }
+
+            Assert.True(compared >= 3,
+                $"Only {compared} of the arrangements offered both answers, so almost nothing was " +
+                "compared. Fix the arrangements, not the bar.");
         }
 
         // ---- M20: being inside your own men costs pace ------------------------
@@ -469,7 +489,9 @@ namespace BattleChess.Tests.Battle
             // rule anywhere recorded what a detour was worth. Whether the arcs
             // are too wide is a judgement, and a judgement needs a number.
             var log = new Heard();
-            AWallWithAGap(out UnitInstance mover, out Vec2 destination, gap: 30f, blocks: 1, log);
+            // A gap too narrow to crab and a wall short enough to step round, so
+            // rung two answers by arching rather than threading.
+            AWallWithAGap(out UnitInstance mover, out Vec2 destination, gap: 10f, blocks: 2, log);
 
             string? said = null;
             for (int i = 0; i < log.Lines.Count && said == null; i++)
