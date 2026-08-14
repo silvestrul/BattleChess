@@ -670,6 +670,51 @@ from the recording instead of argued about.
 
 ---
 
+## 13. Cavalry goes right through units — FIXED ([M24](DECISIONS.md))
+
+From `logs/battle-20260814-135004.log`, 14 Aug 2026. Eight lines, one march, and
+the whole fault in it:
+
+```
+225 > Cavalry is pushing through its own Spearmen — no way round it and no gap to thread.
+225   marching from (313,413) to (169,159) — that line is -120° ... 120° off at 3°/s
+312   reached its destination in 87 s, averaging 3,3 m/s, 33 s of it shouldering through its own.
+```
+
+Open field, one regiment in the way, and rung two found nothing.
+
+**Isolated by controlling the variable rather than by guessing at the arrangement.**
+Two attempts to reproduce it from the recorded geometry both found rung two happily
+— one blocker is not enough, and neither is a crowd. What settles it is holding the
+regiment, the line and the ground fixed and varying only the front it happens to be
+standing on when the order arrives:
+
+| off the line | 0° | 30° | 60° | **90°** | 120° | 150° | 180° |
+|---|---|---|---|---|---|---|---|
+| rung | 2 | 2 | 2 | **3 — through its own** | 2 | 2 | 2 |
+
+At 90° the body presents its whole forty-metre frontage broadside to the line, so
+the corridor the planner sweeps is twice the one the regiment will actually occupy.
+Rung one fails, rung two fails, rung three answers. Every question the planner asked
+was asked of `unit.Facing` — the front it is standing on now, which it is already in
+the act of shedding.
+
+**Why it was always the cavalry.** At 3°/s with a 120° wheel it spends forty seconds
+of every re-order badly misaligned, so it sits in the broadside window far more of
+the time than infantry that is not being re-ordered constantly. Nothing about the
+rule was cavalry-specific; the exposure was.
+
+**Predates the M23 pass**, which is worth saying plainly — the leg-aware clearance
+added then made the planner ask the *right* question about legs two onward while
+still asking the wrong one about leg one. Fixing it needed M23 first: only once a
+regiment genuinely comes round onto every leg is "the front it will hold" a thing
+the planner can know.
+
+Rung-3 frequency across the six comparison crowds is unchanged for the two repairs
+(2 of 6) and improved for the baseline (5 → 4), so nothing was traded for it.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

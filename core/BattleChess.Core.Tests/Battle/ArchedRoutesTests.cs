@@ -240,6 +240,90 @@ namespace BattleChess.Tests.Battle
                 "checked one shape and the march walked another.");
         }
 
+        // ---- The entering front is held for a stretch, not for a leg ----------
+
+        [Fact]
+        public void ARegimentSetOffAcrossItsOwnFrontStillFindsTheWayRound()
+        {
+            // Taken line for line from `logs/battle-20260814-135004.log`:
+            //
+            //   Cavalry is pushing through its own Spearmen — no way round it
+            //   and no gap to thread.
+            //   marching from (313,413) to (169,159) — that line is -120°,
+            //   120° off at 3°/s — 40 ticks to come round.
+            //
+            // Open field, one regiment in the way, and rung two found nothing.
+            //
+            // The cause is M23's other half, overdone. Each leg is checked at
+            // the front it will be walked on *and* at the front it is entered
+            // on — but a regiment 120° off its line of march presents its whole
+            // forty-metre frontage broadside to it, and asking for that corridor
+            // to be clear along the entire leg refuses nearly everything. The
+            // entering front is held for the stretch the wheel takes, not for
+            // the leg.
+            var field = new Battlefield("plains", 49000);
+
+            UnitInstance blocker = field.Add(0, "spearmen", field.Centre, Facing.East);
+            Battlefield.Hold(blocker);
+
+            // A start area, not an empty field. One regiment on the line is not
+            // enough to reproduce this: the recorded battle had six drawn up
+            // together, and it is the crowd that makes a broadside corridor
+            // impossible to fit down.
+            foreach (Vec2 at in new[]
+            {
+                new Vec2(-90f, 60f), new Vec2(-40f, -75f), new Vec2(70f, -70f), new Vec2(120f, 40f),
+            })
+            {
+                UnitInstance nearby = field.Add(0, "spearmen", field.Centre + at, Facing.East);
+                Battlefield.Hold(nearby);
+            }
+
+            // Facing due east and sent south-west: the recorded march is
+            // (313,413) to (169,159), so half of that offset either side of the
+            // regiment that was in the way.
+            var half = new Vec2(72f, 127f);
+
+            UnitInstance mover = field.Add(0, "cavalry", field.Centre + half, Facing.East);
+            Vec2 destination = field.Centre - half;
+
+            Facing line = Facing.FromVector(destination - mover.Position);
+
+            _out.WriteLine($"the line is {line.Degrees:0}°.\n");
+            _out.WriteLine($"{"facing",-10}{"off the line",-14}{"rung",-22}");
+            _out.WriteLine(new string('-', 46));
+
+            // The same regiment, the same line, the same ground — and only the
+            // front it happens to be standing on when the order arrives is
+            // varied. The planner should not care: it is about to come round
+            // onto the line whatever it is pointing at now.
+            var pressed = new List<float>();
+
+            for (float off = 0f; off <= 180f; off += 30f)
+            {
+                mover.Facing = line.RotatedBy(off * MathF.PI / 180f);
+
+                Plan plan = Marching.PlanTo(field.State, mover, field.Pathfinder, destination);
+
+                string rung =
+                    plan.PressedThrough ? "3 — through its own"
+                    : plan.Path.CellsExplored > 0 ? "search"
+                    : plan.Hold != null ? "2 — crabbed"
+                    : plan.Path.Waypoints.Count > 2 ? "2 — round it"
+                    : "1 — straight there";
+
+                _out.WriteLine($"{mover.Facing.Degrees,-10:0}{off,-14:0}{rung,-22}");
+
+                if (plan.PressedThrough) pressed.Add(off);
+            }
+
+            Assert.True(pressed.Count == 0,
+                $"It shouldered through its own at {string.Join("°, ", pressed)}° off the line, and walked " +
+                "round the same regiments on the same ground when it happened to be pointing the right " +
+                "way. Which front it is standing on decides nothing about where it can go — it is about " +
+                "to come round onto the line.");
+        }
+
         // ---- M20: the charge covers every tick it applies to ------------------
 
         [Fact]

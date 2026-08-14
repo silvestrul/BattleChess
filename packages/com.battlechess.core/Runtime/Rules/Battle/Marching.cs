@@ -118,8 +118,11 @@ namespace BattleChess.Rules
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
 
-            // Rung 1: straight there.
-            if (IsClearLine(battle, unit, unit.Position, destination, unit.Facing))
+            // Rung 1: straight there — asked of the body squared to the line
+            // it is about to walk, not the one it is standing in (M24).
+            Facing alongIt = AlongTheLine(unit.Position, destination, unit.Facing);
+
+            if (IsClearLine(battle, unit, unit.Position, destination, alongIt))
                 return Straight(new[] { unit.Position, destination });
 
             // Rung 2: round whatever is in the way — but only for a march.
@@ -198,7 +201,7 @@ namespace BattleChess.Rules
                 // second test a regiment ordered onto its own troops pressed
                 // into them and stopped there, having never said why.
                 if (GroundIsClear(battle, unit, unit.Position, destination - unit.Position,
-                                  (destination - unit.Position).Length, unit.Facing) &&
+                                  (destination - unit.Position).Length, alongIt) &&
                     NobodyStandingAt(battle, unit, destination))
                 {
                     // The one that must never be silent. Two regiments sharing
@@ -323,7 +326,8 @@ namespace BattleChess.Rules
 
         /// <summary>Whatever is standing in the way of the straight line.</summary>
         private static UnitInstance? InTheWay(BattleState battle, UnitInstance unit, Vec2 destination) =>
-            FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
+            FirstBodyInTheWay(battle, unit, unit.Position, destination,
+                              AlongTheLine(unit.Position, destination, unit.Facing), out _);
 
         /// <summary>
         /// Reports which rung of the ladder answered, once, as it is decided.
@@ -423,7 +427,7 @@ namespace BattleChess.Rules
             // Crabbing the whole way would arrive at the far end still side-on
             // and at two fifths pace for a journey that never needed it.
             UnitInstance? tight =
-                FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out float upTo);
+                FirstBodyInTheWay(battle, unit, unit.Position, destination, straight, out float upTo);
 
             if (tight == null) return null;
 
@@ -534,16 +538,47 @@ namespace BattleChess.Rules
         public static bool IsClearLeg(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing entering)
         {
-            Vec2 leg = to - from;
-            if (leg.IsNearZero) return IsClearLine(battle, unit, from, to, entering);
-
-            Facing holding = Facing.FromVector(leg);
+            Facing holding = AlongTheLine(from, to, entering);
 
             if (!IsClearLine(battle, unit, from, to, holding)) return false;
 
             if (Facing.AbsoluteDelta(entering, holding) < 0.01f) return true;
 
             return IsClearLine(battle, unit, from, to, entering);
+        }
+
+        /// <summary>
+        /// The front a regiment will hold while walking a line.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M24.</b> The planner used to ask every one of its questions about
+        /// <c>unit.Facing</c> — the front the regiment happens to be standing on
+        /// at the moment the order arrives. That is a transient. The regiment is
+        /// about to come round onto the line ([M3](../../../../docs/DECISIONS.md),
+        /// and [M23](../../../../docs/DECISIONS.md) now makes it true of every
+        /// leg), so the shape that travels is the one squared to the line, and
+        /// the shape it is standing in has nothing to do with where it can go.
+        /// </para>
+        /// <para>
+        /// Measured: the same regiment, the same line, the same ground, and only
+        /// the front it was left on varied. At 0°, 30°, 60°, 120°, 150° and 180°
+        /// off the line it walked round its own. At <b>90°</b> — presenting its
+        /// whole forty-metre frontage broadside, so the swept corridor is twice
+        /// as wide as the one it will actually occupy — rung one failed, rung
+        /// two failed, and it shouldered straight through them.
+        /// </para>
+        /// <para>
+        /// The wheel at the start is real and is not the plan's business. It is
+        /// the steering's, which is what the steering is for; the plan is about
+        /// the line.
+        /// </para>
+        /// </remarks>
+        public static Facing AlongTheLine(Vec2 from, Vec2 to, Facing fallback)
+        {
+            Vec2 leg = to - from;
+
+            return leg.IsNearZero ? fallback : Facing.FromVector(leg);
         }
 
         /// <summary>

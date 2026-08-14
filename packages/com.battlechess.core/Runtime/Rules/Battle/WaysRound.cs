@@ -72,7 +72,8 @@ namespace BattleChess.Rules
         {
             Vec2 across = new Vec2(-travel.Y, travel.X).Normalised();
 
-            var body = new OrientedRect(unit.Position, unit.Facing, unit.Footprint);
+            var body = new OrientedRect(
+                unit.Position, Marching.AlongTheLine(Vec2.Zero, travel, unit.Facing), unit.Footprint);
 
             return (across,
                     blocker.Shape.ProjectedRadius(across)
@@ -97,7 +98,9 @@ namespace BattleChess.Rules
             public IReadOnlyList<Vec2>? Round(BattleState battle, UnitInstance unit, Vec2 destination)
             {
                 UnitInstance? blocker =
-                    Marching.FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
+                    Marching.FirstBodyInTheWay(battle, unit, unit.Position, destination,
+                                              Marching.AlongTheLine(unit.Position, destination, unit.Facing),
+                                              out _);
 
                 if (blocker == null) return null;
 
@@ -115,7 +118,9 @@ namespace BattleChess.Rules
 
                     // M23: each leg checked at the front it will be walked on,
                     // entering on the one before it.
-                    if (!Marching.IsClearLeg(battle, unit, unit.Position, through, unit.Facing)) continue;
+                    if (!Marching.IsClearLeg(battle, unit, unit.Position, through,
+                                             Marching.AlongTheLine(unit.Position, through, unit.Facing)))
+                        continue;
 
                     Facing onward = Facing.FromVector(through - unit.Position);
                     if (!Marching.IsClearLeg(battle, unit, through, destination, onward)) continue;
@@ -157,7 +162,9 @@ namespace BattleChess.Rules
             public IReadOnlyList<Vec2>? Round(BattleState battle, UnitInstance unit, Vec2 destination)
             {
                 UnitInstance? blocker =
-                    Marching.FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
+                    Marching.FirstBodyInTheWay(battle, unit, unit.Position, destination,
+                                              Marching.AlongTheLine(unit.Position, destination, unit.Facing),
+                                              out _);
 
                 if (blocker == null) return null;
 
@@ -176,7 +183,9 @@ namespace BattleChess.Rules
 
                         Vec2 through = blocker.Position + (side == 0 ? across : -across) * beside;
 
-                        if (!Marching.IsClearLeg(battle, unit, unit.Position, through, unit.Facing)) continue;
+                        if (!Marching.IsClearLeg(battle, unit, unit.Position, through,
+                                             Marching.AlongTheLine(unit.Position, through, unit.Facing)))
+                        continue;
 
                         Facing onward = Facing.FromVector(through - unit.Position);
                         if (!Marching.IsClearLeg(battle, unit, through, destination, onward)) continue;
@@ -219,7 +228,9 @@ namespace BattleChess.Rules
             public IReadOnlyList<Vec2>? Round(BattleState battle, UnitInstance unit, Vec2 destination)
             {
                 UnitInstance? blocker =
-                    Marching.FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
+                    Marching.FirstBodyInTheWay(battle, unit, unit.Position, destination,
+                                              Marching.AlongTheLine(unit.Position, destination, unit.Facing),
+                                              out _);
 
                 if (blocker == null) return null;
 
@@ -240,7 +251,8 @@ namespace BattleChess.Rules
                     // Each bend appends the point it reaches, so the endpoints
                     // arrive with them. Adding the destination again here put a
                     // duplicate on the end of every route it produced.
-                    if (!Bend(battle, unit, unit.Position, through, unit.Facing, legs)) continue;
+                    if (!Bend(battle, unit, unit.Position, through,
+                              Marching.AlongTheLine(unit.Position, through, unit.Facing), legs)) continue;
 
                     Facing onward = Facing.FromVector(through - unit.Position);
                     if (!Bend(battle, unit, through, destination, onward, legs)) continue;
@@ -273,7 +285,8 @@ namespace BattleChess.Rules
                 }
 
                 UnitInstance? second =
-                    Marching.FirstBodyInTheWay(battle, unit, from, to, unit.Facing, out _);
+                    Marching.FirstBodyInTheWay(battle, unit, from, to,
+                                              Marching.AlongTheLine(from, to, unit.Facing), out _);
 
                 if (second == null) return false;
 
