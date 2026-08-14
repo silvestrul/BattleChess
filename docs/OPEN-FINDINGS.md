@@ -514,12 +514,34 @@ message is emitted immediately before the return that stops the regiment) but no
 test discriminates, so the next play-test is the verification. The behaviour guard
 that exists says so in its own comment.
 
-**b. Rung three fires far too readily — open.** Five press-throughs in 126 lines,
+**b. Rung three fires far too readily — FIXED, by measurement.** Five press-throughs in 126 lines,
 including on a 99 m march with a single regiment nearby. It is meant to be the last
 resort and is behaving like the common case. Cause is almost certainly that
 `ArchAround` is one obstruction deep and requires both its legs to be *entirely*
 clear, which fails constantly in a crowded start area — so a way round that plainly
 exists is never found and the ladder drops to shouldering past.
+
+Confirmed exactly, and then repaired by comparison rather than by choosing. The
+way round was made pluggable and three candidates run against six crowds of
+increasing density:
+
+| crowd | past the first thing | past everything | round, and round again |
+|---|---|---|---|
+| 1 | ✓ +7 m | ✓ +7 m | ✓ +7 m |
+| 2 | **no** | ✓ +27 m | ✓ **+17 m** |
+| 3 | **no** | ✓ +41 m | ✓ **+26 m** |
+| 4 | **no** | ✓ +58 m | ✓ **+26 m** |
+| 5–6 | no | no | no |
+
+The old rule found a way round **once in six**. Both repairs found one four times,
+so what separated them was [M17](DECISIONS.md) — bending twice around two bodies
+adds about half what standing off further from one does. Shouldering through fell
+from five crowds in six to two.
+
+Crowds five and six defeat all three, and that is the honest limit of a cast: it is
+what [M19b](DECISIONS.md)'s search trigger is for, and what rung three covers until
+that exists. **All three candidates are kept**, with the table that chose between
+them as a test that still runs.
 
 **c. The wheels are enormous — open, and this is [T2](DECISIONS.md).** Wheels of
 170°, 150°, 147°, 146° and 129° in one short game, each 24 to 42 ticks at 4°/s.

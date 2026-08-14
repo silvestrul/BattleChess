@@ -111,7 +111,7 @@ namespace BattleChess.Rules
         /// </remarks>
         public static Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
-            IBattleLog? log = null)
+            IBattleLog? log = null, IWayRound? wayRound = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
@@ -128,7 +128,7 @@ namespace BattleChess.Rules
             // the two rules in charge of the same approach.
             if (unit.Order.Kind != OrderKind.Attack)
             {
-                IReadOnlyList<Vec2>? arch = ArchAround(battle, unit, destination);
+                IReadOnlyList<Vec2>? arch = (wayRound ?? WaysRound.Default).Round(battle, unit, destination);
 
                 if (arch != null)
                 {
@@ -342,75 +342,6 @@ namespace BattleChess.Rules
                 unit.Position + along * exit,
                 destination
             };
-        }
-
-        /// <summary>
-        /// Goes round the first thing in the way, by whichever side costs less.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// <b>M18</b> rung two. Two candidates and no more: past one end of the
-        /// obstruction or past the other, aimed at its tangent rather than at
-        /// some guessed angle, so the way round hugs what it is avoiding instead
-        /// of swinging wide of it.
-        /// </para>
-        /// <para>
-        /// Scored by total distance, which is <b>M17</b>: among lines that work,
-        /// take the one that loses least to going round. Terrain speed is not in
-        /// it and must not be — marching into a swamp is a decision the player
-        /// made, and a route that quietly took the dry way would be overruling
-        /// an order rather than carrying it out.
-        /// </para>
-        /// <para>
-        /// One obstruction deep, deliberately. Going round the thing behind the
-        /// thing behind the thing is a search, and there is already a search for
-        /// that.
-        /// </para>
-        /// </remarks>
-        private static IReadOnlyList<Vec2>? ArchAround(BattleState battle, UnitInstance unit, Vec2 destination)
-        {
-            UnitInstance? blocker =
-                FirstBodyInTheWay(battle, unit, unit.Position, destination, unit.Facing, out _);
-
-            // Stopped by ground rather than by anybody. Going round terrain is
-            // what the search is genuinely good at, and guessing at a tangent
-            // for a shape with no centre would be guessing.
-            if (blocker == null) return null;
-
-            Vec2 travel = destination - unit.Position;
-            if (travel.IsNearZero) return null;
-
-            Vec2 across = new Vec2(-travel.Y, travel.X).Normalised();
-
-            var body = new OrientedRect(unit.Position, unit.Facing, unit.Footprint);
-
-            float beside = blocker.Shape.ProjectedRadius(across)
-                         + body.ProjectedRadius(across)
-                         + TangentMarginMetres;
-
-            IReadOnlyList<Vec2>? best = null;
-            float shortest = float.MaxValue;
-
-            // One side then the other, in an order that never depends on where
-            // anybody happens to be standing — two ways round that are equally
-            // good must be picked between the same way every time this is asked,
-            // or the route flickers between them at the re-planning cadence.
-            for (int side = 0; side < 2; side++)
-            {
-                Vec2 through = blocker.Position + (side == 0 ? across : -across) * beside;
-
-                if (!IsClearLine(battle, unit, unit.Position, through, unit.Facing)) continue;
-                if (!IsClearLine(battle, unit, through, destination, unit.Facing)) continue;
-
-                float cost = Vec2.Distance(unit.Position, through) + Vec2.Distance(through, destination);
-
-                if (cost >= shortest) continue;
-
-                shortest = cost;
-                best = new[] { unit.Position, through, destination };
-            }
-
-            return best;
         }
 
         /// <summary>
