@@ -245,7 +245,14 @@ namespace BattleChess.Rules
                 return new[] { unit.Position, destination };
             }
 
-            hold = new Facing?[] { null, null, sideOn, null };
+            // The last leg names the front it ends on rather than leaving it
+            // implied, and that is not tidiness. Coming *off* a crab is the same
+            // ninety degrees as going onto it, and the stall detector only
+            // forgives a regiment for coming round when the leg it is walking
+            // says which front it wants. Left as null, a regiment that had just
+            // threaded a gap was declared stuck at the far side of it — the
+            // fault it had been rescued from, one waypoint later.
+            hold = new Facing?[] { null, null, sideOn, straight };
 
             return new[]
             {

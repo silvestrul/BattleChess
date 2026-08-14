@@ -757,7 +757,17 @@ namespace BattleChess.Rules
                 // crossable and the formation has to fit on it — so what is
                 // being set aside is M1 alone, and only because the planner has
                 // already tried every way of honouring it.
-                unit.Position = route.PressingThrough
+                // Two kinds of leg the steering must not second-guess. One has
+                // given up on keeping clear on purpose. The other is threading a
+                // gap side-on, where the planner has already checked that this
+                // body fits along this line at this front — and the steering,
+                // which knows only that friends are close on both sides, called
+                // it hemmed in with no way round either flank and stopped it
+                // dead in the gap. The stall detector then agreed. Both were
+                // describing the manoeuvre working.
+                bool trustTheRoute = route.PressingThrough || route.HoldThisLeg.HasValue;
+
+                unit.Position = trustTheRoute
                     ? next
                     : MakeRoomForFriends(battle, unit, next, tick, log);
             }

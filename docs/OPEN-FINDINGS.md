@@ -402,21 +402,30 @@ have stalled either — verified by reverting the line and watching the test pas
 unchanged. It becomes load-bearing when crabbing makes a detour slow enough to
 outlast the detector's patience, which is the original trigger and is still ahead.
 
-**Mostly closed by crabbing, and the residue is specific.** Threading a gap side-on
-went from *never getting through* to arriving with **two** spurious stall reports,
-down from four. What is left is one turn, not a class of fault: turning **onto** a
-crabbed leg is now excused, because the route says that leg wants a front and the
-regiment is plainly coming round onto it; turning **off** it at the far side is
-not, and that is the same ninety degrees against the same fifteen ticks of
-patience.
+**Closed.** Four spurious stall reports, then two, then none. Threading a gap
+side-on now happens without anything claiming it is stuck.
 
-Excusing *any* coming-round rather than only a crabbed leg was tried and **breaks
-M6**. A regiment sent onto its own troops presses against them, asks which way the
-waypoint under its feet lies, gets noise for an answer, and is forgiven for
-standing there for ever — which is precisely the seizure that rule exists to end.
-Guarding the bearing on distance did not rescue it either. Reverted rather than
-tuned at; the honest shape of the fix is probably for a leg to name the front it
-ends on as well as the one it holds.
+The last two were not the stall detector at all, which is why guessing at its
+patience kept failing. Printed, they read:
+
+```
+Swordsmen is hemmed in by its own Spearmen with no way round either flank
+Swordsmen is not getting through and is trying another way round
+```
+
+The first is the **steering**. Squeezing through a gap puts friends close on both
+sides, which is exactly what "hemmed in with no way round either flank" tests for
+— so it stopped the regiment dead in the gap, and the stall detector then agreed
+with it. Both were describing the manoeuvre working.
+
+So a leg that names a front is now trusted by the steering, in the same way a leg
+that has given up on keeping clear already was. The planner has checked that this
+body fits along this line at this front; the steering knows only that friends are
+close. When they disagree, the one that looked is right.
+
+*Two earlier attempts are worth not repeating: excusing any coming-round rather
+than only a crabbed leg breaks M6 outright, and having a crabbed route name the
+front it ends on changed nothing, because the fault was never in the turn.*
 
 **What this means for the plan.** M13 and the [M10](DECISIONS.md) stall rework are
 *mutually* dependent, not sequential — the ordering in task #43 had it as sidestep
