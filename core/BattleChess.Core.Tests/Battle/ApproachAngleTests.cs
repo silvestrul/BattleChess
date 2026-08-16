@@ -109,10 +109,17 @@ namespace BattleChess.Tests.Battle
             return true;
         }
 
-        [Fact(Skip = "The gate for the (place, front) search, written before the model that must pass " +
-                     "it. Fails 12 of 19 on the ladder, which is the measurement the rewrite exists " +
-                     "to move. Un-skip when the search answers.")]
+        [Fact]
         public void EveryApproachAngleFindsAWayThroughTheGap()
+        {
+            foreach (IRoutePlanner planner in RoutePlanners.All)
+            {
+                _out.WriteLine($"--- {planner.Name} ---");
+                Sweep(planner);
+            }
+        }
+
+        private void Sweep(IRoutePlanner planner)
         {
             var failed = new List<string>();
 
@@ -120,7 +127,8 @@ namespace BattleChess.Tests.Battle
             {
                 Battlefield field = TheGapAt(degrees, out UnitInstance mover, out Vec2 destination);
 
-                Plan plan = Marching.PlanTo(field.State, mover, field.Pathfinder, destination);
+                Plan plan = Marching.PlanTo(
+                    field.State, mover, field.Pathfinder, destination, planner: planner);
 
                 bool clear = plan.Found
                              && !plan.PressedThrough
@@ -136,6 +144,10 @@ namespace BattleChess.Tests.Battle
 
                 if (!clear) failed.Add($"{degrees}° ({verdict})");
             }
+
+            _out.WriteLine($"  {19 - failed.Count} of 19 clear.");
+
+            if (planner != RoutePlanners.TheSearch) return;
 
             Assert.True(failed.Count == 0,
                 $"{failed.Count} of 19 approach angles cannot cross a 30 m gap with a regiment 20 m " +

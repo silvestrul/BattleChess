@@ -109,7 +109,27 @@ namespace BattleChess.Rules
         /// route of two waypoints having explored no cells, which is also how it
         /// shows up in a recording and makes the saving legible there.
         /// </remarks>
+        /// <param name="planner">
+        /// Which way of planning to use. Null takes
+        /// <see cref="RoutePlanners.Default"/>, which is the only thing any
+        /// caller in the game passes — the parameter exists so the harness can
+        /// put two planners against the same arrangement and print both answers.
+        /// </param>
         public static Plan PlanTo(
+            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+            IBattleLog? log = null, IWayRound? wayRound = null, IRoutePlanner? planner = null) =>
+            (planner ?? RoutePlanners.Default).PlanTo(battle, unit, pathfinder, destination, log, wayRound);
+
+        /// <summary>
+        /// <b>M18</b>'s ladder: straight line, round it, through its own, and the
+        /// search when none of those answers.
+        /// </summary>
+        /// <remarks>
+        /// Kept whole while the search that supersedes it is measured against it.
+        /// It is reachable only through <see cref="RoutePlanners.TheLadder"/>, and
+        /// it goes once the recordings agree.
+        /// </remarks>
+        public static Plan ByTheLadder(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
             IBattleLog? log = null, IWayRound? wayRound = null)
         {

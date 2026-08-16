@@ -53,7 +53,12 @@ namespace BattleChess.Rules
         /// otherwise it is strictly worse, since turning under way at least
         /// covers a little ground while it happens.
         /// </remarks>
-        private const float PivotBonusWhileHalted = 1.6f;
+        /// <remarks>
+        /// Public because the planner prices a rotation in place with it, and a
+        /// plan costed against a different number than the walk is the fault
+        /// this sweep kept finding in new disguises (the W5 rule).
+        /// </remarks>
+        public const float PivotBonusWhileHalted = 1.6f;
 
         /// <summary>Distance within which a waypoint counts as reached, in metres.</summary>
         private const float ArrivalTolerance = 0.5f;
@@ -68,7 +73,11 @@ namespace BattleChess.Rules
         /// sent in a reasonable time; it just no longer does it faster than
         /// going round would have.
         /// </remarks>
-        private const float PaceWhileInsideItsOwn = 0.6f;
+        /// <remarks>
+        /// Public for the same reason as <see cref="PivotBonusWhileHalted"/>:
+        /// the planner has to price a passage by the rule the march will obey.
+        /// </remarks>
+        public const float PaceWhileInsideItsOwn = 0.6f;
 
         /// <summary>
         /// Whether this regiment is currently sharing ground with one of its own.
