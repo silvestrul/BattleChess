@@ -1026,7 +1026,7 @@ shorter by eye. The fix, if the recordings say it matters, is to search over
 
 ---
 
-## 20. The plan is a promise about a shape the regiment has not taken yet
+## ~~20. The plan is a promise about a shape the regiment has not taken yet~~ — FIXED ([M29](DECISIONS.md))
 
 **This is the root cause, and it is not in the planner.** Four passes were spent on
 route *choice* — [M25a](DECISIONS.md), [M26](DECISIONS.md), [M27](DECISIONS.md),
@@ -1089,16 +1089,22 @@ stutter at unit edges (it clips, contact shoves it, it re-plans), and why each c
 route made things *no better* — the cleverer the route, the more it depends on a front
 being held, and the front is never there in time.
 
-**Two ways to fix it, and the choice is a design one.**
+**Fixed by [M29](DECISIONS.md)**, on the designer's answer — *"route should wait for
+the turn right at the point where it would collide"* — which is better than either
+option that was offered. Waiting at the **mouth** of the leg delays regiments that
+would have cleared the gap anyway; waiting on the **step that would have hit** costs
+nothing when nothing is in the way.
 
-1. **The route waits for the front.** A leg that names a front is not entered until the
-   regiment is on it — come round first, then go. Costs time and looks deliberate;
-   risks a regiment standing in the open turning while under fire.
-2. **The plan allows for the turn.** Place the mouth far enough back that the wheel
-   finishes before the tight part, using the turn rate the planner already knows —
-   `SecondsToWalk` models exactly this and nothing checks clearance with it.
+The hole was precisely locatable once the cause was known. The walker already had a
+*"wheels on the spot until the shape clears"* rule — but it asked `FormationFits`,
+which is **terrain only**, and a leg naming a front was trusted unconditionally
+(`trustTheRoute = route.PressingThrough || route.HoldThisLeg.HasValue`). So the plan
+said "hold 0° here", the steering waved it through, and the regiment walked in at
+−121°.
 
-Recommend **2**, with **1** as the fallback when there is not enough room to turn in.
+**15 ticks → 0**, on the same six marches. Verified by disabling: 15 with it out.
+A body the regiment is *already* standing in never holds it, or M25a's whole reason
+for existing would be undone.
 
 ---
 

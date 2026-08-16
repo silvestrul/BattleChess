@@ -48,8 +48,7 @@ namespace BattleChess.Tests.Battle
             return field;
         }
 
-        [Fact(Skip = "Finding 20 — reproduced and diagnosed, not yet fixed. The regiment enters the " +
-                     "tight part of its route still wheeling onto the front that route was measured for.")]
+        [Fact]
         public void ARouteThePlannerCalledClearIsWalkedClear()
         {
             Battlefield field = ALineAndSomebodyCrossingIt(out UnitInstance mover);

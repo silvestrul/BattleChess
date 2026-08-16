@@ -80,6 +80,52 @@ namespace BattleChess.Rules
         /// are exempt: men running are not a formation and nothing about
         /// keeping order applies to them.
         /// </remarks>
+        /// <summary>
+        /// Whether the regiment has yet come round onto the front its leg was
+        /// measured at.
+        /// </summary>
+        private static bool NotYetOnTheFront(UnitInstance unit, Facing? wanted) =>
+            wanted.HasValue &&
+            Facing.AbsoluteDelta(unit.Facing, wanted.Value) * 180f / MathF.PI > WheelToleranceDegrees;
+
+        /// <summary>
+        /// Whether taking this step would put the regiment into one of its own
+        /// that it is not already standing in.
+        /// </summary>
+        /// <remarks>
+        /// <b>M29.</b> "Not already standing in" is what makes this a wait rather
+        /// than a cage. A regiment that sets off from inside one of its own —
+        /// [M25a](../../../../docs/DECISIONS.md), and the reason the detour legs
+        /// are allowed to ignore what they start lapped by — must still be able
+        /// to walk out of it, and would otherwise be held here for ever by the
+        /// very body it is leaving.
+        /// </remarks>
+        private static bool WouldLapOneOfItsOwn(
+            BattleState battle, UnitInstance unit, Vec2 to, Facing facing)
+        {
+            var stepped = new OrientedRect(to, facing, unit.Footprint);
+            OrientedRect here = unit.Shape;
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id) continue;
+                if (other.Owner != unit.Owner) continue;
+                if (!other.IsFighting) continue;
+                if (other.State == UnitState.Routing) continue;
+
+                if (OrientedRect.OverlapFraction(stepped, other.Shape) <= OrderSystem.GrazingTolerance)
+                    continue;
+
+                // Already inside this one: leaving is the whole point.
+                if (OrientedRect.OverlapFraction(here, other.Shape) > OrderSystem.GrazingTolerance)
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
         private static bool InsideItsOwn(BattleState battle, UnitInstance unit)
         {
             if (unit.State == UnitState.Routing) return false;
@@ -927,9 +973,36 @@ namespace BattleChess.Rules
                 // describing the manoeuvre working.
                 bool trustTheRoute = route.PressingThrough || route.HoldThisLeg.HasValue;
 
-                unit.Position = trustTheRoute
-                    ? next
-                    : MakeRoomForFriends(battle, unit, next, tick, log);
+                // M29. Trust the line, but not before the shape that was
+                // measured for it has arrived. A leg that names a front was
+                // checked at that front — a corridor 30 m wide measured against
+                // a body 20 m across — and the regiment reaches it still coming
+                // round, in a body that spans 44 m and never could have fitted.
+                // Recorded: inside the gap at tick 21 holding −121° where the
+                // leg wanted 0°, three ticks before a 121° wheel at 5°/s could
+                // possibly have finished.
+                //
+                // So it waits, and it waits *here* rather than at the mouth of
+                // the leg — the designer's call, and the better one: a regiment
+                // that would clear the gap anyway is never delayed, and one that
+                // would not stops on the step that would have hit rather than
+                // standing about in the open on the chance of it.
+                if (trustTheRoute && !route.PressingThrough &&
+                    NotYetOnTheFront(unit, route.HoldThisLeg) &&
+                    WouldLapOneOfItsOwn(battle, unit, next, unit.Facing))
+                {
+                    // Holds this ground and keeps turning — the wheel has
+                    // already been applied this tick, so nothing is stalled and
+                    // the next step is asked of a shape a little closer to
+                    // fitting. `KeepTheMarchHonest` forgives a leg still coming
+                    // round, so the stall detector does not call this a stall.
+                }
+                else
+                {
+                    unit.Position = trustTheRoute
+                        ? next
+                        : MakeRoomForFriends(battle, unit, next, tick, log);
+                }
             }
 
             unit.GroundCovered += Vec2.Distance(stoodAt, unit.Position);
