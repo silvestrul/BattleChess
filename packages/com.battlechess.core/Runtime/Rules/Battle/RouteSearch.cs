@@ -69,7 +69,7 @@ namespace BattleChess.Rules
         private const int Depth = 5;
 
         /// <summary>How many candidate places the search will consider at most.</summary>
-        private const int MostPlaces = 48;
+        private const int MostPlaces = 26;
 
         /// <summary>
         /// Plans a march, or returns a plan that was not found.
@@ -79,6 +79,16 @@ namespace BattleChess.Rules
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            // M10, and its absence was measured the hard way: without this the
+            // suite went from nine seconds to over ten minutes, because every
+            // march across open grass built a graph to rediscover that nothing
+            // was in the way. The question a regiment actually has is "can I
+            // walk straight there", and across open ground the answer is yes.
+            Facing alongIt = Marching.AlongTheLine(unit.Position, destination, unit.Facing);
+
+            if (Marching.IsClearLine(battle, unit, unit.Position, destination, alongIt))
+                return Straight(unit.Position, destination);
 
             List<Vec2> places = Places(battle, unit, destination);
 
@@ -102,6 +112,15 @@ namespace BattleChess.Rules
                     PathResult.Failed(PathFailure.NoRouteExists,
                         "nothing reaches that ground, going round or through", 0),
                     null, false);
+        }
+
+        private static Plan Straight(Vec2 from, Vec2 to)
+        {
+            float length = Vec2.Distance(from, to);
+
+            return new Plan(
+                PathResult.Success(new[] { from, to }, Array.Empty<Coord>(), length, length, 0),
+                null, false);
         }
 
         // ---- Where a route may bend ------------------------------------------
@@ -196,8 +215,13 @@ namespace BattleChess.Rules
                 float ahead = MathF.Max(0f, MathF.Min(length, Vec2.Dot(offset, along)));
                 float off = Vec2.Distance(other.Position, unit.Position + along * ahead);
 
-                // Far enough to one side that no route worth taking bends round it.
-                if (off > length + other.Footprint.Width) continue;
+                // Only what a route might actually meet. Everything within a
+                // corridor of the drawn line the width of both bodies, and
+                // nothing further: a regiment two hundred metres to the flank
+                // changes no answer and costs a place, three fronts and a sweep
+                // per place already in the graph.
+                if (off > other.Footprint.BoundingRadius + unit.Footprint.BoundingRadius + MarginMetres * 2f)
+                    continue;
 
                 found.Add(other);
                 away.Add(off);
@@ -361,7 +385,8 @@ namespace BattleChess.Rules
             cameFrom.Add(-1);
             settled.Add(false);
 
-            int arrived = -1;
+            int arrivedFrom = -1;
+            Facing arrivedOn = unit.Facing;
             float arrivedCost = float.MaxValue;
 
             while (true)
@@ -422,10 +447,16 @@ namespace BattleChess.Rules
                             total += Degrees(walkOn, arriveOn)
                                      / (turnRate * MovementSystem.PivotBonusWhileHalted);
 
+                            // Recorded rather than added as a state. Added, the
+                            // goal is expandable, so the search walks *out* of
+                            // the destination and back in, growing the graph as
+                            // it goes. That is the other half of why the suite
+                            // stopped finishing.
                             if (total < arrivedCost)
                             {
                                 arrivedCost = total;
-                                arrived = Remember(stateAt, stateOn, best, cameFrom, settled, to, walkOn, total, at);
+                                arrivedFrom = at;
+                                arrivedOn = walkOn;
                             }
 
                             continue;
@@ -446,12 +477,12 @@ namespace BattleChess.Rules
                 }
             }
 
-            if (arrived < 0) return null;
+            if (arrivedFrom < 0) return null;
 
-            var backwards = new List<Vec2>();
-            var fronts = new List<Facing>();
+            var backwards = new List<Vec2> { destination };
+            var fronts = new List<Facing> { arrivedOn };
 
-            for (int state = arrived; state >= 0; state = cameFrom[state])
+            for (int state = arrivedFrom; state >= 0; state = cameFrom[state])
             {
                 backwards.Add(places[stateAt[state]]);
                 fronts.Add(stateOn[state]);

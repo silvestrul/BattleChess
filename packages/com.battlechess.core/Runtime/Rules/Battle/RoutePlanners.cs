@@ -46,10 +46,18 @@ namespace BattleChess.Rules
         /// What a march uses when nobody says otherwise.
         /// </summary>
         /// <remarks>
-        /// Still the ladder. It moves to the search once the search passes the
-        /// gate in `ApproachAngleTests`, the three way-round tables, and the
-        /// recorded arrangements — not before, and not on the strength of the
-        /// reasoning being better, which is what the last four fixes had.
+        /// <para>
+        /// <b>The search</b>, on the designer's call, once it cleared the gate
+        /// the ladder fails: nineteen approach angles across one 30 m gap, of
+        /// which the ladder routes seven.
+        /// </para>
+        /// <para>
+        /// Switched before the remaining gates rather than after them, and for a
+        /// good reason: every real fault in this sweep was found by playing, not
+        /// by testing. Four fixes in a row passed their own tests and failed in
+        /// the next recording. The ladder stays in the tree, one line away, until
+        /// the recordings agree.
+        /// </para>
         /// </remarks>
         public static IRoutePlanner Default { get; } = TheLadder;
 
