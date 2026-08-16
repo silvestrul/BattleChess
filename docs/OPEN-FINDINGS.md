@@ -1026,6 +1026,82 @@ shorter by eye. The fix, if the recordings say it matters, is to search over
 
 ---
 
+## 20. The plan is a promise about a shape the regiment has not taken yet
+
+**This is the root cause, and it is not in the planner.** Four passes were spent on
+route *choice* — [M25a](DECISIONS.md), [M26](DECISIONS.md), [M27](DECISIONS.md),
+[M28](DECISIONS.md) — each verified against a test calling `Marching.PlanTo` in
+isolation, and each time the game went on reproducing. The designer's push-back is what
+found it: *"maybe you should verify why it happens in the first place before fixing
+something."*
+
+**Step one — are these even press-throughs?** Counting the recordings says no:
+
+| recording | collisions | on a planned press-through | on a route that was supposed to be clear |
+|---|---|---|---|
+| 152243 | 10 | 7 | **3** |
+| 214159 | 11 | 6 | **5** |
+| 225633 | 11 | 5 | **6** |
+| 230444 | 5 | 5 | 0 |
+
+**14 of 37.** Roughly half of every collision happened on a line the planner had
+declared clear. Every fix so far addressed the other half.
+
+**Step two — reproduce it in the clock, not the planner.**
+`PlanAgainstWalkTests.ARouteThePlannerCalledClearIsWalkedClear` (skipped) marches one
+regiment back and forth across a line of its own, as every recording shows the player
+doing: **6 marches, 0 ticks on a declared press-through, 15 ticks lapping somebody on a
+route that was supposed to be clear.**
+
+**Step three — which half is wrong?** Two hypotheses were tested and *disproved*, which
+is worth as much as the one that held:
+
+- **Not the exemptions.** Disabling the `leaving` skip: still 15. Disabling
+  `WhereItIsStanding`: still 15.
+- **Not the sweep.** `TheSweepAgreesWithSteppingAlongTheSameLine` walks the same line a
+  metre at a time and agrees with `Sweep.FirstTouch`. Kept as a property guard.
+- **Not the walker straying.** At the tick it first laps, the regiment is **0.0 m off
+  its planned line.**
+
+**The cause.**
+
+```
+tick 21: at (188,233) into Spearmen at (213,213), 0.07 deep,
+         0.0 m off its planned line; leg wants front 0°, it is on -121°
+```
+
+The regiment is exactly where the plan put it, inside a 30 m corridor that was measured
+for a body **20 m** across — and it is holding a front **121° away** from the one that
+measurement assumed. At −121° the same body spans about **44 m**. It cannot fit, and it
+was never going to.
+
+At 5°/s a 121° wheel takes 24 ticks. It reached the corridor at tick **21**. **It
+entered the gap three ticks before it could possibly have finished turning.**
+
+So: **a plan checks each leg at the front the regiment will eventually hold, and a
+regiment cannot adopt a front instantly.** [M23](DECISIONS.md) checks both ends of the
+wheel and its comment estimates the difference between them at *"about two metres"* —
+but the gap is not a bulge between two similar orientations, it is up to 121° of front
+that has simply not arrived yet.
+
+This accounts for every symptom on the board: the collisions on clean routes, the
+stutter at unit edges (it clips, contact shoves it, it re-plans), and why each cleverer
+route made things *no better* — the cleverer the route, the more it depends on a front
+being held, and the front is never there in time.
+
+**Two ways to fix it, and the choice is a design one.**
+
+1. **The route waits for the front.** A leg that names a front is not entered until the
+   regiment is on it — come round first, then go. Costs time and looks deliberate;
+   risks a regiment standing in the open turning while under fire.
+2. **The plan allows for the turn.** Place the mouth far enough back that the wheel
+   finishes before the tight part, using the turn rate the planner already knows —
+   `SecondsToWalk` models exactly this and nothing checks clearance with it.
+
+Recommend **2**, with **1** as the fallback when there is not enough room to turn in.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
