@@ -987,8 +987,42 @@ namespace BattleChess.Rules
                 // that would clear the gap anyway is never delayed, and one that
                 // would not stops on the step that would have hit rather than
                 // standing about in the open on the chance of it.
-                if (trustTheRoute && !route.PressingThrough &&
-                    NotYetOnTheFront(unit, route.HoldThisLeg) &&
+                // M30. Widened from "still coming round onto a named front" to
+                // the plain rule, because the narrow form kept being right about
+                // the mechanism and wrong about the reach. Recorded 16 August:
+                // twelve collisions in one game, **none** of them a declared
+                // press-through, so nothing was charged for any of them — which
+                // is what "goes through units without colliding" describes.
+                //
+                // Three separate escapes from the narrow form, all in that one
+                // recording. A leg with no named front, checked at the line of
+                // march, entered while still wheeling onto it. A regiment inside
+                // the corridor but 6 m off its centre line, where the 10° front
+                // tolerance is wider than the gap allows. And a step taken with
+                // the front fully adopted that still grazed a corner.
+                //
+                // The plain rule — never step into one of your own unless you
+                // said you would — was written, measured and **thrown away**: it
+                // deadlocks. `TwoRegimentsSwappingPlacesDoNotDeadlock` and
+                // `ARegimentHeldUpByAFriendGoesOnceTheFriendMovesOff` both fail
+                // under it, which is the designer's other complaint ("cavalry
+                // still keeps getting stuck") arriving by a different door.
+                //
+                // What survives is the honest condition: **wait only while
+                // waiting can change the answer.** A regiment still coming round
+                // will be a different shape in a moment, so holding is worth
+                // something. A regiment already square to its leg will not, so
+                // holding buys nothing and costs everything, and it walks on to
+                // be sorted out by the shuffle.
+                //
+                // The widening is from "a leg that names a front" to every leg,
+                // because an ordinary leg is checked at the line of march and a
+                // regiment comes round onto that just as slowly.
+                Facing wants = route.HoldThisLeg
+                               ?? Marching.AlongTheLine(unit.Position, route.Target, unit.Facing);
+
+                if (!route.PressingThrough &&
+                    NotYetOnTheFront(unit, wants) &&
                     WouldLapOneOfItsOwn(battle, unit, next, unit.Facing))
                 {
                     // Holds this ground and keeps turning — the wheel has

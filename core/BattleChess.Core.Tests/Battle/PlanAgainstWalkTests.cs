@@ -201,5 +201,127 @@ namespace BattleChess.Tests.Battle
                 $"{worst:0.00} of a body at ({worstAt.X:0},{worstAt.Y:0}). Every clearance decision in " +
                 "the planner rests on the sweep.");
         }
+
+        /// <summary>
+        /// `logs/battle-20260816-184220.log` tick 1145, and the case the first
+        /// form of [M29] missed.
+        /// </summary>
+        /// <remarks>
+        /// <code>
+        /// 1145 X Cavalry at (230,233) facing -109 deg is standing in its own
+        ///        Archers at (213,213) - 0,09 of a body overlapping.
+        ///        Cavalry is marching to (241,185); Archers is standing.
+        /// </code>
+        /// No press-through declared and no named front on the leg, so the first
+        /// form of M29 did not look at it. An ordinary leg is checked at the line
+        /// of march, and a regiment comes round onto that just as slowly as onto
+        /// a corridor's front.
+        /// </remarks>
+        [Fact]
+        public void ComingRoundOntoAnOrdinaryLegDoesNotClipTheNeighbours()
+        {
+            var field = new Battlefield("plains", 184220);
+
+            foreach (float x in new[] { 163f, 213f, 263f })
+                Battlefield.Hold(field.Add(0, "spearmen", new Vec2(x, 213f), Facing.FromDegrees(0f)));
+
+            // Tick 691 of logs/battle-20260816-190422.log: 12 collisions in
+            // that game, not one of them a declared press-through.
+            UnitInstance mover =
+                field.Add(0, "cavalry", new Vec2(238f, 260f), Facing.FromDegrees(100f));
+
+            field.March(mover, new Vec2(241f, 177f), log: field.Transcript);
+
+            int lapped = 0;
+            int wheeling = 0;
+
+            for (int tick = 0; tick < 200 && mover.IsMarching; tick++)
+            {
+                Vec2 was = mover.Position;
+
+                field.Clock.Advance(field.State, field.Transcript);
+
+                if (mover.Route?.PressingThrough == true) continue;
+
+                foreach (UnitInstance other in field.State.UnitsOnField())
+                {
+                    if (other.Id == mover.Id) continue;
+
+                    if (OrientedRect.OverlapFraction(mover.Shape, other.Shape)
+                        > OrderSystem.GrazingTolerance)
+                    {
+                        lapped++;
+                        _out.WriteLine($"  lap at tick {tick}: ({mover.Position.X:0},{mover.Position.Y:0}) " +
+                                       $"facing {mover.Facing.Degrees:0}, moved " +
+                                       $"{Vec2.Distance(mover.Position, was):0.00} m this tick, " +
+                                       $"into {other.Def.DisplayName}");
+                        break;
+                    }
+                }
+
+                if (mover.Route != null &&
+                    Facing.AbsoluteDelta(
+                        mover.Facing,
+                        Marching.AlongTheLine(mover.Position, mover.Route.Target, mover.Facing))
+                    * 180f / MathF.PI > 10f)
+                    wheeling++;
+            }
+
+            _out.WriteLine($"{wheeling} ticks still coming round; {lapped} ticks lapping somebody.");
+
+            // Non-vacuity: it has to have been turning, or there was no wheel to
+            // clip with and the arrangement proves nothing.
+            Assert.True(wheeling > 0,
+                "It was never off the line of march, so no wheel was tested here.");
+
+            Assert.Equal(0, lapped);
+        }
+
+        /// <summary>
+        /// A regiment marched onto ground beside one of its own does not end up
+        /// inside it.
+        /// </summary>
+        /// <remarks>
+        /// The plain form of the designer's report: *"goes through units without
+        /// colliding"*. In `logs/battle-20260816-190422.log` there were twelve
+        /// collisions and **not one declared press-through**, so nothing charged
+        /// for any of them and nothing in the rules had agreed to them.
+        /// </remarks>
+        [Fact]
+        public void MarchingUpBesideOneOfItsOwnDoesNotEndUpInsideIt()
+        {
+            var field = new Battlefield("plains", 48000);
+
+            UnitInstance holding = field.Add(0, "spearmen", field.Centre, Facing.East);
+            Battlefield.Hold(holding);
+
+            UnitInstance mover =
+                field.Add(0, "cavalry", field.Centre - new Vec2(180f, 0f), Facing.East);
+
+            field.March(mover, field.Centre + new Vec2(6f, 0f), log: field.Transcript);
+
+            int lapped = 0;
+            int marched = 0;
+
+            for (int tick = 0; tick < 400; tick++)
+            {
+                field.Clock.Advance(field.State, field.Transcript);
+
+                if (mover.IsMarching) marched++;
+                if (mover.Route?.PressingThrough == true) continue;
+
+                if (OrientedRect.OverlapFraction(mover.Shape, holding.Shape)
+                    > OrderSystem.GrazingTolerance) lapped++;
+            }
+
+            _out.WriteLine($"{marched} ticks marching; {lapped} ticks inside the holder " +
+                           "without ever declaring a press-through.");
+
+            // Non-vacuity: it has to have gone somewhere, or nothing was tested.
+            Assert.True(marched > 20,
+                "It barely moved, so this measures nothing about walking into anybody.");
+
+            Assert.Equal(0, lapped);
+        }
     }
 }

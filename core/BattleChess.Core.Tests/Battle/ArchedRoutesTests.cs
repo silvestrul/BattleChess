@@ -612,18 +612,25 @@ namespace BattleChess.Tests.Battle
             // is ever declared, so the old exemption never applied and the
             // shuffle ran every tick for the rest of the battle.
             //
-            // Two arrangements were tried before this one and both failed their
-            // own guard below: a charge at an enemy beyond a wall routes round
-            // the wall, and a march into a wall with no way round declares a
-            // press-through and is exempt already. The case that bites is the
-            // one where nobody ever decided to overlap anybody.
-            UnitInstance mover = field.Add(0, "cavalry", field.Centre - new Vec2(180f, 0f), Facing.East);
+            // Four arrangements have been tried here and three failed their own
+            // guard below. A charge at an enemy beyond a wall routes round the
+            // wall. A march into a wall with no way round declares a
+            // press-through and is exempt already. And marching in from clear
+            // ground no longer produces an overlap at all, because
+            // [M30](../../../docs/DECISIONS.md) holds a regiment on the step
+            // that would have hit while it is still coming round. That is the
+            // rule working, and it took this test's own non-vacuity guard to
+            // notice, which is the whole reason the guard is there.
+            //
+            // So the overlap is there from the start instead. M30 never holds a
+            // regiment inside a body it is *already* standing in, since leaving
+            // is the point, and that is exactly M1a's case: somebody is
+            // marching, somebody else is not, and the ground is shared. Two
+            // regiments deployed on top of each other is also the commonest way
+            // this arises in play.
+            UnitInstance mover = field.Add(0, "cavalry", field.Centre - new Vec2(14f, 0f), Facing.East);
 
-            // Six metres off its centre, which is as far in as this can be
-            // pushed. Sending it to the exact centre is worse, not better: the
-            // placement search relocates a destination nobody can stand on, so
-            // the regiment halts short and never overlaps at all.
-            field.March(mover, field.Centre + new Vec2(6f, 0f));
+            field.March(mover, field.Centre + new Vec2(180f, 0f));
 
             var log = new Quiet();
             int lapped = 0;
