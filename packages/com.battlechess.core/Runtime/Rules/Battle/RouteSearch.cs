@@ -63,12 +63,6 @@ namespace BattleChess.Rules
         private const float MarginMetres = 4f;
 
         /// <summary>
-        /// How many times a blocked leg may be broken down further.
-        /// </summary>
-        /// <remarks>The designer's figure. A bound on the work, not a rule.</remarks>
-        private const int Depth = 5;
-
-        /// <summary>
         /// How many candidate places the search will consider at most.
         /// </summary>
         /// <remarks>
@@ -82,21 +76,47 @@ namespace BattleChess.Rules
         private const int MostPlaces = 48;
 
         /// <summary>
-        /// Every candidate place the search would consider for this march, for a
-        /// debug overlay to draw. Not used by <see cref="Find"/> itself, which
-        /// calls the private generator directly — this exists so a view layer
-        /// can show the same points the planner actually reasoned over, rather
-        /// than a reconstruction of them.
+        /// How many times the search may stop, grow the ground it is allowed to
+        /// bend at, and start again.
         /// </summary>
+        /// <remarks>
+        /// A bound on the work rather than a rule. Each round costs a restart
+        /// and buys the rings of every body that refused a leg in the round
+        /// before, so the rounds go as deep as the obstacles are layered, and
+        /// six layers of regiment between a mover and its destination is a
+        /// battle line, not a march.
+        /// </remarks>
+        private const int MostRounds = 1;
+
+        /// <summary>
+        /// Every candidate place the search considered for this march, for a
+        /// debug overlay to draw.
+        /// </summary>
+        /// <remarks>
+        /// This runs the search rather than the generator, because since the
+        /// generator went lazy there is no such thing as the places a march
+        /// <i>would</i> consider — only the ones it was driven to invent. Drawing
+        /// anything else would be drawing a reconstruction, and the overlay
+        /// exists to show what actually happened (<b>W5</b>).
+        /// </remarks>
         public static IReadOnlyList<Vec2> DebugCandidatePlaces(
-            BattleState battle, UnitInstance unit, Vec2 destination) =>
-            Places(battle, unit, destination);
+            BattleState battle, UnitInstance unit, Vec2 destination)
+        {
+            var ledger = new Ledger();
+
+            List<Vec2> places = Places(battle, unit, destination, ledger);
+
+            Hunt(battle, unit, destination, unit.OrderFacing, places, ledger, out _);
+
+            return places;
+        }
 
         /// <summary>
         /// Plans a march, or returns a plan that was not found.
         /// </summary>
         public static Plan Find(
-            BattleState battle, UnitInstance unit, Vec2 destination, Facing arriveOn, IBattleLog? log = null)
+            BattleState battle, UnitInstance unit, Vec2 destination, Facing arriveOn,
+            IBattleLog? log = null, IPathfinder? pathfinder = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
@@ -111,42 +131,244 @@ namespace BattleChess.Rules
             if (Marching.IsClearLine(battle, unit, unit.Position, destination, alongIt))
                 return Straight(unit.Position, destination);
 
-            List<Vec2> places = Places(battle, unit, destination);
-
-            int legs = 0;
-            int expanded = 0;
-
-            // Clean first, shouldering through only if nothing else reaches.
+            // M33. The ladder answers in about a millisecond, and when its
+            // answer is clean it is a real route, so a march may as well have
+            // the cheaper of the two.
             //
-            // Pricing a press-through as one edge among many is the goal and is
-            // deliberately *not* done yet: measured, at M20's pace of 0.6 it wins
-            // almost everywhere, which is the same result the M26 experiment gave
-            // twice. That is a designer's number, not a planner's, so until it is
-            // settled the last resort stays a last resort — which is what M18
-            // always said and what this rung of it got right.
-            Route? clean = Cheapest(
-                battle, unit, places, destination, arriveOn, mayPress: false, ref legs, ref expanded);
+            // Recorded 17 Aug, one click: the ladder 82 m and 28 s, the search
+            // 153 m and 40 s. The search was optimal over the places it had
+            // invented and the ladder's bends were not among them — a true
+            // answer to the wrong question. The player wanted the shorter march.
+            //
+            // <b>Held as a floor, and deliberately not as a ceiling.</b> Feeding
+            // this price in as the search's starting bound was built and
+            // measured: it is sound, and it costs. The bound is what lets the
+            // search stop, so a search told to *beat* a route cannot stop at the
+            // first one it finds and keeps buying places to try again — one
+            // arrangement went from 10 places and 180 legs to 34 and 1,260, and
+            // the whole-army order lost a fifth of its speed. The pruning it was
+            // meant to buy never arrived either, because the fields where the
+            // search is dear are exactly the fields where the ladder presses
+            // through and offers no price at all. So: compare at the end, never
+            // during.
+            float fromLadderPrice = float.MaxValue;
+            IReadOnlyList<Vec2>? fromLadder = null;
 
-            if (clean.HasValue)
+            if (pathfinder != null)
             {
-                return Assemble(
-                    Smooth(battle, unit, clean.Value, arriveOn), pressed: false,
-                    new RouteEffort(places.Count, legs, expanded));
+                Plan ladder = Marching.ByTheLadder(battle, unit, pathfinder, destination);
+
+                if (ladder.Path.Found && !ladder.PressedThrough)
+                {
+                    float priced = PriceOf(battle, unit, ladder.Path.Waypoints, arriveOn);
+
+                    if (priced >= 0f)
+                    {
+                        fromLadderPrice = priced;
+                        fromLadder = ladder.Path.Waypoints;
+                    }
+                }
             }
 
-            // A second search, and its cost is added rather than replacing the
-            // first: the regiment really did pay for both.
-            Route? forced = Cheapest(
-                battle, unit, places, destination, arriveOn, mayPress: true, ref legs, ref expanded);
+            var ledger = new Ledger();
 
-            var effort = new RouteEffort(places.Count, legs, expanded);
+            // Every body along the drawn line offers its places at once (M34);
+            // anything further out has to earn them by refusing a leg (M32).
+            List<Vec2> places = Places(battle, unit, destination, ledger);
 
-            return forced.HasValue
-                ? Assemble(forced.Value, pressed: true, effort)
-                : new Plan(
-                    PathResult.Failed(PathFailure.NoRouteExists,
-                        "nothing reaches that ground, going round or through", 0),
-                    null, false, effort);
+            Route? route = Hunt(
+                battle, unit, destination, arriveOn, places, ledger, out bool pressed);
+
+            var effort = new RouteEffort(
+                places.Count, ledger.LegsPriced, ledger.Expanded, ledger.Rounds,
+                ledger.States, ledger.FrontierScans, ledger.CacheHits, ledger.Pruned,
+                ledger.LineChecks, ledger.StandChecks, ledger.TurnChecks);
+
+            if (!route.HasValue)
+            {
+                return fromLadder != null
+                    ? Assemble(Straighten(fromLadder), pressed: false, effort)
+                    : new Plan(
+                        PathResult.Failed(PathFailure.NoRouteExists,
+                            "nothing reaches that ground, going round or through", 0),
+                        null, false, effort);
+            }
+
+            if (pressed)
+            {
+                // A clean route beats a press-through whatever it costs: one of
+                // them is a march and the other is walking through your own men.
+                return fromLadder != null
+                    ? Assemble(Straighten(fromLadder), pressed: false, effort)
+                    : Assemble(route.Value, pressed: true, effort);
+            }
+
+            Route found = Smooth(battle, unit, route.Value, arriveOn);
+
+            // Priced the same way as the ladder's, after smoothing, so the two
+            // numbers are the same question asked of two answers.
+            float foundPrice = PriceOf(battle, unit, found.Places, arriveOn);
+
+            if (fromLadder != null && (foundPrice < 0f || fromLadderPrice < foundPrice))
+                return Assemble(Straighten(fromLadder), pressed: false, effort);
+
+            return Assemble(found, pressed: false, effort);
+        }
+
+        /// <summary>
+        /// Searches, and when the search finds nothing, grows the candidate
+        /// places from whatever refused it and searches again.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M32.</b> Every body near the line used to be quarried for candidate
+        /// places before a single leg was tried. Measured on a field of sixteen
+        /// regiments with a lane through it that nothing stood in: the forty-eight
+        /// places allowed were spent on bodies the march never met, the lane's own
+        /// points were never generated, and the search — finding nothing clean in
+        /// a graph that could not describe the way through — shouldered four
+        /// hundred metres through its own army instead. The cap was not costing
+        /// speed. It was costing the answer.
+        /// </para>
+        /// <para>
+        /// So a body earns its places by refusing a leg the search actually wanted
+        /// to walk, and by nothing else. Bodies stood to one side of the march are
+        /// never asked about, however near the line they sit, because a bend
+        /// around something that was not in the way can only ever lengthen a
+        /// route — which is the visibility-graph result, and the reason this is
+        /// sound rather than merely cheaper.
+        /// </para>
+        /// <para>
+        /// <b>Restarting is close to free, and that is what makes rounds
+        /// affordable.</b> Every dear question about a leg is cached in the
+        /// <see cref="Ledger"/> under the two places and the presentation, and
+        /// places are only ever appended, so their indices never shift. A second
+        /// round re-prices nothing the first round already asked; it only reaches
+        /// the ground the first round could not see.
+        /// </para>
+        /// <para>
+        /// Each round is a whole search over its own set of places, so each is
+        /// correct on its own terms and the last one's answer is the cheapest
+        /// route over the places that exist by then. Growing the set <i>during</i>
+        /// a search would not be: a place added late can offer a cheaper way to
+        /// somewhere already settled, and settled is meant to mean finished.
+        /// </para>
+        /// </remarks>
+        private static Route? Hunt(
+            BattleState battle, UnitInstance unit, Vec2 destination, Facing arriveOn,
+            List<Vec2> places, Ledger ledger, out bool pressed)
+        {
+            pressed = false;
+
+            for (int round = 0; round < MostRounds; round++)
+            {
+                ledger.Rounds++;
+
+                // Clean first, shouldering through only if nothing else reaches.
+                //
+                // Pricing a press-through as one edge among many is the goal and
+                // is deliberately *not* done yet: measured, at M20's pace of 0.6
+                // it wins almost everywhere, which is the same result the M26
+                // experiment gave twice. That is a designer's number, not a
+                // planner's, so until it is settled the last resort stays a last
+                // resort — which is what M18 always said and what this rung of it
+                // got right.
+                Route? clean = Cheapest(
+                    battle, unit, places, destination, arriveOn, mayPress: false, ledger);
+
+                if (clean.HasValue) return clean;
+
+                // Only worth buying more ground if another round will use it.
+                // Growing on the last pass and then falling through left the
+                // press-through search walking an enlarged graph for nothing:
+                // measured at 2,868 legs across sixteen regiments against 1,842
+                // for the same orders without it.
+                if (round + 1 >= MostRounds) break;
+
+                if (!Grow(unit, places, destination, ledger)) break;
+            }
+
+            // Nothing goes round it, so the last resort — over every place the
+            // rounds managed to find, since those are the best description of the
+            // ground this march has.
+            pressed = true;
+
+            return Cheapest(battle, unit, places, destination, arriveOn, mayPress: true, ledger);
+        }
+
+        /// <summary>
+        /// Gives every body that refused a leg its ring of places, and says
+        /// whether that added anything new.
+        /// </summary>
+        private static bool Grow(
+            UnitInstance unit, List<Vec2> places, Vec2 destination, Ledger ledger)
+        {
+            int had = places.Count;
+
+            // In the order the search met them, which is cost order, so when the
+            // cap does bite it bites the bodies the march cared about least. The
+            // list is built by a deterministic walk, so this is stable (M0).
+            foreach (UnitInstance other in ledger.Refused)
+            {
+                if (!ledger.Grown.Add(other.Id)) continue;
+
+                RingsFor(places, unit, other, destination);
+            }
+
+            ledger.Refused.Clear();
+
+            return places.Count > had;
+        }
+
+        /// <summary>
+        /// Everything a search needs to remember between rounds.
+        /// </summary>
+        /// <remarks>
+        /// Sized by <see cref="MostPlaces"/> rather than by however many places
+        /// exist right now, which is the whole trick: a leg's name is fixed the
+        /// moment its two places exist, so the answers survive the set growing
+        /// under them.
+        /// </remarks>
+        private sealed class Ledger
+        {
+            private const int Legs = MostPlaces * MostPlaces * 3;
+
+            public readonly bool[] Asked = new bool[Legs];
+            public readonly Facing[] Front = new Facing[Legs];
+            public readonly bool[] StandNear = new bool[Legs];
+            public readonly bool[] StandFar = new bool[Legs];
+            public readonly bool[] Clear = new bool[Legs];
+
+            /// <summary>Nought means not yet asked, as it is ground, not a leg.</summary>
+            public readonly sbyte[] RoomToTurn = new sbyte[MostPlaces];
+
+            /// <summary>Who said no this round, in the order they said it.</summary>
+            public readonly List<UnitInstance> Refused = new List<UnitInstance>();
+
+            /// <summary>Who has already been given places, so nobody is quarried twice.</summary>
+            public readonly HashSet<UnitId> Grown = new HashSet<UnitId>();
+
+            public int LegsPriced;
+            public int Expanded;
+            public int Rounds;
+
+            // Counted so a bench can say where a march's time went. Nothing
+            // here changes a route; all of it is reported through RouteEffort,
+            // which travels with the plan rather than sitting in a static.
+            public int States;
+            public long FrontierScans;
+            public int CacheHits;
+            public int Pruned;
+            public int LineChecks;
+            public int StandChecks;
+            public int TurnChecks;
+
+            public void Refuse(UnitInstance? blocker)
+            {
+                // Terrain refuses without being a body, and there is nothing to
+                // route around: that is the pathfinder's ground, not this one's.
+                if (blocker != null) Refused.Add(blocker);
+            }
         }
 
         private static Plan Straight(Vec2 from, Vec2 to)
@@ -179,104 +401,47 @@ namespace BattleChess.Rules
         /// generator costs work and never correctness.
         /// </para>
         /// </remarks>
-        private static List<Vec2> Places(BattleState battle, UnitInstance unit, Vec2 destination)
+        /// <summary>
+        /// The places every body near the drawn line offers, taken before a
+        /// single leg is tried.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M34, and it is a retreat from <see cref="M32">M32</see>'s pure
+        /// form.</b> Growing places only from bodies that had refused a leg was
+        /// measured against this and lost badly: a whole army ordered at once
+        /// went from 14 ms to 115, because each round restarts the search and
+        /// the frontier — unlike the legs — is not carried over. The corridor
+        /// filter this restores was never the waste it looked like. It is good
+        /// pruning, cheap, and it puts the useful bodies in first.
+        /// </para>
+        /// <para>
+        /// What survives of M32 is the part that answered a question this could
+        /// not: bodies <i>outside</i> the corridor are still never quarried up
+        /// front, and can still earn their places by refusing a leg. So the
+        /// first round is as wide as the old generator and the later ones reach
+        /// past it, which is the hybrid neither half was on its own.
+        /// </para>
+        /// </remarks>
+        private static List<Vec2> Places(BattleState battle, UnitInstance unit, Vec2 destination, Ledger ledger)
         {
             var places = new List<Vec2> { unit.Position, destination };
 
-            Vec2 line = destination - unit.Position;
-            float length = line.Length;
-            Vec2 along = length > 0f ? line / length : new Vec2(1f, 0f);
+            float length = Vec2.Distance(unit.Position, destination);
 
-            // Both presentations, because a place is only a place for the front
-            // it is stood on. The narrow half is what threads a gap side-on; the
-            // wide half is what a regiment needs if it arrives face-on, and
-            // generating only the narrow ring left every face-on approach with
-            // nowhere it could legally stand — so either the search found no
-            // route at all and shouldered through, or it took a place it did not
-            // fit in and the route clipped what it went round.
             foreach (UnitInstance other in Nearby(battle, unit, destination, length))
             {
                 if (places.Count >= MostPlaces) break;
 
-                Vec2 ahead = other.Facing.ToVector();
-                Vec2 beside = other.Facing.RightVector();
+                // Marked as quarried, so a later round does not spend a second
+                // pass rediscovering the ring it already has.
+                ledger.Grown.Add(other.Id);
 
-                foreach (float reach in new[]
-                         {
-                             unit.Footprint.HalfDepth + MarginMetres,
-                             unit.Footprint.HalfWidth + MarginMetres,
-                         })
-                {
-                    float deep = other.Footprint.HalfDepth + reach;
-                    float wide = other.Footprint.HalfWidth + reach;
-
-                    for (int i = -1; i <= 1; i += 2)
-                    for (int j = -1; j <= 1; j += 2)
-                        Consider(places, other.Position + ahead * (deep * i) + beside * (wide * j));
-
-                    // Where the ends of the march come onto each face. These are
-                    // the "walk in along the body's side" points.
-                    foreach (Vec2 end in new[] { unit.Position, destination })
-                    {
-                        Vec2 offset = end - other.Position;
-
-                        float onAhead = Vec2.Dot(offset, ahead);
-                        float onBeside = Vec2.Dot(offset, beside);
-
-                        for (int s = -1; s <= 1; s += 2)
-                        {
-                            Consider(places, other.Position + ahead * (deep * s) + beside * Clamp(onBeside, wide));
-                            Consider(places, other.Position + beside * (wide * s) + ahead * Clamp(onAhead, deep));
-                        }
-                    }
-                }
+                RingsFor(places, unit, other, destination);
             }
 
             return places;
         }
-
-        /// <summary>
-        /// Adds a place unless one is already standing there.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// The generator repeats itself heavily and by construction: a face
-        /// projection whose clamp saturates lands on the corner the corner loop
-        /// already produced, and both ends of the march project to the same
-        /// point whenever they sit the same side of a body. Measured on four
-        /// bodies in a line, twenty-six places held about ten distinct ones.
-        /// </para>
-        /// <para>
-        /// That was not merely wasted work. <see cref="MostPlaces"/> is a hard
-        /// cap, so the duplicates <b>crowded genuine candidates out</b>: in the
-        /// same arrangement the two outer bodies contributed nothing at all and
-        /// the search planned as though they were not on the field. A route that
-        /// ignores half the obstacles is the "went somewhere far on the fields"
-        /// report, and no amount of better costing fixes it.
-        /// </para>
-        /// <para>
-        /// One metre, matching the separation the search already demands between
-        /// the ends of a leg, so a place too near another to be a distinct leg is
-        /// too near to be a distinct place.
-        /// </para>
-        /// </remarks>
-        private static void Consider(List<Vec2> places, Vec2 place)
-        {
-            if (places.Count >= MostPlaces) return;
-
-            foreach (Vec2 already in places)
-            {
-                if (Vec2.Distance(already, place) < ApartEnoughMetres) return;
-            }
-
-            places.Add(place);
-        }
-
-        /// <summary>How far apart two candidate places must be to count as two.</summary>
-        private const float ApartEnoughMetres = 1f;
-
-        private static float Clamp(float value, float limit) =>
-            value < -limit ? -limit : value > limit ? limit : value;
 
         /// <summary>
         /// Ours, near enough this march to matter, nearest the line first so the
@@ -328,6 +493,95 @@ namespace BattleChess.Rules
 
             return sorted;
         }
+
+        private static void RingsFor(
+            List<Vec2> places, UnitInstance unit, UnitInstance other, Vec2 destination)
+        {
+            if (places.Count >= MostPlaces) return;
+
+            Vec2 ahead = other.Facing.ToVector();
+            Vec2 beside = other.Facing.RightVector();
+
+            // Both presentations, because a place is only a place for the front
+            // it is stood on. The narrow half is what threads a gap side-on; the
+            // wide half is what a regiment needs if it arrives face-on, and
+            // generating only the narrow ring left every face-on approach with
+            // nowhere it could legally stand — so either the search found no
+            // route at all and shouldered through, or it took a place it did not
+            // fit in and the route clipped what it went round.
+            foreach (float reach in new[]
+                     {
+                         unit.Footprint.HalfDepth + MarginMetres,
+                         unit.Footprint.HalfWidth + MarginMetres,
+                     })
+            {
+                float deep = other.Footprint.HalfDepth + reach;
+                float wide = other.Footprint.HalfWidth + reach;
+
+                for (int i = -1; i <= 1; i += 2)
+                for (int j = -1; j <= 1; j += 2)
+                    Consider(places, other.Position + ahead * (deep * i) + beside * (wide * j));
+
+                // Where the ends of the march come onto each face. These are
+                // the "walk in along the body's side" points.
+                foreach (Vec2 end in new[] { places[0], destination })
+                {
+                    Vec2 offset = end - other.Position;
+
+                    float onAhead = Vec2.Dot(offset, ahead);
+                    float onBeside = Vec2.Dot(offset, beside);
+
+                    for (int s = -1; s <= 1; s += 2)
+                    {
+                        Consider(places, other.Position + ahead * (deep * s) + beside * Clamp(onBeside, wide));
+                        Consider(places, other.Position + beside * (wide * s) + ahead * Clamp(onAhead, deep));
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Adds a place unless one is already standing there.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The generator repeats itself heavily and by construction: a face
+        /// projection whose clamp saturates lands on the corner the corner loop
+        /// already produced, and both ends of the march project to the same
+        /// point whenever they sit the same side of a body. Measured on four
+        /// bodies in a line, twenty-six places held about ten distinct ones.
+        /// </para>
+        /// <para>
+        /// That was not merely wasted work. <see cref="MostPlaces"/> is a hard
+        /// cap, so the duplicates <b>crowded genuine candidates out</b>: in the
+        /// same arrangement the two outer bodies contributed nothing at all and
+        /// the search planned as though they were not on the field. A route that
+        /// ignores half the obstacles is the "went somewhere far on the fields"
+        /// report, and no amount of better costing fixes it.
+        /// </para>
+        /// <para>
+        /// One metre, matching the separation the search already demands between
+        /// the ends of a leg, so a place too near another to be a distinct leg is
+        /// too near to be a distinct place.
+        /// </para>
+        /// </remarks>
+        private static void Consider(List<Vec2> places, Vec2 place)
+        {
+            if (places.Count >= MostPlaces) return;
+
+            foreach (Vec2 already in places)
+            {
+                if (Vec2.Distance(already, place) < ApartEnoughMetres) return;
+            }
+
+            places.Add(place);
+        }
+
+        /// <summary>How far apart two candidate places must be to count as two.</summary>
+        private const float ApartEnoughMetres = 1f;
+
+        private static float Clamp(float value, float limit) =>
+            value < -limit ? -limit : value > limit ? limit : value;
 
         // ---- What a leg costs -------------------------------------------------
 
@@ -688,6 +942,59 @@ namespace BattleChess.Rules
         }
 
         /// <summary>One leg's cost, or negative if it cannot be walked that way.</summary>
+        /// <summary>
+        /// What walking a finished line of waypoints costs, in the same seconds
+        /// the search prices its own legs in. Negative means it cannot be walked.
+        /// </summary>
+        /// <remarks>
+        /// The fronts are the ones the walk would really hold — square to each
+        /// leg, coming round on every one (<b>M24</b>) — so this is a cost some
+        /// regiment can actually pay, which is what makes it safe as a ceiling.
+        /// A ceiling below the true best would prune the best away.
+        /// </remarks>
+        private static float PriceOf(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> path, Facing arriveOn)
+        {
+            if (path == null || path.Count < 2) return -1f;
+
+            Facing on = unit.Facing;
+            float total = 0f;
+
+            for (int i = 1; i < path.Count; i++)
+            {
+                Facing walkOn = Marching.AlongTheLine(path[i - 1], path[i], on);
+
+                float step = StepCost(battle, unit, path[i - 1], path[i], on, walkOn);
+                if (step < 0f) return -1f;
+
+                total += step;
+                on = walkOn;
+            }
+
+            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
+
+            return total + Degrees(on, arriveOn) / (turnRate * MovementSystem.PivotBonusWhileHalted);
+        }
+
+        /// <summary>A finished list of waypoints, as a route the assembler can take.</summary>
+        private static Route Straighten(IReadOnlyList<Vec2> path)
+        {
+            var places = new List<Vec2>(path.Count);
+            var fronts = new List<Facing>(path.Count);
+
+            Facing on = default;
+
+            for (int i = 0; i < path.Count; i++)
+            {
+                if (i > 0) on = Marching.AlongTheLine(path[i - 1], path[i], on);
+
+                places.Add(path[i]);
+                fronts.Add(on);
+            }
+
+            return new Route(places, fronts, 0f);
+        }
+
         private static float StepCost(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing arrivingOn, Facing walkOn)
         {
@@ -747,7 +1054,7 @@ namespace BattleChess.Rules
         /// </remarks>
         private static Route? Cheapest(
             BattleState battle, UnitInstance unit, List<Vec2> places, Vec2 destination,
-            Facing arriveOn, bool mayPress, ref int legsPriced, ref int expanded)
+            Facing arriveOn, bool mayPress, Ledger ledger)
         {
             int count = places.Count;
 
@@ -759,17 +1066,17 @@ namespace BattleChess.Rules
             var cameFrom = new List<int>();
             var settled = new List<bool>();
 
-            int legs = count * count * 3;
-
-            var asked = new bool[legs];
-            var legFront = new Facing[legs];
-            var legStandNear = new bool[legs];
-            var legStandFar = new bool[legs];
-            var legClear = new bool[legs];
+            // Named by place and presentation alone, so every answer outlives
+            // the round that paid for it.
+            bool[] asked = ledger.Asked;
+            Facing[] legFront = ledger.Front;
+            bool[] legStandNear = ledger.StandNear;
+            bool[] legStandFar = ledger.StandFar;
+            bool[] legClear = ledger.Clear;
 
             // Room to turn is a property of the ground, so it is asked once for
-            // each place. Nought means not yet asked.
-            var roomToTurn = new sbyte[count];
+            // each place, and stays asked.
+            sbyte[] roomToTurn = ledger.RoomToTurn;
 
             // Finding a state was a walk down the whole list, which came to three
             // quarters of a million list elements on one plan.
@@ -802,26 +1109,32 @@ namespace BattleChess.Rules
             for (int i = 0; i < count; i++)
                 leftToWalk[i] = Vec2.Distance(places[i], destination) / pace;
 
+            // Choosing what to expand next used to be a walk down every state
+            // there was. Measured on one 800 m march through sixteen bodies:
+            // 3.4 million of those steps against 17,182 pieces of geometry, so
+            // the search was spending its time deciding what to look at rather
+            // than looking. A heap makes the same choice in a few comparisons.
+            //
+            // Stale entries are left in rather than found and removed — a state
+            // whose cost improves is pushed again, and the older, dearer copy is
+            // recognised on the way out. That is what keeps this a heap of plain
+            // numbers with no index to maintain.
+            var frontier = new Frontier();
+            frontier.Push(0, leftToWalk[0], ledger);
+
             while (true)
             {
-                int at = -1;
-                float nearest = float.MaxValue;
+                if (!frontier.TryPop(out int at, out float nearest, ledger)) break;
 
-                for (int i = 0; i < stateAt.Count; i++)
-                {
-                    if (settled[i]) continue;
+                if (settled[at]) continue;
 
-                    float reckoned = best[i] + leftToWalk[stateAt[i]];
-                    if (reckoned >= nearest) continue;
+                // A copy left over from before this state got cheaper.
+                if (nearest > best[at] + leftToWalk[stateAt[at]]) continue;
 
-                    nearest = reckoned;
-                    at = i;
-                }
-
-                if (at < 0 || nearest >= arrivedCost) break;
+                if (nearest >= arrivedCost) break;
 
                 settled[at] = true;
-                expanded++;
+                ledger.Expanded++;
 
                 int from = stateAt[at];
                 Vec2 here = places[from];
@@ -852,16 +1165,27 @@ namespace BattleChess.Rules
                     // every pop priced every place it could see. This is what
                     // makes a focused search actually cheap rather than merely
                     // well-aimed.
-                    if (best[at] + apart / pace + leftToWalk[to] >= arrivedCost) continue;
+                    if (best[at] + apart / pace + leftToWalk[to] >= arrivedCost)
+                    {
+                        ledger.Pruned++;
+                        continue;
+                    }
 
                     // Face-on, or side-on either way. Three fronts, because those
                     // are the three a body of men actually walks a line on: front
                     // first, or presenting a flank to thread something narrow.
                     for (int k = 0; k < 3; k++)
                     {
-                        int leg = (from * count + to) * 3 + k;
+                        // The stride is the cap, not however many places
+                        // there are just now, so a leg keeps its name when the
+                        // set grows in a later round.
+                        int leg = (from * MostPlaces + to) * 3 + k;
 
-                        if (!asked[leg])
+                        if (asked[leg])
+                        {
+                            ledger.CacheHits++;
+                        }
+                        else
                         {
                             // unit.Facing only stands in for a leg of no length,
                             // and those are skipped above, so this bearing and
@@ -877,11 +1201,22 @@ namespace BattleChess.Rules
                             legFront[leg] = walking;
                             legStandNear[leg] = CanStandHere(battle, unit, here, walking);
                             legStandFar[leg] = CanStandHere(battle, unit, there, walking);
+                            ledger.StandChecks += 2;
+                            ledger.LineChecks++;
                             legClear[leg] = Marching.IsClearLine(
-                                battle, unit, here, there, walking, leaving: true, leavingGrazeOnly: true);
+                                battle, unit, here, there, walking, out UnitInstance? refused,
+                                leaving: true, leavingGrazeOnly: true);
+
+                            // The refusal is the whole reason this body will get
+                            // places to bend at. Recorded only when the leg is
+                            // freshly priced, which is exactly when the search
+                            // wanted to walk it: the bound above turns back every
+                            // leg that could not have been on the answer, before
+                            // any geometry, so nothing here is asked idly.
+                            if (!legClear[leg]) ledger.Refuse(refused);
 
                             asked[leg] = true;
-                            legsPriced++;
+                            ledger.LegsPriced++;
                         }
 
                         Facing walkOn = legFront[leg];
@@ -900,9 +1235,22 @@ namespace BattleChess.Rules
                         // M25 grace in full rather than the graze: a formed line
                         // laps its neighbours by definition, and getting clear of
                         // that is the steering's business.
-                        bool clear = at == 0
-                            ? Marching.IsClearLine(battle, unit, here, there, walkOn, leaving: true)
-                            : legClear[leg];
+                        bool clear;
+
+                        if (at == 0)
+                        {
+                            ledger.LineChecks++;
+
+                            clear = Marching.IsClearLine(
+                                battle, unit, here, there, walkOn, out UnitInstance? inTheWay,
+                                leaving: true);
+
+                            if (!clear) ledger.Refuse(inTheWay);
+                        }
+                        else
+                        {
+                            clear = legClear[leg];
+                        }
 
                         if (!clear && !mayPress) continue;
 
@@ -911,7 +1259,10 @@ namespace BattleChess.Rules
                         if (Degrees(on, walkOn) > WalkingCapDegrees)
                         {
                             if (roomToTurn[from] == 0)
+                            {
+                                ledger.TurnChecks++;
                                 roomToTurn[from] = (sbyte)(CanTurnHere(battle, unit, here) ? 1 : -1);
+                            }
 
                             if (roomToTurn[from] < 0) continue;
                         }
@@ -952,6 +1303,10 @@ namespace BattleChess.Rules
                         {
                             index[key] = stateAt.Count;
 
+                            ledger.States++;
+
+                            frontier.Push(stateAt.Count, total + leftToWalk[to], ledger);
+
                             stateAt.Add(to);
                             stateOn.Add(walkOn);
                             best.Add(total);
@@ -962,6 +1317,8 @@ namespace BattleChess.Rules
                         {
                             best[state] = total;
                             cameFrom[state] = at;
+
+                            frontier.Push(state, total + leftToWalk[to], ledger);
                         }
                     }
                 }
@@ -982,6 +1339,97 @@ namespace BattleChess.Rules
             fronts.Reverse();
 
             return backwards.Count < 2 ? null : new Route(backwards, fronts, arrivedCost);
+        }
+
+        /// <summary>
+        /// The states waiting to be expanded, cheapest reckoning first.
+        /// </summary>
+        /// <remarks>
+        /// A plain binary heap over pairs of (reckoning, state). Deliberately not
+        /// a general priority queue with an index: this one never needs to find a
+        /// state it already holds, because a state that gets cheaper is pushed
+        /// again and the dearer copy is discarded when it surfaces. Two words per
+        /// entry, no bookkeeping, and the same answers.
+        /// </remarks>
+        private sealed class Frontier
+        {
+            private float[] _by = new float[64];
+            private int[] _state = new int[64];
+            private int _held;
+
+            public void Push(int state, float reckoning, Ledger ledger)
+            {
+                if (_held == _by.Length)
+                {
+                    Array.Resize(ref _by, _held * 2);
+                    Array.Resize(ref _state, _held * 2);
+                }
+
+                int at = _held++;
+
+                _by[at] = reckoning;
+                _state[at] = state;
+
+                while (at > 0)
+                {
+                    int up = (at - 1) / 2;
+
+                    ledger.FrontierScans++;
+
+                    if (_by[up] <= _by[at]) break;
+
+                    Swap(up, at);
+                    at = up;
+                }
+            }
+
+            public bool TryPop(out int state, out float reckoning, Ledger ledger)
+            {
+                if (_held == 0)
+                {
+                    state = -1;
+                    reckoning = 0f;
+                    return false;
+                }
+
+                state = _state[0];
+                reckoning = _by[0];
+
+                _held--;
+
+                if (_held > 0)
+                {
+                    _by[0] = _by[_held];
+                    _state[0] = _state[_held];
+
+                    int at = 0;
+
+                    while (true)
+                    {
+                        int left = at * 2 + 1;
+                        if (left >= _held) break;
+
+                        int small = left;
+                        int right = left + 1;
+
+                        ledger.FrontierScans++;
+
+                        if (right < _held && _by[right] < _by[left]) small = right;
+                        if (_by[at] <= _by[small]) break;
+
+                        Swap(at, small);
+                        at = small;
+                    }
+                }
+
+                return true;
+            }
+
+            private void Swap(int a, int b)
+            {
+                (_by[a], _by[b]) = (_by[b], _by[a]);
+                (_state[a], _state[b]) = (_state[b], _state[a]);
+            }
         }
 
         /// <summary>How many steps the circle is cut into when naming a front.</summary>

@@ -79,7 +79,7 @@ namespace BattleChess.Rules
             public Plan PlanTo(
                 BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
                 IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
-                RouteSearch.Find(battle, unit, destination, arriveOn ?? unit.OrderFacing, log);
+                RouteSearch.Find(battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder);
         }
 
         private sealed class Ladder : IRoutePlanner

@@ -80,11 +80,22 @@ namespace BattleChess.Rules
     /// </remarks>
     public readonly struct RouteEffort
     {
-        public RouteEffort(int places, int legs, int expansions)
+        public RouteEffort(
+            int places, int legs, int expansions, int rounds = 0,
+            int states = 0, long frontierScans = 0, int cacheHits = 0, int pruned = 0,
+            int lineChecks = 0, int standChecks = 0, int turnChecks = 0)
         {
             Places = places;
             Legs = legs;
             Expansions = expansions;
+            Rounds = rounds;
+            States = states;
+            FrontierScans = frontierScans;
+            CacheHits = cacheHits;
+            Pruned = pruned;
+            LineChecks = lineChecks;
+            StandChecks = standChecks;
+            TurnChecks = turnChecks;
         }
 
         /// <summary>Candidate places the route was allowed to bend at.</summary>
@@ -100,12 +111,73 @@ namespace BattleChess.Rules
         /// <summary>States taken off the frontier and expanded.</summary>
         public readonly int Expansions;
 
+        /// <summary>
+        /// How many times the search gave up, bought more ground to bend at
+        /// from whatever had refused it, and started again (<b>M32</b>).
+        /// </summary>
+        /// <remarks>
+        /// One means the first handful of places was enough. A high count on an
+        /// ordinary march means the march kept meeting bodies it had not been
+        /// told about, which is either a genuinely layered field or a generator
+        /// handing out places that do not help.
+        /// </remarks>
+        public readonly int Rounds;
+
+        /// <summary>
+        /// States of (place, front) created. Always at least as many as
+        /// <see cref="Places"/>, usually several times more, and the number the
+        /// frontier's cost is really measured against.
+        /// </summary>
+        public readonly int States;
+
+        /// <summary>
+        /// States looked at while choosing which to expand next.
+        /// </summary>
+        /// <remarks>
+        /// The frontier is a walk down the whole list, so this grows as the
+        /// square of the graph. A <c>long</c> because it is the one counter here
+        /// that can reach millions on a single march, which is itself the
+        /// finding: it is bookkeeping, not geometry, and nothing about a route
+        /// depends on it.
+        /// </remarks>
+        public readonly long FrontierScans;
+
+        /// <summary>Legs wanted whose answer was already known.</summary>
+        public readonly int CacheHits;
+
+        /// <summary>Edges turned back by the bound before any geometry.</summary>
+        public readonly int Pruned;
+
+        /// <summary>Swept-rectangle line checks actually run.</summary>
+        public readonly int LineChecks;
+
+        /// <summary>Standing checks actually run.</summary>
+        public readonly int StandChecks;
+
+        /// <summary>Room-to-turn checks actually run.</summary>
+        public readonly int TurnChecks;
+
+        /// <summary>Every dear geometric question this plan asked.</summary>
+        public int Geometry => LineChecks + StandChecks + TurnChecks;
+
         /// <summary>Whether a graph was built at all, or the cast answered.</summary>
         public bool Searched => Places > 0;
 
+        /// <summary>
+        /// Everything counted, for a bench rather than a game log.
+        /// </summary>
+        public string Detail =>
+            Searched
+                ? $"{Places,3} places  {States,5} states  {Rounds} rounds | " +
+                  $"geometry {Geometry,6} ({LineChecks} line, {StandChecks} stand, {TurnChecks} turn) | " +
+                  $"legs {Legs,5} priced, {CacheHits,7} cached, {Pruned,7} pruned | " +
+                  $"frontier {FrontierScans,9}"
+                : "straight line, nothing searched";
+
         public override string ToString() =>
             Searched
-                ? $"{Places} places, {Legs} legs priced, {Expansions} expanded"
+                ? $"{Places} places, {Legs} legs priced, {Expansions} expanded, " +
+                  $"{Rounds} round{(Rounds == 1 ? string.Empty : "s")}"
                 : "straight line, nothing searched";
     }
 
@@ -919,8 +991,30 @@ namespace BattleChess.Rules
         /// </param>
         public static bool IsClearLine(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
-            bool leaving = false, bool leavingGrazeOnly = false)
+            bool leaving = false, bool leavingGrazeOnly = false) =>
+            IsClearLine(battle, unit, from, to, facing, out _, leaving, leavingGrazeOnly);
+
+        /// <summary>
+        /// The same question, and which regiment answered no.
+        /// </summary>
+        /// <param name="blocker">
+        /// A body that refused the line, or nothing if it was clear or the
+        /// <i>ground</i> refused it. Terrain is not something this search can
+        /// walk about — that is the pathfinder's job (<b>M10</b>).
+        /// <para>
+        /// <b>A</b> body, not the nearest one: the loop stops at the first no,
+        /// as it always has. Naming the body the march meets first instead was
+        /// built and measured, and it cost between a quarter and half again as
+        /// much time across the whole scaling bench while changing not one
+        /// route — so the extra sweeps bought nothing.
+        /// </para>
+        /// </param>
+        public static bool IsClearLine(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
+            out UnitInstance? blocker, bool leaving = false, bool leavingGrazeOnly = false)
         {
+            blocker = null;
+
             Vec2 travel = to - from;
             float length = travel.Length;
 
@@ -930,10 +1024,10 @@ namespace BattleChess.Rules
 
             // A safe bound on how far from the segment a body could possibly
             // reach and still be touched: the swept rectangle's own bounding
-            // circle at either end, plus the obstacle's. Cheap and geometric
-            // rather than the loose corridor RouteSearch.Nearby uses for
-            // choosing candidates — this only has to be provably safe, not
-            // tight, so it can never turn a real collision into a missed one.
+            // circle at either end, plus the obstacle's. It only has to be
+            // provably safe, not tight, so it can never turn a real collision
+            // into a missed one — and since M32 it decides candidate places
+            // too, by way of the blocker this hands back.
             float reach = unit.Footprint.BoundingRadius;
 
             foreach (UnitInstance other in battle.UnitsOnField())
@@ -976,7 +1070,11 @@ namespace BattleChess.Rules
                         continue;
                 }
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
+                if (Sweep.FirstTouch(body, travel, other.Shape, out _))
+                {
+                    blocker = other;
+                    return false;
+                }
             }
 
             // The ground last, and it is worth saying why, because it used to be
