@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -22,7 +22,7 @@ namespace BattleChess.Rules
 
         Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
-            IBattleLog? log = null, IWayRound? wayRound = null);
+            IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null);
     }
 
     /// <summary>The ways of planning a march, and the one used by default.</summary>
@@ -59,25 +59,40 @@ namespace BattleChess.Rules
         /// the recordings agree.
         /// </para>
         /// </remarks>
-        public static IRoutePlanner Default { get; } = TheLadder;
+        public static IRoutePlanner Default { get; } = TheSearch;
 
         private sealed class Search : IRoutePlanner
         {
             public string Name => "over places and fronts";
 
+            /// <remarks>
+            /// <paramref name="arriveOn"/> falls back to the unit's own
+            /// <see cref="UnitInstance.OrderFacing"/>, which is only right once
+            /// the order exists. Planning a march <i>before</i> giving the order
+            /// — which is what the Unity harness does, and what a route preview
+            /// does — reads the front of the <b>previous</b> order, and the
+            /// search then buys that front with ground: measured from a recorded
+            /// click, eight waypoints and a hook out past the destination and
+            /// back, against five when told the front the order was about to
+            /// set. Callers who know the pending front must say so.
+            /// </remarks>
             public Plan PlanTo(
                 BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
-                IBattleLog? log = null, IWayRound? wayRound = null) =>
-                RouteSearch.Find(battle, unit, destination, unit.OrderFacing, log);
+                IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
+                RouteSearch.Find(battle, unit, destination, arriveOn ?? unit.OrderFacing, log);
         }
 
         private sealed class Ladder : IRoutePlanner
         {
             public string Name => "the ladder";
 
+            /// <remarks>
+            /// The ladder plans a line and leaves the wheel to the steering
+            /// (<b>M24</b>), so it has no use for an arrival front.
+            /// </remarks>
             public Plan PlanTo(
                 BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
-                IBattleLog? log = null, IWayRound? wayRound = null) =>
+                IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
                 Marching.ByTheLadder(battle, unit, pathfinder, destination, log, wayRound);
         }
     }

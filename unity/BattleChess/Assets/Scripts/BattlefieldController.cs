@@ -1565,13 +1565,26 @@ namespace BattleChess.Unity
             if (_options.ShowRouteCandidates)
                 _overlay.SetRouteCandidates(RouteSearch.DebugCandidatePlaces(_battle, unit, destination));
 
-            Plan search = Marching.PlanTo(_battle, unit, pathfinder, destination, planner: RoutePlanners.TheSearch);
+            // What GiveOrder would set for the click being previewed: a plain
+            // right-click draws no bearing, so the front is the line of march.
+            // Left to the planner's own fallback it reads the *previous*
+            // order's front instead, and the search pays for that one in
+            // ground.
+            Facing arriveOn = Marching.AlongTheLine(unit.Position, destination, unit.Facing);
+
+            Plan search = Marching.PlanTo(
+                _battle, unit, pathfinder, destination,
+                planner: RoutePlanners.TheSearch, arriveOn: arriveOn);
+
             _overlay.SetSearchPreview(search.Path.Waypoints);
             ReportPreview("search", unit, search);
 
             if (_options.PreviewBothPlanners)
             {
-                Plan ladder = Marching.PlanTo(_battle, unit, pathfinder, destination, planner: RoutePlanners.TheLadder);
+                Plan ladder = Marching.PlanTo(
+                    _battle, unit, pathfinder, destination,
+                    planner: RoutePlanners.TheLadder, arriveOn: arriveOn);
+
                 _overlay.SetLadderPreview(ladder.Path.Waypoints);
                 ReportPreview("ladder", unit, ladder);
             }
@@ -1724,7 +1737,19 @@ namespace BattleChess.Unity
             // M10: the straight line first, the search only if something is
             // genuinely in the way. Most player orders across open ground now
             // never reach the pathfinder at all.
-            Plan plan = Marching.PlanTo(_battle, unit, pathfinder, destination, _console);
+            //
+            // The front is handed over rather than left to the planner to guess,
+            // because the order does not exist yet: GiveOrder is called below,
+            // and until it is, unit.OrderFacing still holds the *previous*
+            // order's front. The search prices the wheel onto the front it is
+            // given, so guessing it wrong buys the wrong wheel with real ground.
+            // The same expression GiveOrder itself will use — the drawn bearing
+            // if there is one, otherwise the line of march.
+            Facing willArriveOn = bearing ?? Marching.AlongTheLine(unit.Position, destination, unit.Facing);
+
+            Plan plan = Marching.PlanTo(
+                _battle, unit, pathfinder, destination, _console, arriveOn: willArriveOn);
+
             PathResult path = plan.Path;
 
             // The route overlay and the drawn line show one march. Ordering a

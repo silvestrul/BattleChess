@@ -115,10 +115,20 @@ namespace BattleChess.Rules
         /// caller in the game passes — the parameter exists so the harness can
         /// put two planners against the same arrangement and print both answers.
         /// </param>
+        /// <param name="arriveOn">
+        /// The front the regiment is meant to finish on, when the caller knows
+        /// it and the unit does not yet. Left out, the planner falls back to
+        /// <see cref="UnitInstance.OrderFacing"/>, which is right for anything
+        /// re-planning a march already under way and <b>wrong</b> for anything
+        /// planning one before giving the order — see
+        /// <see cref="RoutePlanners"/> for what that cost.
+        /// </param>
         public static Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
-            IBattleLog? log = null, IWayRound? wayRound = null, IRoutePlanner? planner = null) =>
-            (planner ?? RoutePlanners.Default).PlanTo(battle, unit, pathfinder, destination, log, wayRound);
+            IBattleLog? log = null, IWayRound? wayRound = null, IRoutePlanner? planner = null,
+            Facing? arriveOn = null) =>
+            (planner ?? RoutePlanners.Default).PlanTo(
+                battle, unit, pathfinder, destination, log, wayRound, arriveOn);
 
         /// <summary>
         /// <b>M18</b>'s ladder: straight line, round it, through its own, and the
