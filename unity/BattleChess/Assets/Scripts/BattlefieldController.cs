@@ -1556,6 +1556,12 @@ namespace BattleChess.Unity
 
             _overlay.ClearRoutePreview();
 
+            // The one thing a screenshot cannot give back: enough to rebuild
+            // the exact arrangement later without guessing pixel positions off
+            // a picture. Written once per preview, not per planner, and before
+            // either plan runs, so it is here even if something below throws.
+            ReportScene(unit, destination);
+
             if (_options.ShowRouteCandidates)
                 _overlay.SetRouteCandidates(RouteSearch.DebugCandidatePlaces(_battle, unit, destination));
 
@@ -1575,6 +1581,35 @@ namespace BattleChess.Unity
                        (_options.ShowRouteCandidates ? " Cyan crosses: candidate places." : string.Empty);
         }
 
+        /// <summary>
+        /// Everything about the arrangement a preview was asked against: the
+        /// mover, the resolved destination, and every friendly regiment on the
+        /// field that a route could conceivably bend around.
+        /// </summary>
+        /// <remarks>
+        /// Friendly rather than nearby-filtered, and deliberately: the point of
+        /// this line is rebuilding the scene from the log alone, and a
+        /// corridor filter tuned for planning is exactly the kind of thing that
+        /// might itself be the bug being chased.
+        /// </remarks>
+        private void ReportScene(UnitInstance unit, Vec2 destination)
+        {
+            _console.Info("Preview",
+                $"{unit.Def.DisplayName} at ({unit.Position.X:0.0},{unit.Position.Y:0.0}) " +
+                $"facing {unit.Facing.Degrees:0.0}°, {unit.Footprint.Width:0}x{unit.Footprint.Depth:0} m, " +
+                $"to ({destination.X:0.0},{destination.Y:0.0}).");
+
+            foreach (UnitInstance other in _battle.UnitsOnField())
+            {
+                if (ReferenceEquals(other, unit)) continue;
+                if (other.Owner != unit.Owner) continue;
+
+                _console.Info("Preview",
+                    $"  {other.Def.DisplayName} at ({other.Position.X:0.0},{other.Position.Y:0.0}) " +
+                    $"facing {other.Facing.Degrees:0.0}°, {other.Footprint.Width:0}x{other.Footprint.Depth:0} m.");
+            }
+        }
+
         private void ReportPreview(string name, UnitInstance unit, Plan plan)
         {
             PathResult path = plan.Path;
@@ -1587,10 +1622,23 @@ namespace BattleChess.Unity
 
             float seconds = Marching.SecondsToWalk(_battle, unit, path.Waypoints, plan.Hold);
 
+            var waypoints = new System.Text.StringBuilder();
+            for (int i = 0; i < path.Waypoints.Count; i++)
+            {
+                if (i > 0) waypoints.Append(" -> ");
+
+                Vec2 point = path.Waypoints[i];
+                waypoints.Append($"({point.X:0},{point.Y:0})");
+
+                if (plan.Hold != null && i < plan.Hold.Length && plan.Hold[i].HasValue)
+                    waypoints.Append($"[{plan.Hold[i]!.Value.Degrees:0}°]");
+            }
+
             _console.Info("Preview",
                 $"{unit.Def.DisplayName} — {name}: {path.Waypoints.Count} waypoints, " +
                 $"{path.Distance:0} m, {seconds:0} s" +
-                (plan.PressedThrough ? ", presses through its own." : "."));
+                (plan.PressedThrough ? ", presses through its own." : ".") +
+                $"  {waypoints}");
         }
 
         /// <summary>
