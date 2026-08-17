@@ -773,14 +773,39 @@ namespace BattleChess.Rules
             Facing arrivedOn = unit.Facing;
             float arrivedCost = float.MaxValue;
 
+            // What is left to walk, at best, from each place — the shortest a
+            // march from there could possibly take.
+            //
+            // This turns the search from Dijkstra into A*, and it is honest
+            // rather than a fudge: Seconds prices every leg at this same pace
+            // reduced by an alignment penalty of at most one and by the pace
+            // inside its own, both of which only ever make a leg slower. So the
+            // straight line at full pace is a bound no route can beat, the
+            // estimate never overshoots, and the cheapest route found is still
+            // the cheapest route there is.
+            float pace = MathF.Max(0.1f, battle.SpeedOf(unit));
+            var leftToWalk = new float[count];
+
+            for (int i = 0; i < count; i++)
+                leftToWalk[i] = Vec2.Distance(places[i], destination) / pace;
+
             while (true)
             {
                 int at = -1;
+                float nearest = float.MaxValue;
 
                 for (int i = 0; i < stateAt.Count; i++)
-                    if (!settled[i] && (at < 0 || best[i] < best[at])) at = i;
+                {
+                    if (settled[i]) continue;
 
-                if (at < 0 || best[at] >= arrivedCost) break;
+                    float reckoned = best[i] + leftToWalk[stateAt[i]];
+                    if (reckoned >= nearest) continue;
+
+                    nearest = reckoned;
+                    at = i;
+                }
+
+                if (at < 0 || nearest >= arrivedCost) break;
 
                 settled[at] = true;
 
