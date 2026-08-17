@@ -123,7 +123,8 @@ namespace BattleChess.Rules
             // always said and what this rung of it got right.
             Route? clean = Cheapest(battle, unit, places, destination, arriveOn, mayPress: false);
 
-            if (clean.HasValue) return Assemble(clean.Value, pressed: false);
+            if (clean.HasValue)
+                return Assemble(Smooth(battle, unit, clean.Value, arriveOn), pressed: false);
 
             Route? forced = Cheapest(battle, unit, places, destination, arriveOn, mayPress: true);
 
@@ -464,6 +465,225 @@ namespace BattleChess.Rules
             public readonly List<Vec2> Places;
             public readonly List<Facing> Fronts;
             public readonly float Seconds;
+        }
+
+        /// <summary>
+        /// Drops every waypoint the regiment can simply see past.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The search bends at candidate places, and a candidate place is a
+        /// corner of something — so a route that had to get round one body
+        /// comes back threaded through every corner it considered on the way,
+        /// whether or not it still needs them once the whole line is known.
+        /// Reported from a play-test as the plain thing it is: <i>"it uses too
+        /// many points in the route when less points would have been more
+        /// optimal"</i>.
+        /// </para>
+        /// <para>
+        /// Two halves, and the split matters. String-pulling reaches as far
+        /// along the route as one leg can honestly carry, asking only whether a
+        /// leg is possible — <b>not</b> which front to walk it on. Then the
+        /// shortened line is priced as a whole, its fronts chosen together.
+        /// </para>
+        /// <para>
+        /// Written the obvious way first, choosing each leg's cheapest front as
+        /// it went, and it lost to the route it was shortening: six waypoints
+        /// at 64.8 s became four at 106.5 s. A front that is cheap to walk can
+        /// be dear to leave, so the fronts are not independent and picking them
+        /// one at a time is simply wrong. Over a line rather than a graph the
+        /// exact answer is a short dynamic program, so there is no reason to
+        /// approximate it.
+        /// </para>
+        /// <para>
+        /// Every kept leg is put through exactly the checks the search itself
+        /// used, and the result is taken only if it is genuinely cheaper in
+        /// seconds — a straight line is never longer in metres, but the wheel
+        /// it forces can cost more than the two legs it replaced, and the clock
+        /// is what a plan is priced in (<b>M31</b>).
+        /// </para>
+        /// </remarks>
+        private static Route Smooth(BattleState battle, UnitInstance unit, Route route, Facing arriveOn)
+        {
+            if (route.Places.Count <= 2) return route;
+
+            int last = route.Places.Count - 1;
+
+            var places = new List<Vec2> { route.Places[0] };
+
+            int at = 0;
+
+            while (at < last)
+            {
+                int next = at + 1;
+
+                // Furthest first: the point of this is to skip as much as one
+                // leg can carry.
+                for (int j = last; j > at + 1; j--)
+                {
+                    if (FrontsFor(battle, unit, route.Places[at], route.Places[j],
+                            leavingItsOwn: at == 0, arriving: j == last).Count == 0)
+                        continue;
+
+                    next = j;
+                    break;
+                }
+
+                places.Add(route.Places[next]);
+                at = next;
+            }
+
+            if (places.Count >= route.Places.Count) return route;
+
+            if (!CheapestFronts(battle, unit, places, arriveOn, out List<Facing> fronts, out float seconds))
+                return route;
+
+            return seconds < route.Seconds ? new Route(places, fronts, seconds) : route;
+        }
+
+        /// <summary>Every front that can carry the regiment along one straight leg.</summary>
+        private static List<Facing> FrontsFor(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, bool leavingItsOwn, bool arriving)
+        {
+            Facing bearing = Marching.AlongTheLine(from, to, unit.Facing);
+            var fronts = new List<Facing>(3);
+
+            foreach (Facing front in new[]
+                     {
+                         bearing,
+                         Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f),
+                         Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f),
+                     })
+            {
+                if (!leavingItsOwn && !CanStandHere(battle, unit, from, front)) continue;
+                if (!arriving && !CanStandHere(battle, unit, to, front)) continue;
+
+                if (!Marching.IsClearLine(battle, unit, from, to, front,
+                        leaving: true, leavingGrazeOnly: !leavingItsOwn))
+                    continue;
+
+                fronts.Add(front);
+            }
+
+            return fronts;
+        }
+
+        /// <summary>
+        /// The cheapest way to walk a fixed line of places, choosing every front
+        /// together, and the seconds it comes to.
+        /// </summary>
+        /// <remarks>
+        /// A leg costs what it costs given both the front it is walked on and
+        /// the front it was entered on, so the fronts down a route are not
+        /// independent. Over a line of places rather than a graph that is a
+        /// short dynamic program: at most three fronts to a leg, each looking
+        /// back only at the three before it.
+        /// </remarks>
+        private static bool CheapestFronts(
+            BattleState battle, UnitInstance unit, List<Vec2> places, Facing arriveOn,
+            out List<Facing> chosen, out float seconds)
+        {
+            chosen = new List<Facing>();
+            seconds = float.MaxValue;
+
+            int legs = places.Count - 1;
+            var options = new List<Facing>[legs];
+
+            for (int i = 0; i < legs; i++)
+            {
+                options[i] = FrontsFor(battle, unit, places[i], places[i + 1], i == 0, i == legs - 1);
+                if (options[i].Count == 0) return false;
+            }
+
+            var cost = new float[legs][];
+            var cameFrom = new int[legs][];
+
+            for (int i = 0; i < legs; i++)
+            {
+                cost[i] = new float[options[i].Count];
+                cameFrom[i] = new int[options[i].Count];
+            }
+
+            for (int f = 0; f < options[0].Count; f++)
+            {
+                cost[0][f] = StepCost(battle, unit, places[0], places[1], unit.Facing, options[0][f]);
+                cameFrom[0][f] = -1;
+
+                if (cost[0][f] < 0f) cost[0][f] = float.MaxValue;
+            }
+
+            for (int i = 1; i < legs; i++)
+            for (int f = 0; f < options[i].Count; f++)
+            {
+                cost[i][f] = float.MaxValue;
+                cameFrom[i][f] = -1;
+
+                for (int g = 0; g < options[i - 1].Count; g++)
+                {
+                    if (cost[i - 1][g] >= float.MaxValue) continue;
+
+                    float step = StepCost(
+                        battle, unit, places[i], places[i + 1], options[i - 1][g], options[i][f]);
+
+                    if (step < 0f) continue;
+
+                    float total = cost[i - 1][g] + step;
+                    if (total >= cost[i][f]) continue;
+
+                    cost[i][f] = total;
+                    cameFrom[i][f] = g;
+                }
+            }
+
+            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
+            int best = -1;
+
+            for (int f = 0; f < options[legs - 1].Count; f++)
+            {
+                if (cost[legs - 1][f] >= float.MaxValue) continue;
+
+                // The wheel onto the ordered front, counted once at the end,
+                // exactly as the search counts it on arrival.
+                float total = cost[legs - 1][f]
+                              + Degrees(options[legs - 1][f], arriveOn)
+                                / (turnRate * MovementSystem.PivotBonusWhileHalted);
+
+                if (total >= seconds) continue;
+
+                seconds = total;
+                best = f;
+            }
+
+            if (best < 0) return false;
+
+            var backwards = new List<Facing>();
+
+            for (int i = legs - 1; i >= 0; i--)
+            {
+                backwards.Add(options[i][best]);
+                best = cameFrom[i][best];
+            }
+
+            backwards.Reverse();
+
+            // A front is recorded against the waypoint its leg ends at, which is
+            // the convention Route and MovementRoute both already read.
+            chosen.Add(unit.Facing);
+            chosen.AddRange(backwards);
+
+            return true;
+        }
+
+        /// <summary>One leg's cost, or negative if it cannot be walked that way.</summary>
+        private static float StepCost(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing arrivingOn, Facing walkOn)
+        {
+            // Turning above the cap means turning on the spot, and there has to
+            // be room for it where it stands.
+            if (Degrees(arrivingOn, walkOn) > WalkingCapDegrees && !CanTurnHere(battle, unit, from))
+                return -1f;
+
+            return Seconds(battle, unit, from, to, arrivingOn, walkOn, inside: false);
         }
 
         private static Plan Assemble(Route route, bool pressed)
