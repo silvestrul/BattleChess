@@ -856,7 +856,7 @@ namespace BattleChess.Rules
         /// </param>
         public static bool IsClearLine(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
-            bool leaving = false)
+            bool leaving = false, bool leavingGrazeOnly = false)
         {
             Vec2 travel = to - from;
             float length = travel.Length;
@@ -871,7 +871,22 @@ namespace BattleChess.Rules
             {
                 if (!IsInTheWayOf(unit, other)) continue;
                 if (WhereItIsStanding(body, travel, other)) continue;
-                if (leaving && OrientedRect.Overlaps(body, other.Shape)) continue;
+
+                if (leaving && OrientedRect.Overlaps(body, other.Shape))
+                {
+                    // Ordinarily any overlap at the start is excused: the
+                    // regiment already occupies that ground and getting clear
+                    // of it is the steering's business (M25). A candidate the
+                    // search invented is not ground anybody occupies, so
+                    // <paramref name="leavingGrazeOnly"/> narrows that to the
+                    // same brush the codebase already treats as no obstacle at
+                    // all — OrderSystem.GrazingTolerance — rather than excusing
+                    // a body genuinely ahead in the direction of travel just
+                    // because the candidate happened to already touch it.
+                    if (!leavingGrazeOnly ||
+                        OrientedRect.OverlapFraction(body, other.Shape) <= OrderSystem.GrazingTolerance)
+                        continue;
+                }
 
                 if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
             }

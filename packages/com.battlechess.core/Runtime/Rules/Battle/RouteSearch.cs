@@ -422,24 +422,28 @@ namespace BattleChess.Rules
                                  Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f),
                              })
                     {
-                        // Tried restricting this to the true departure (state 0)
-                        // only, since that fixed the reproduced fault below. It
-                        // is not kept: measured against the angle gate, it took
-                        // the search from 19 of 19 clear to 5 of 19, worse than
-                        // the ladder it was meant to replace, because legitimate
-                        // corner-hugging needs the same grace across more than
-                        // one hop beside the same body, and WhereItIsStanding's
-                        // per-leg directional test can flip for that body as the
-                        // bearing changes leg to leg. A real fix wants the
-                        // candidate's own clearance margin to match the front it
-                        // is actually walked on, not a blanket policy on leaving.
-                        //
-                        // Left as it was pending that: known to let a leg cut
-                        // through a body it started already touching, "ahead" in
-                        // the travel direction (measured:
+                        // Full leaving grace only where the regiment is truly
+                        // standing (state 0, unit.Position on unit.Facing) —
+                        // that is M25's case, a formed line the regiment is
+                        // already inside. Every other place in this graph is a
+                        // candidate the search invented, so a blanket leaving
+                        // there excused a body genuinely ahead in the travel
+                        // direction just because the candidate already touched
+                        // it, and a leg cut straight through a wall on the
+                        // strength of that (measured:
                         // EveryLegOfAPlannedRouteIsClearAtTheFrontItIsWalkedOn,
-                        // "wall, no gap").
-                        bool clear = Marching.IsClearLine(battle, unit, here, there, walkOn, leaving: true);
+                        // "wall, no gap"). Restricting it outright to state 0
+                        // was tried and cost the angle gate more than it
+                        // fixed — corner-hugging needs the same grace across
+                        // more than one hop beside the same body. Narrowing it
+                        // to a graze, using the tolerance the rest of the
+                        // codebase already treats as no obstacle at all
+                        // (OrderSystem.GrazingTolerance) rather than dropping
+                        // it, keeps both: a true graze is still excused on
+                        // every hop, a body the leg genuinely walks through is
+                        // not.
+                        bool clear = Marching.IsClearLine(
+                            battle, unit, here, there, walkOn, leaving: true, leavingGrazeOnly: at != 0);
 
                         if (!clear && !mayPress) continue;
 
