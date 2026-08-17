@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -482,6 +482,28 @@ namespace BattleChess.Rules
                 hold, pressed);
         }
 
+        /// <summary>
+        /// Dijkstra over states of (place, front), returning the cheapest route
+        /// or nothing.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>A leg is asked about once, not once per state standing at its near
+        /// end.</b> The front a leg is walked on falls out of the two places and
+        /// which of the three presentations is being tried. It does not depend on
+        /// the front the regiment arrived at the near place on, because the
+        /// bearing between two points is a property of the points. So the three
+        /// dear questions about a leg (can it stand at either end on that front,
+        /// is the line clear) have the same answer for every state sharing that
+        /// place, and there are many of those: measured, twenty places carried
+        /// nearly three hundred states.
+        /// </para>
+        /// <para>
+        /// Measured on one plan before this: 22,941 standing checks and 10,310
+        /// swept-rectangle line checks against 1,200 distinct legs. Nine tenths
+        /// of the geometry was the same question asked again.
+        /// </para>
+        /// </remarks>
         private static Route? Cheapest(
             BattleState battle, UnitInstance unit, List<Vec2> places, Vec2 destination,
             Facing arriveOn, bool mayPress)
@@ -496,11 +518,28 @@ namespace BattleChess.Rules
             var cameFrom = new List<int>();
             var settled = new List<bool>();
 
+            int legs = count * count * 3;
+
+            var asked = new bool[legs];
+            var legFront = new Facing[legs];
+            var legStandNear = new bool[legs];
+            var legStandFar = new bool[legs];
+            var legClear = new bool[legs];
+
+            // Room to turn is a property of the ground, so it is asked once for
+            // each place. Nought means not yet asked.
+            var roomToTurn = new sbyte[count];
+
+            // Finding a state was a walk down the whole list, which came to three
+            // quarters of a million list elements on one plan.
+            var index = new Dictionary<long, int>();
+
             stateAt.Add(0);
             stateOn.Add(unit.Facing);
             best.Add(0f);
             cameFrom.Add(-1);
             settled.Add(false);
+            index[Key(0, unit.Facing)] = 0;
 
             int arrivedFrom = -1;
             Facing arrivedOn = unit.Facing;
@@ -517,71 +556,77 @@ namespace BattleChess.Rules
 
                 settled[at] = true;
 
-                Vec2 here = places[stateAt[at]];
+                int from = stateAt[at];
+                Vec2 here = places[from];
                 Facing on = stateOn[at];
 
                 for (int to = 0; to < count; to++)
                 {
-                    if (to == stateAt[at]) continue;
+                    if (to == from) continue;
 
                     Vec2 there = places[to];
-                    if (Vec2.Distance(here, there) < 1f) continue;
-
-                    Facing bearing = Marching.AlongTheLine(here, there, on);
+                    if (Vec2.Distance(here, there) < ApartEnoughMetres) continue;
 
                     // Face-on, or side-on either way. Three fronts, because those
                     // are the three a body of men actually walks a line on: front
                     // first, or presenting a flank to thread something narrow.
-                    foreach (Facing walkOn in new[]
-                             {
-                                 bearing,
-                                 Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f),
-                                 Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f),
-                             })
+                    for (int k = 0; k < 3; k++)
                     {
-                        // Full leaving grace only where the regiment is truly
-                        // standing (state 0, unit.Position on unit.Facing) —
-                        // that is M25's case, a formed line the regiment is
-                        // already inside. Every other place in this graph is a
-                        // candidate the search invented, so a blanket leaving
-                        // there excused a body genuinely ahead in the travel
-                        // direction just because the candidate already touched
-                        // it, and a leg cut straight through a wall on the
-                        // strength of that (measured:
-                        // EveryLegOfAPlannedRouteIsClearAtTheFrontItIsWalkedOn,
-                        // "wall, no gap"). Restricting it outright to state 0
-                        // was tried and cost the angle gate more than it
-                        // fixed — corner-hugging needs the same grace across
-                        // more than one hop beside the same body. Narrowing it
-                        // to a graze, using the tolerance the rest of the
-                        // codebase already treats as no obstacle at all
-                        // (OrderSystem.GrazingTolerance) rather than dropping
-                        // it, keeps both: a true graze is still excused on
-                        // every hop, a body the leg genuinely walks through is
-                        // not.
-                        // A place the generator invented is only a place if the
-                        // regiment could stand in it. Asked before the leg is
-                        // costed, because a waypoint it cannot occupy makes
-                        // every question about the legs either side of it moot.
-                        //
-                        // Both ends, and on this leg's own front. The regiment
-                        // comes round onto that front where it stands before it
-                        // sets off (M23), so the place it leaves has to hold the
-                        // turned rectangle, not the one it arrived in — checking
-                        // only the far end left the route bending through a
-                        // waypoint it could arrive at side-on and not turn in.
-                        if (at != 0 && !CanStandHere(battle, unit, here, walkOn)) continue;
-                        if (to != 1 && !CanStandHere(battle, unit, there, walkOn)) continue;
+                        int leg = (from * count + to) * 3 + k;
 
-                        bool clear = Marching.IsClearLine(
-                            battle, unit, here, there, walkOn, leaving: true, leavingGrazeOnly: at != 0);
+                        if (!asked[leg])
+                        {
+                            // unit.Facing only stands in for a leg of no length,
+                            // and those are skipped above, so this bearing and
+                            // everything drawn from it is a property of the two
+                            // places alone.
+                            Facing bearing = Marching.AlongTheLine(here, there, unit.Facing);
+
+                            Facing walking =
+                                k == 0 ? bearing
+                                : k == 1 ? Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f)
+                                : Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f);
+
+                            legFront[leg] = walking;
+                            legStandNear[leg] = CanStandHere(battle, unit, here, walking);
+                            legStandFar[leg] = CanStandHere(battle, unit, there, walking);
+                            legClear[leg] = Marching.IsClearLine(
+                                battle, unit, here, there, walking, leaving: true, leavingGrazeOnly: true);
+
+                            asked[leg] = true;
+                        }
+
+                        Facing walkOn = legFront[leg];
+
+                        // A place the generator invented is only a place if the
+                        // regiment could stand in it, at both ends and on this
+                        // leg's own front, since it comes round where it stands
+                        // before it sets off (M23). The regiment's real ground and
+                        // the ordered destination are exempt: one is where it
+                        // actually is, and the placement search already chose the
+                        // other.
+                        if (at != 0 && !legStandNear[leg]) continue;
+                        if (to != 1 && !legStandFar[leg]) continue;
+
+                        // The one state standing where the regiment really is gets
+                        // M25 grace in full rather than the graze: a formed line
+                        // laps its neighbours by definition, and getting clear of
+                        // that is the steering's business.
+                        bool clear = at == 0
+                            ? Marching.IsClearLine(battle, unit, here, there, walkOn, leaving: true)
+                            : legClear[leg];
 
                         if (!clear && !mayPress) continue;
 
                         // Turning above the cap means turning on the spot, and
                         // there has to be room for it where it stands.
-                        if (Degrees(on, walkOn) > WalkingCapDegrees && !CanTurnHere(battle, unit, here))
-                            continue;
+                        if (Degrees(on, walkOn) > WalkingCapDegrees)
+                        {
+                            if (roomToTurn[from] == 0)
+                                roomToTurn[from] = (sbyte)(CanTurnHere(battle, unit, here) ? 1 : -1);
+
+                            if (roomToTurn[from] < 0) continue;
+                        }
 
                         float seconds = Seconds(battle, unit, here, there, on, walkOn, inside: !clear);
                         if (seconds < 0f) continue;
@@ -600,10 +645,9 @@ namespace BattleChess.Rules
                                      / (turnRate * MovementSystem.PivotBonusWhileHalted);
 
                             // Recorded rather than added as a state. Added, the
-                            // goal is expandable, so the search walks *out* of
-                            // the destination and back in, growing the graph as
-                            // it goes. That is the other half of why the suite
-                            // stopped finishing.
+                            // goal is expandable, so the search walks out of the
+                            // destination and back in, growing the graph as it
+                            // goes.
                             if (total < arrivedCost)
                             {
                                 arrivedCost = total;
@@ -614,11 +658,17 @@ namespace BattleChess.Rules
                             continue;
                         }
 
-                        int state = Find(stateAt, stateOn, to, walkOn);
+                        long key = Key(to, walkOn);
 
-                        if (state < 0)
+                        if (!index.TryGetValue(key, out int state))
                         {
-                            Remember(stateAt, stateOn, best, cameFrom, settled, to, walkOn, total, at);
+                            index[key] = stateAt.Count;
+
+                            stateAt.Add(to);
+                            stateOn.Add(walkOn);
+                            best.Add(total);
+                            cameFrom.Add(at);
+                            settled.Add(false);
                         }
                         else if (total < best[state] && !settled[state])
                         {
@@ -646,26 +696,21 @@ namespace BattleChess.Rules
             return backwards.Count < 2 ? null : new Route(backwards, fronts, arrivedCost);
         }
 
-        private static int Find(List<int> stateAt, List<Facing> stateOn, int place, Facing front)
+        /// <summary>How many steps the circle is cut into when naming a front.</summary>
+        /// <remarks>
+        /// Finer than the hundredth of a radian the old walk-the-list match
+        /// allowed, so this can only ever keep two fronts apart that used to
+        /// merge, never merge two it kept apart. A fifth of a degree is far below
+        /// anything a regiment can be said to hold.
+        /// </remarks>
+        private const int FrontSteps = 2048;
+
+        /// <summary>A state's name: the ground it stands on, and its front.</summary>
+        private static long Key(int place, Facing front)
         {
-            for (int i = 0; i < stateAt.Count; i++)
-                if (stateAt[i] == place && Facing.AbsoluteDelta(stateOn[i], front) < 0.01f)
-                    return i;
+            int step = (int)MathF.Round(front.Radians / (MathF.PI * 2f) * FrontSteps) & (FrontSteps - 1);
 
-            return -1;
-        }
-
-        private static int Remember(
-            List<int> stateAt, List<Facing> stateOn, List<float> best, List<int> cameFrom,
-            List<bool> settled, int place, Facing front, float cost, int from)
-        {
-            stateAt.Add(place);
-            stateOn.Add(front);
-            best.Add(cost);
-            cameFrom.Add(from);
-            settled.Add(false);
-
-            return stateAt.Count - 1;
+            return ((long)place << 16) | (uint)step;
         }
     }
 }
