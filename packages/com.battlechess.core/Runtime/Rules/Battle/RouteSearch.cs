@@ -68,8 +68,18 @@ namespace BattleChess.Rules
         /// <remarks>The designer's figure. A bound on the work, not a rule.</remarks>
         private const int Depth = 5;
 
-        /// <summary>How many candidate places the search will consider at most.</summary>
-        private const int MostPlaces = 26;
+        /// <summary>
+        /// How many candidate places the search will consider at most.
+        /// </summary>
+        /// <remarks>
+        /// Raised from 26 when the generator stopped repeating itself and
+        /// started offering both presentations. It is a bound on the work, and
+        /// the work is what matters: the cap used to be reached by duplicates,
+        /// which is the worst way to spend it — bodies further down the list
+        /// contributed nothing and the search planned as though they were not
+        /// there.
+        /// </remarks>
+        private const int MostPlaces = 48;
 
         /// <summary>
         /// Every candidate place the search would consider for this march, for a
@@ -163,10 +173,13 @@ namespace BattleChess.Rules
             float length = line.Length;
             Vec2 along = length > 0f ? line / length : new Vec2(1f, 0f);
 
-            // Side-on is how a regiment threads anything, so the narrow half is
-            // the clearance that decides whether a gap is a gap at all.
-            float reach = unit.Footprint.HalfDepth + MarginMetres;
-
+            // Both presentations, because a place is only a place for the front
+            // it is stood on. The narrow half is what threads a gap side-on; the
+            // wide half is what a regiment needs if it arrives face-on, and
+            // generating only the narrow ring left every face-on approach with
+            // nowhere it could legally stand — so either the search found no
+            // route at all and shouldered through, or it took a place it did not
+            // fit in and the route clipped what it went round.
             foreach (UnitInstance other in Nearby(battle, unit, destination, length))
             {
                 if (places.Count >= MostPlaces) break;
@@ -174,32 +187,79 @@ namespace BattleChess.Rules
                 Vec2 ahead = other.Facing.ToVector();
                 Vec2 beside = other.Facing.RightVector();
 
-                float deep = other.Footprint.HalfDepth + reach;
-                float wide = other.Footprint.HalfWidth + reach;
-
-                for (int i = -1; i <= 1; i += 2)
-                for (int j = -1; j <= 1; j += 2)
-                    places.Add(other.Position + ahead * (deep * i) + beside * (wide * j));
-
-                // Where the ends of the march come onto each face. These are the
-                // "walk in along the body's side" points.
-                foreach (Vec2 end in new[] { unit.Position, destination })
+                foreach (float reach in new[]
+                         {
+                             unit.Footprint.HalfDepth + MarginMetres,
+                             unit.Footprint.HalfWidth + MarginMetres,
+                         })
                 {
-                    Vec2 offset = end - other.Position;
+                    float deep = other.Footprint.HalfDepth + reach;
+                    float wide = other.Footprint.HalfWidth + reach;
 
-                    float onAhead = Vec2.Dot(offset, ahead);
-                    float onBeside = Vec2.Dot(offset, beside);
+                    for (int i = -1; i <= 1; i += 2)
+                    for (int j = -1; j <= 1; j += 2)
+                        Consider(places, other.Position + ahead * (deep * i) + beside * (wide * j));
 
-                    for (int s = -1; s <= 1; s += 2)
+                    // Where the ends of the march come onto each face. These are
+                    // the "walk in along the body's side" points.
+                    foreach (Vec2 end in new[] { unit.Position, destination })
                     {
-                        places.Add(other.Position + ahead * (deep * s) + beside * Clamp(onBeside, wide));
-                        places.Add(other.Position + beside * (wide * s) + ahead * Clamp(onAhead, deep));
+                        Vec2 offset = end - other.Position;
+
+                        float onAhead = Vec2.Dot(offset, ahead);
+                        float onBeside = Vec2.Dot(offset, beside);
+
+                        for (int s = -1; s <= 1; s += 2)
+                        {
+                            Consider(places, other.Position + ahead * (deep * s) + beside * Clamp(onBeside, wide));
+                            Consider(places, other.Position + beside * (wide * s) + ahead * Clamp(onAhead, deep));
+                        }
                     }
                 }
             }
 
             return places;
         }
+
+        /// <summary>
+        /// Adds a place unless one is already standing there.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The generator repeats itself heavily and by construction: a face
+        /// projection whose clamp saturates lands on the corner the corner loop
+        /// already produced, and both ends of the march project to the same
+        /// point whenever they sit the same side of a body. Measured on four
+        /// bodies in a line, twenty-six places held about ten distinct ones.
+        /// </para>
+        /// <para>
+        /// That was not merely wasted work. <see cref="MostPlaces"/> is a hard
+        /// cap, so the duplicates <b>crowded genuine candidates out</b>: in the
+        /// same arrangement the two outer bodies contributed nothing at all and
+        /// the search planned as though they were not on the field. A route that
+        /// ignores half the obstacles is the "went somewhere far on the fields"
+        /// report, and no amount of better costing fixes it.
+        /// </para>
+        /// <para>
+        /// One metre, matching the separation the search already demands between
+        /// the ends of a leg, so a place too near another to be a distinct leg is
+        /// too near to be a distinct place.
+        /// </para>
+        /// </remarks>
+        private static void Consider(List<Vec2> places, Vec2 place)
+        {
+            if (places.Count >= MostPlaces) return;
+
+            foreach (Vec2 already in places)
+            {
+                if (Vec2.Distance(already, place) < ApartEnoughMetres) return;
+            }
+
+            places.Add(place);
+        }
+
+        /// <summary>How far apart two candidate places must be to count as two.</summary>
+        private const float ApartEnoughMetres = 1f;
 
         private static float Clamp(float value, float limit) =>
             value < -limit ? -limit : value > limit ? limit : value;
@@ -307,6 +367,52 @@ namespace BattleChess.Rules
 
         private static float Degrees(Facing from, Facing to) =>
             Facing.AbsoluteDelta(from, to) * 180f / MathF.PI;
+
+        /// <summary>
+        /// Whether the regiment could stand at a place, on a given front,
+        /// without sharing ground with one of its own.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The constraint the search was missing entirely. Every check it made
+        /// was about a <i>leg</i> — can this line be walked — and none about a
+        /// <i>place</i>, so it would happily route through a waypoint the
+        /// regiment could not occupy, then let the leg out of it pass because
+        /// leaving-grace excuses a body you are already touching.
+        /// </para>
+        /// <para>
+        /// Measured: the "wall, 30 m gap" arrangement bent the route through
+        /// (976, 569) on a front of 35°, which puts a corner of a forty by
+        /// twenty body inside the regiment standing at (1000, 575). The leg out
+        /// of it was walked away from that body and so looked clean by itself.
+        /// The place was never the leg's fault and no amount of leg checking
+        /// finds it.
+        /// </para>
+        /// <para>
+        /// Only asked of places the generator invented. The regiment's own
+        /// starting ground is exempt because it is where it actually is —
+        /// standing in a formed line laps your neighbours by definition
+        /// (<b>M2</b>), and getting clear of that is the steering's business
+        /// (<b>M25</b>). The destination is exempt because the placement search
+        /// has already chosen ground that fits.
+        /// </para>
+        /// </remarks>
+        private static bool CanStandHere(BattleState battle, UnitInstance unit, Vec2 at, Facing front)
+        {
+            var body = new OrientedRect(at, front, unit.Footprint);
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (ReferenceEquals(other, unit)) continue;
+                if (other.Owner != unit.Owner) continue;
+                if (!other.IsFighting) continue;
+
+                if (OrientedRect.OverlapFraction(body, other.Shape) > OrderSystem.GrazingTolerance)
+                    return false;
+            }
+
+            return true;
+        }
 
         /// <summary>
         /// Whether a regiment could turn where it stands without lapping one of
@@ -453,6 +559,20 @@ namespace BattleChess.Rules
                         // it, keeps both: a true graze is still excused on
                         // every hop, a body the leg genuinely walks through is
                         // not.
+                        // A place the generator invented is only a place if the
+                        // regiment could stand in it. Asked before the leg is
+                        // costed, because a waypoint it cannot occupy makes
+                        // every question about the legs either side of it moot.
+                        //
+                        // Both ends, and on this leg's own front. The regiment
+                        // comes round onto that front where it stands before it
+                        // sets off (M23), so the place it leaves has to hold the
+                        // turned rectangle, not the one it arrived in — checking
+                        // only the far end left the route bending through a
+                        // waypoint it could arrive at side-on and not turn in.
+                        if (at != 0 && !CanStandHere(battle, unit, here, walkOn)) continue;
+                        if (to != 1 && !CanStandHere(battle, unit, there, walkOn)) continue;
+
                         bool clear = Marching.IsClearLine(
                             battle, unit, here, there, walkOn, leaving: true, leavingGrazeOnly: at != 0);
 
