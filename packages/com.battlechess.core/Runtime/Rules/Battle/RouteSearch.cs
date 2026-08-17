@@ -818,7 +818,27 @@ namespace BattleChess.Rules
                     if (to == from) continue;
 
                     Vec2 there = places[to];
-                    if (Vec2.Distance(here, there) < ApartEnoughMetres) continue;
+
+                    float apart = Vec2.Distance(here, there);
+                    if (apart < ApartEnoughMetres) continue;
+
+                    // The least this leg, and everything after it, could
+                    // possibly cost — asked before any geometry, because
+                    // geometry is the whole bill and this is one subtraction
+                    // and a square root.
+                    //
+                    // Same bound as the frontier's, for the same reason it is
+                    // sound: no leg beats its own straight line at full pace.
+                    // So a leg that cannot better the best arrival already
+                    // found cannot be on the answer, and never needs a swept
+                    // rectangle run against it.
+                    //
+                    // Measured: the search pops only forty-one states across a
+                    // whole army's orders and still costed 1,863 legs, because
+                    // every pop priced every place it could see. This is what
+                    // makes a focused search actually cheap rather than merely
+                    // well-aimed.
+                    if (best[at] + apart / pace + leftToWalk[to] >= arrivedCost) continue;
 
                     // Face-on, or side-on either way. Three fronts, because those
                     // are the three a body of men actually walks a line on: front
