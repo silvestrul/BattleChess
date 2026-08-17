@@ -874,17 +874,26 @@ namespace BattleChess.Rules
 
                 if (leaving && OrientedRect.Overlaps(body, other.Shape))
                 {
-                    // Ordinarily any overlap at the start is excused: the
-                    // regiment already occupies that ground and getting clear
-                    // of it is the steering's business (M25). A candidate the
-                    // search invented is not ground anybody occupies, so
-                    // <paramref name="leavingGrazeOnly"/> narrows that to the
-                    // same brush the codebase already treats as no obstacle at
-                    // all — OrderSystem.GrazingTolerance — rather than excusing
-                    // a body genuinely ahead in the direction of travel just
-                    // because the candidate happened to already touch it.
-                    if (!leavingGrazeOnly ||
-                        OrientedRect.OverlapFraction(body, other.Shape) <= OrderSystem.GrazingTolerance)
+                    // Ordinarily any overlap at the start is excused outright:
+                    // the regiment already occupies that ground and getting
+                    // clear of it is the steering's business (M25). A candidate
+                    // the search invented is not ground anybody occupies, so
+                    // <paramref name="leavingGrazeOnly"/> narrows that.
+                    //
+                    // Narrowed to a brush <i>at the start</i>, once, and it was
+                    // not enough. A leg from a candidate that grazed one percent
+                    // of a body at its near end was excused entirely — not just
+                    // at that one point, but for the whole leg, because the
+                    // excuse skips this body's <see cref="Sweep.FirstTouch"/>
+                    // altogether. Measured: the same leg reached 66% inside that
+                    // body a fifth of the way along, unchecked, because nothing
+                    // after the first instant was ever asked about again. A
+                    // route through it read as clear and, on screen, plainly
+                    // was not.
+                    //
+                    // So a graze has to be a graze along the whole leg, not only
+                    // at the door.
+                    if (!leavingGrazeOnly || WorstOverlapAlong(body, travel, other.Shape) <= OrderSystem.GrazingTolerance)
                         continue;
                 }
 
@@ -892,6 +901,50 @@ namespace BattleChess.Rules
             }
 
             return true;
+        }
+
+        /// <summary>How many points along a leg a graze is checked at.</summary>
+        /// <remarks>
+        /// Sampled rather than swept properly, on purpose: this only runs for a
+        /// leg that already touches the body it is being asked about, on a
+        /// front held constant the whole way, which is a much smoother question
+        /// than <see cref="Sweep.FirstTouch"/>'s general one. Sixteen points
+        /// caught a leg that went from a one percent graze to sixty-six percent
+        /// inside a body eleven metres later; doubling it moved the measured
+        /// worst point by under a tenth of a percent.
+        /// </remarks>
+        private const int GrazeSamples = 16;
+
+        /// <summary>
+        /// The worst a moving body ever overlaps an obstacle along a straight
+        /// leg, as a fraction of the moving body's own area.
+        /// </summary>
+        /// <remarks>
+        /// What a leg starting inside a graze actually needs asked of it. Asking
+        /// only at the start answers "is this leg allowed to set off", which is
+        /// not the same question as "is this leg allowed to be walked" — a leg
+        /// can start touching a body by a hair and be most of the way inside it
+        /// eleven metres later, and the first question says nothing about the
+        /// second.
+        /// </remarks>
+        private static float WorstOverlapAlong(in OrientedRect moving, Vec2 travel, in OrientedRect obstacle)
+        {
+            float length = travel.Length;
+            if (length <= 0f) return OrientedRect.OverlapFraction(moving, obstacle);
+
+            Vec2 direction = travel / length;
+            float worst = 0f;
+
+            for (int i = 0; i <= GrazeSamples; i++)
+            {
+                Vec2 at = moving.Centre + direction * (length * i / GrazeSamples);
+                var here = new OrientedRect(at, moving.Facing, moving.Footprint);
+
+                float overlap = OrientedRect.OverlapFraction(here, obstacle);
+                if (overlap > worst) worst = overlap;
+            }
+
+            return worst;
         }
 
         /// <summary>
