@@ -422,6 +422,23 @@ namespace BattleChess.Rules
                                  Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f),
                              })
                     {
+                        // Tried restricting this to the true departure (state 0)
+                        // only, since that fixed the reproduced fault below. It
+                        // is not kept: measured against the angle gate, it took
+                        // the search from 19 of 19 clear to 5 of 19, worse than
+                        // the ladder it was meant to replace, because legitimate
+                        // corner-hugging needs the same grace across more than
+                        // one hop beside the same body, and WhereItIsStanding's
+                        // per-leg directional test can flip for that body as the
+                        // bearing changes leg to leg. A real fix wants the
+                        // candidate's own clearance margin to match the front it
+                        // is actually walked on, not a blanket policy on leaving.
+                        //
+                        // Left as it was pending that: known to let a leg cut
+                        // through a body it started already touching, "ahead" in
+                        // the travel direction (measured:
+                        // EveryLegOfAPlannedRouteIsClearAtTheFrontItIsWalkedOn,
+                        // "wall, no gap").
                         bool clear = Marching.IsClearLine(battle, unit, here, there, walkOn, leaving: true);
 
                         if (!clear && !mayPress) continue;
