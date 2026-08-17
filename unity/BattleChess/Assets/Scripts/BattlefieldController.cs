@@ -1651,6 +1651,7 @@ namespace BattleChess.Unity
                 $"{unit.Def.DisplayName} — {name}: {path.Waypoints.Count} waypoints, " +
                 $"{path.Distance:0} m, {seconds:0} s" +
                 (plan.PressedThrough ? ", presses through its own." : ".") +
+                $"  cost to work out: {plan.Effort}." +
                 $"  {waypoints}");
         }
 
@@ -1782,6 +1783,13 @@ namespace BattleChess.Unity
             if (!quiet) DrawPath(path);
 
             float seconds = path.SecondsAt(unit.BaseSpeed);
+
+            // Every order, not only previews, and quiet ones too. What a plan
+            // cost to work out is the one thing a recording could never answer,
+            // so it was measured by hand four times over in one afternoon
+            // before it was simply written down.
+            _console.Info("Cost",
+                $"{unit.Def.DisplayName} planned by {RoutePlanners.Default.Name}: {plan.Effort}.", unit.Id);
 
             if (!quiet)
                 _console.Decision("Path",

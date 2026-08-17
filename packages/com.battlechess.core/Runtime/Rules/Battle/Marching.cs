@@ -60,13 +60,63 @@ namespace BattleChess.Rules
     /// pathfinding bug. Shared mutable state does not survive being convenient.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// What working out a route actually cost, in the units the work is done in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Carried on the plan rather than counted in static fields, and that is not
+    /// a stylistic preference — see <see cref="Plan"/> for the time decisions
+    /// about a route <i>were</i> static and a plan came back described by
+    /// somebody else's numbers. Effort is a property of one plan and travels
+    /// with it.
+    /// </para>
+    /// <para>
+    /// All zero means the straight line answered and no graph was ever built,
+    /// which is <b>M10</b> working and is the common case: measured on a whole
+    /// army ordered at once, seven regiments in thirteen never reach the search
+    /// at all.
+    /// </para>
+    /// </remarks>
+    public readonly struct RouteEffort
+    {
+        public RouteEffort(int places, int legs, int expansions)
+        {
+            Places = places;
+            Legs = legs;
+            Expansions = expansions;
+        }
+
+        /// <summary>Candidate places the route was allowed to bend at.</summary>
+        public readonly int Places;
+
+        /// <summary>
+        /// Legs actually priced. Each one costs a swept rectangle along the leg
+        /// and a standing test at either end, so this is the number to multiply
+        /// when asking what the geometry came to.
+        /// </summary>
+        public readonly int Legs;
+
+        /// <summary>States taken off the frontier and expanded.</summary>
+        public readonly int Expansions;
+
+        /// <summary>Whether a graph was built at all, or the cast answered.</summary>
+        public bool Searched => Places > 0;
+
+        public override string ToString() =>
+            Searched
+                ? $"{Places} places, {Legs} legs priced, {Expansions} expanded"
+                : "straight line, nothing searched";
+    }
+
     public readonly struct Plan
     {
-        public Plan(PathResult path, Facing?[]? hold, bool pressedThrough)
+        public Plan(PathResult path, Facing?[]? hold, bool pressedThrough, RouteEffort effort = default)
         {
             Path = path;
             Hold = hold;
             PressedThrough = pressedThrough;
+            Effort = effort;
         }
 
         /// <summary>The line itself.</summary>
@@ -77,6 +127,9 @@ namespace BattleChess.Rules
 
         /// <summary>Whether this plan gave up on keeping clear of its own side.</summary>
         public readonly bool PressedThrough;
+
+        /// <summary>What working this route out cost.</summary>
+        public readonly RouteEffort Effort;
 
         public bool Found => Path.Found;
 

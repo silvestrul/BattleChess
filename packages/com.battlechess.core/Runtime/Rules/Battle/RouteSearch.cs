@@ -113,6 +113,9 @@ namespace BattleChess.Rules
 
             List<Vec2> places = Places(battle, unit, destination);
 
+            int legs = 0;
+            int expanded = 0;
+
             // Clean first, shouldering through only if nothing else reaches.
             //
             // Pricing a press-through as one edge among many is the goal and is
@@ -121,19 +124,29 @@ namespace BattleChess.Rules
             // twice. That is a designer's number, not a planner's, so until it is
             // settled the last resort stays a last resort — which is what M18
             // always said and what this rung of it got right.
-            Route? clean = Cheapest(battle, unit, places, destination, arriveOn, mayPress: false);
+            Route? clean = Cheapest(
+                battle, unit, places, destination, arriveOn, mayPress: false, ref legs, ref expanded);
 
             if (clean.HasValue)
-                return Assemble(Smooth(battle, unit, clean.Value, arriveOn), pressed: false);
+            {
+                return Assemble(
+                    Smooth(battle, unit, clean.Value, arriveOn), pressed: false,
+                    new RouteEffort(places.Count, legs, expanded));
+            }
 
-            Route? forced = Cheapest(battle, unit, places, destination, arriveOn, mayPress: true);
+            // A second search, and its cost is added rather than replacing the
+            // first: the regiment really did pay for both.
+            Route? forced = Cheapest(
+                battle, unit, places, destination, arriveOn, mayPress: true, ref legs, ref expanded);
+
+            var effort = new RouteEffort(places.Count, legs, expanded);
 
             return forced.HasValue
-                ? Assemble(forced.Value, pressed: true)
+                ? Assemble(forced.Value, pressed: true, effort)
                 : new Plan(
                     PathResult.Failed(PathFailure.NoRouteExists,
                         "nothing reaches that ground, going round or through", 0),
-                    null, false);
+                    null, false, effort);
         }
 
         private static Plan Straight(Vec2 from, Vec2 to)
@@ -686,7 +699,7 @@ namespace BattleChess.Rules
             return Seconds(battle, unit, from, to, arrivingOn, walkOn, inside: false);
         }
 
-        private static Plan Assemble(Route route, bool pressed)
+        private static Plan Assemble(Route route, bool pressed, RouteEffort effort = default)
         {
             float walked = 0f;
 
@@ -707,7 +720,7 @@ namespace BattleChess.Rules
 
             return new Plan(
                 PathResult.Success(route.Places.ToArray(), Array.Empty<Coord>(), walked, walked, 0),
-                hold, pressed);
+                hold, pressed, effort);
         }
 
         /// <summary>
@@ -734,7 +747,7 @@ namespace BattleChess.Rules
         /// </remarks>
         private static Route? Cheapest(
             BattleState battle, UnitInstance unit, List<Vec2> places, Vec2 destination,
-            Facing arriveOn, bool mayPress)
+            Facing arriveOn, bool mayPress, ref int legsPriced, ref int expanded)
         {
             int count = places.Count;
 
@@ -808,6 +821,7 @@ namespace BattleChess.Rules
                 if (at < 0 || nearest >= arrivedCost) break;
 
                 settled[at] = true;
+                expanded++;
 
                 int from = stateAt[at];
                 Vec2 here = places[from];
@@ -867,6 +881,7 @@ namespace BattleChess.Rules
                                 battle, unit, here, there, walking, leaving: true, leavingGrazeOnly: true);
 
                             asked[leg] = true;
+                            legsPriced++;
                         }
 
                         Facing walkOn = legFront[leg];
