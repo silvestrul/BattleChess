@@ -400,12 +400,20 @@ namespace BattleChess.Rules
         private static bool CanStandHere(BattleState battle, UnitInstance unit, Vec2 at, Facing front)
         {
             var body = new OrientedRect(at, front, unit.Footprint);
+            float reach = unit.Footprint.BoundingRadius;
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 if (ReferenceEquals(other, unit)) continue;
                 if (other.Owner != unit.Owner) continue;
                 if (!other.IsFighting) continue;
+
+                // Called for both ends of every leg tried, so this is asked far
+                // more than once per plan — a body too far off to possibly
+                // overlap costs one subtraction and a compare instead of a
+                // polygon clip against every regiment on the field.
+                if (Vec2.Distance(other.Position, at) > reach + other.Footprint.BoundingRadius)
+                    continue;
 
                 if (OrientedRect.OverlapFraction(body, other.Shape) > OrderSystem.GrazingTolerance)
                     return false;
