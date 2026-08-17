@@ -419,9 +419,10 @@ namespace BattleChess.Unity
                 Vec2 at = MouseWorld();
                 UnitInstance clicked = UnitAt(at);
 
-                // Right-clicking an enemy is an attack, which follows the target
-                // as it moves rather than marching at where it used to be.
-                if (clicked != null && clicked.Owner != Primary.Owner)
+                // Right-clicking an enemy is ordinarily an attack. In preview
+                // mode nothing is ordered at all, so the point clicked is just
+                // ground to plan against, enemy regiment or not.
+                if (!_options.PreviewRouteMode && clicked != null && clicked.Owner != Primary.Owner)
                 {
                     AttackWithSelection(clicked);
                     return;
@@ -440,10 +441,12 @@ namespace BattleChess.Unity
 
             if (Input.GetMouseButton(1))
             {
-                _status = far
-                    ? $"Forming a line on that bearing, facing {FrontOfDrawnLine(drawn).Degrees:0}° — " +
-                      "release to confirm, drag the other way to face about."
-                    : "Drag out the line they should form on, or release to keep the current front.";
+                _status = _options.PreviewRouteMode
+                    ? "Previewing — release to compute the route, nothing will move."
+                    : far
+                        ? $"Forming a line on that bearing, facing {FrontOfDrawnLine(drawn).Degrees:0}° — " +
+                          "release to confirm, drag the other way to face about."
+                        : "Drag out the line they should form on, or release to keep the current front.";
 
                 return;
             }
@@ -453,7 +456,10 @@ namespace BattleChess.Unity
             _lastDestination = _orderAt;
             _hasDestination = true;
 
-            MarchSelection(_orderAt, far ? FrontOfDrawnLine(drawn) : (Facing?)null);
+            if (_options.PreviewRouteMode)
+                PreviewRoute(Primary, _orderAt);
+            else
+                MarchSelection(_orderAt, far ? FrontOfDrawnLine(drawn) : (Facing?)null);
         }
 
         /// <summary>
@@ -1486,6 +1492,7 @@ namespace BattleChess.Unity
             _pathLine.positionCount = 0;
             _overlay.SetSearchCells(null, default);
             _overlay.SetRawPath(null, default);
+            _overlay.ClearRoutePreview();
 
             foreach (UnitView view in _views)
                 view.SetSelected(_selection.Contains(view.Unit));
@@ -1507,6 +1514,83 @@ namespace BattleChess.Unity
             _status =
                 $"{unit.Def.DisplayName}: {unit.Strength} men, {unit.FormationOrder.DisplayName}, " +
                 $"org {unit.Organization:0.00}, stance {unit.Stance}.";
+        }
+
+        /// <summary>
+        /// Works out what would be ordered, and draws it, without ordering it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Everything <see cref="PlanRoute"/> does up to the point it would call
+        /// <c>GiveOrder</c> — the same clearance rule, the same placement search
+        /// when the exact point is taken or impassable — reused rather than
+        /// duplicated, so a preview can never show a route the real order
+        /// wouldn't. It stops before touching the unit at all.
+        /// </para>
+        /// <para>
+        /// Draws the ladder's answer and the search's answer as two separate
+        /// lines when <see cref="DebugOptions.PreviewBothPlanners"/> is on,
+        /// because the disagreement between them is usually the thing worth
+        /// looking at, and marks every place <see cref="RouteSearch"/> considered
+        /// bending at — not only the ones its winning route used — since a
+        /// candidate that <i>wasn't</i> picked is exactly what explains a route
+        /// that looks wrong.
+        /// </para>
+        /// </remarks>
+        private void PreviewRoute(UnitInstance unit, Vec2 destination)
+        {
+            if (unit == null) return;
+
+            float clearance = _options.RespectUnitWidth
+                ? unit.Footprint.Width * 0.5f
+                : HexPathfinder.DefaultClearanceMetres;
+
+            IPathfinder pathfinder = _options.RouteLikeAi
+                ? new HexPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance)
+                : new DirectPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance);
+
+            if (OrderSystem.TryFindPlacement(_battle, unit, destination, unit.Facing, out Vec2 stand))
+                destination = stand;
+            else
+                destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
+
+            _overlay.ClearRoutePreview();
+
+            if (_options.ShowRouteCandidates)
+                _overlay.SetRouteCandidates(RouteSearch.DebugCandidatePlaces(_battle, unit, destination));
+
+            Plan search = Marching.PlanTo(_battle, unit, pathfinder, destination, planner: RoutePlanners.TheSearch);
+            _overlay.SetSearchPreview(search.Path.Waypoints);
+            ReportPreview("search", unit, search);
+
+            if (_options.PreviewBothPlanners)
+            {
+                Plan ladder = Marching.PlanTo(_battle, unit, pathfinder, destination, planner: RoutePlanners.TheLadder);
+                _overlay.SetLadderPreview(ladder.Path.Waypoints);
+                ReportPreview("ladder", unit, ladder);
+            }
+
+            _status = $"Previewing {unit.Def.DisplayName}'s route — nothing moved. " +
+                       (_options.PreviewBothPlanners ? "Orange: ladder. Green: search." : "Green: search.") +
+                       (_options.ShowRouteCandidates ? " Cyan crosses: candidate places." : string.Empty);
+        }
+
+        private void ReportPreview(string name, UnitInstance unit, Plan plan)
+        {
+            PathResult path = plan.Path;
+
+            if (!path.Found)
+            {
+                _console.Info("Preview", $"{unit.Def.DisplayName} — {name}: {path.FailureDetail} [{path.Failure}].");
+                return;
+            }
+
+            float seconds = Marching.SecondsToWalk(_battle, unit, path.Waypoints, plan.Hold);
+
+            _console.Info("Preview",
+                $"{unit.Def.DisplayName} — {name}: {path.Waypoints.Count} waypoints, " +
+                $"{path.Distance:0} m, {seconds:0} s" +
+                (plan.PressedThrough ? ", presses through its own." : "."));
         }
 
         /// <summary>
@@ -1809,7 +1893,9 @@ namespace BattleChess.Unity
 
             GUI.Label(new Rect(20, 16, Screen.width - 40, 22), clock + _status);
             GUI.Label(new Rect(20, 38, Screen.width - 40, 22),
-                "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    " +
+                (_options.PreviewRouteMode
+                    ? "PREVIEWING — R-click plans a route and draws it, nothing moves. Untick to give real orders.    "
+                    : "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    ") +
                 "B bind    1-4 reshape    QERT stance    V fog    G ghost    Space pause    . step    " +
                 "+/- speed    Middle-drag pan    F1 debug");
 
@@ -1826,8 +1912,13 @@ namespace BattleChess.Unity
             if (_options.Draw(OptionsRect) && Primary != null && _hasDestination)
             {
                 // Re-plan on any toggle, so the effect of a change is visible at
-                // once rather than needing the click repeated.
-                PlanRoute(Primary, _lastDestination);
+                // once rather than needing the click repeated. A toggle flipped
+                // while previewing must re-preview, never re-order — the whole
+                // point of the mode is that ticking boxes cannot move a unit.
+                if (_options.PreviewRouteMode)
+                    PreviewRoute(Primary, _lastDestination);
+                else
+                    PlanRoute(Primary, _lastDestination);
             }
 
             _console.Draw(ConsoleRect);

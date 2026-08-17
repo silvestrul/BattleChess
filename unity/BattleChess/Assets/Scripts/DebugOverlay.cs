@@ -49,6 +49,15 @@ namespace BattleChess.Unity
         private static readonly Color SearchColour = new Color(0.5f, 0.6f, 1f, 0.20f);
         private static readonly Color RawPathColour = new Color(1f, 0.5f, 0.9f, 0.9f);
 
+        /// <summary>Every place <see cref="BattleChess.Rules.RouteSearch"/> considered bending at.</summary>
+        private static readonly Color CandidateColour = new Color(0.55f, 0.85f, 1f, 0.9f);
+
+        /// <summary>The route <see cref="BattleChess.Rules.RoutePlanners.TheLadder"/> would take.</summary>
+        private static readonly Color LadderPreviewColour = new Color(1f, 0.7f, 0.25f, 0.95f);
+
+        /// <summary>The route <see cref="BattleChess.Rules.RoutePlanners.TheSearch"/> would take.</summary>
+        private static readonly Color SearchPreviewColour = new Color(0.4f, 1f, 0.55f, 0.95f);
+
         private Material _material;
 
         private readonly List<OverlayUnit> _units = new List<OverlayUnit>();
@@ -57,6 +66,10 @@ namespace BattleChess.Unity
         private readonly List<Vector3> _searchCells = new List<Vector3>();
         private readonly List<Vector3> _rawPath = new List<Vector3>();
         private float _searchCellSize = 5f;
+
+        private readonly List<Vector3> _routeCandidates = new List<Vector3>();
+        private readonly List<Vector3> _ladderPreview = new List<Vector3>();
+        private readonly List<Vector3> _searchPreview = new List<Vector3>();
 
         public DebugOptions Options;
 
@@ -107,6 +120,40 @@ namespace BattleChess.Unity
                 Vec2 world = layout.ToWorld(cells[i]);
                 _rawPath.Add(new Vector3(world.X, world.Y, 0f));
             }
+        }
+
+        /// <summary>Clears every route-preview drawing at once — a fresh click starts clean.</summary>
+        public void ClearRoutePreview()
+        {
+            _routeCandidates.Clear();
+            _ladderPreview.Clear();
+            _searchPreview.Clear();
+        }
+
+        /// <summary>
+        /// Every place <see cref="BattleChess.Rules.RouteSearch"/> would consider
+        /// bending the route at, for the arrangement just previewed.
+        /// </summary>
+        public void SetRouteCandidates(IReadOnlyList<Vec2> places)
+        {
+            _routeCandidates.Clear();
+            if (places == null) return;
+
+            foreach (Vec2 place in places)
+                _routeCandidates.Add(new Vector3(place.X, place.Y, 0f));
+        }
+
+        public void SetLadderPreview(IReadOnlyList<Vec2> waypoints) => Fill(_ladderPreview, waypoints);
+
+        public void SetSearchPreview(IReadOnlyList<Vec2> waypoints) => Fill(_searchPreview, waypoints);
+
+        private static void Fill(List<Vector3> into, IReadOnlyList<Vec2> waypoints)
+        {
+            into.Clear();
+            if (waypoints == null) return;
+
+            foreach (Vec2 point in waypoints)
+                into.Add(new Vector3(point.X, point.Y, 0f));
         }
 
         private void OnRenderObject()
@@ -185,8 +232,51 @@ namespace BattleChess.Unity
                 }
             }
 
+            // Two planners' answers to the same ground, drawn as separate lines
+            // so the disagreement itself is the picture — a route only one of
+            // them would take is exactly the case worth clicking again to see.
+            DrawPolyline(_ladderPreview, LadderPreviewColour, lift: 1.2f);
+            DrawPolyline(_searchPreview, SearchPreviewColour, lift: -1.2f);
+
             GL.End();
+
+            if (Options.ShowRouteCandidates && _routeCandidates.Count > 0)
+                DrawCandidateMarks();
+
             GL.PopMatrix();
+        }
+
+        private static void DrawPolyline(List<Vector3> points, Color colour, float lift)
+        {
+            if (points.Count < 2) return;
+
+            GL.Color(colour);
+            var offset = new Vector3(0f, 0f, lift * 0.01f);
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                GL.Vertex(points[i - 1] + offset);
+                GL.Vertex(points[i] + offset);
+            }
+        }
+
+        /// <summary>How wide the cross drawn at each candidate place is, in metres.</summary>
+        private const float CandidateMarkMetres = 4f;
+
+        private void DrawCandidateMarks()
+        {
+            GL.Begin(GL.LINES);
+            GL.Color(CandidateColour);
+
+            foreach (Vector3 at in _routeCandidates)
+            {
+                GL.Vertex(at + new Vector3(-CandidateMarkMetres, 0f, 0f));
+                GL.Vertex(at + new Vector3(CandidateMarkMetres, 0f, 0f));
+                GL.Vertex(at + new Vector3(0f, -CandidateMarkMetres, 0f));
+                GL.Vertex(at + new Vector3(0f, CandidateMarkMetres, 0f));
+            }
+
+            GL.End();
         }
 
         private void DrawSearchCells()

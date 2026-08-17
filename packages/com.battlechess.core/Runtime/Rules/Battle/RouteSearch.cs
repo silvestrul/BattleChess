@@ -72,6 +72,17 @@ namespace BattleChess.Rules
         private const int MostPlaces = 26;
 
         /// <summary>
+        /// Every candidate place the search would consider for this march, for a
+        /// debug overlay to draw. Not used by <see cref="Find"/> itself, which
+        /// calls the private generator directly — this exists so a view layer
+        /// can show the same points the planner actually reasoned over, rather
+        /// than a reconstruction of them.
+        /// </summary>
+        public static IReadOnlyList<Vec2> DebugCandidatePlaces(
+            BattleState battle, UnitInstance unit, Vec2 destination) =>
+            Places(battle, unit, destination);
+
+        /// <summary>
         /// Plans a march, or returns a plan that was not found.
         /// </summary>
         public static Plan Find(

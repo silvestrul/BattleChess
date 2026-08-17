@@ -73,6 +73,33 @@ namespace BattleChess.Unity
         /// <summary>Draw the raw search cells of the route rather than the smoothed line.</summary>
         public bool ShowRawPath;
 
+        /// <summary>
+        /// Right-click computes and draws a route instead of giving the order.
+        /// </summary>
+        /// <remarks>
+        /// For working out why a planner chose what it chose, without spending a
+        /// real order to find out — the regiment never moves, so the same ground
+        /// can be tried at as many angles as it takes.
+        /// </remarks>
+        public bool PreviewRouteMode;
+
+        /// <summary>
+        /// In preview mode, plan with both
+        /// <see cref="BattleChess.Rules.RoutePlanners.TheLadder"/> and
+        /// <see cref="BattleChess.Rules.RoutePlanners.TheSearch"/> and draw
+        /// both, rather than only whichever is
+        /// <see cref="BattleChess.Rules.RoutePlanners.Default"/>.
+        /// </summary>
+        public bool PreviewBothPlanners = true;
+
+        /// <summary>
+        /// In preview mode, mark every place
+        /// <see cref="BattleChess.Rules.RouteSearch"/> considered bending the
+        /// route at — the corners and face projections its candidate generator
+        /// built, not just the ones the winning route used.
+        /// </summary>
+        public bool ShowRouteCandidates = true;
+
         /// <summary>Whose eyes the field is shown through. -1 shows everything.</summary>
         /// <remarks>
         /// The debug view has to be able to cheat, or fog is impossible to tune:
@@ -169,6 +196,12 @@ namespace BattleChess.Unity
             ShowClearance = GUILayout.Toggle(ShowClearance, " Width used for routing");
 
             GUILayout.Space(6);
+            GUILayout.Label($"Route preview   {(PreviewRouteMode ? "ON — right-click plans, does not move" : "off")}");
+            PreviewRouteMode = GUILayout.Toggle(PreviewRouteMode, " Preview route (no move)");
+            PreviewBothPlanners = GUILayout.Toggle(PreviewBothPlanners, " Show the ladder and the search both");
+            ShowRouteCandidates = GUILayout.Toggle(ShowRouteCandidates, " Mark the search's candidate places");
+
+            GUILayout.Space(6);
             GUILayout.Label("Lines and labels");
             ShowSightLines = GUILayout.Toggle(ShowSightLines, " Who is looking at whom");
             ShowUnitLabels = GUILayout.Toggle(ShowUnitLabels, " Strength / morale / order");
@@ -225,6 +258,9 @@ namespace BattleChess.Unity
             | (NoCasualties ? 1 << 14 : 0)
             | (NoRouting ? 1 << 15 : 0)
             | (InstantReload ? 1 << 16 : 0)
+            | (PreviewRouteMode ? 1 << 24 : 0)
+            | (PreviewBothPlanners ? 1 << 25 : 0)
+            | (ShowRouteCandidates ? 1 << 26 : 0)
             | ((ViewingArmy + 2) << 17);
     }
 }
