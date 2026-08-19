@@ -207,6 +207,20 @@ namespace BattleChess.Tests.Battle
                 $"states {measured.States:N0}   expanded {measured.Expanded:N0}   " +
                 $"bodies pulled in {measured.Bodies:N0}");
 
+            // Attribution for StandCheck. Stands() memoises on (place, front-bin)
+            // and counts only its misses; FrontsFor calls CanStandHere straight,
+            // past the memo. If the two are close the memo is absorbing the
+            // volume and the scan itself is the lever; if invocations run far
+            // ahead of misses, the memo is being bypassed and that is the lever
+            // instead.
+            long standInvocations = PlanningProfile.CallsTo(PlanningProfile.Step.StandCheck);
+            _out.WriteLine(
+                $"stand checks: {standInvocations:N0} invocations   " +
+                $"{measured.StandChecks:N0} memo misses   " +
+                $"{standInvocations - measured.StandChecks:N0} past the memo   " +
+                $"(SmoothRoute, the only caller that bypasses it, " +
+                $"{PlanningProfile.InclusiveMilliseconds(PlanningProfile.Step.SmoothRoute):0.0} ms inclusive)");
+
             Assert.Equal(80, measured.Orders);
 
             // A bench that stopped routing would still produce a tidy table, and
@@ -303,7 +317,7 @@ namespace BattleChess.Tests.Battle
         private readonly struct Tally
         {
             public Tally(int orders, int found, int failed, int pressed,
-                long places, long legs, long states, long expanded, long bodies)
+                long places, long legs, long states, long expanded, long bodies, long standChecks)
             {
                 Orders = orders;
                 Found = found;
@@ -314,6 +328,7 @@ namespace BattleChess.Tests.Battle
                 States = states;
                 Expanded = expanded;
                 Bodies = bodies;
+                StandChecks = standChecks;
             }
 
             public readonly int Orders;
@@ -325,6 +340,7 @@ namespace BattleChess.Tests.Battle
             public readonly long States;
             public readonly long Expanded;
             public readonly long Bodies;
+            public readonly long StandChecks;
         }
 
         private static Tally OrderEverybody(BattleState battle, IRoutePlanner? planner)
@@ -333,7 +349,7 @@ namespace BattleChess.Tests.Battle
                 battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
 
             int orders = 0, found = 0, failed = 0, pressed = 0;
-            long places = 0, legs = 0, states = 0, expanded = 0, bodies = 0;
+            long places = 0, legs = 0, states = 0, expanded = 0, bodies = 0, standChecks = 0;
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
@@ -347,6 +363,7 @@ namespace BattleChess.Tests.Battle
 
                 if (plan.PressedThrough) pressed++;
 
+                standChecks += plan.Effort.StandChecks;
                 places += plan.Effort.Places;
                 legs += plan.Effort.Legs;
                 states += plan.Effort.States;
@@ -354,7 +371,8 @@ namespace BattleChess.Tests.Battle
                 bodies += plan.Effort.Bodies;
             }
 
-            return new Tally(orders, found, failed, pressed, places, legs, states, expanded, bodies);
+            return new Tally(
+                orders, found, failed, pressed, places, legs, states, expanded, bodies, standChecks);
         }
     }
 }

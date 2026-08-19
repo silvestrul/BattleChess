@@ -1273,8 +1273,12 @@ namespace BattleChess.Rules
             var body = new OrientedRect(at, front, unit.Footprint);
             float reach = unit.Footprint.BoundingRadius;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> all = _standingNear ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, reach, all);
+
+            for (int u = 0; u < all.Count; u++)
             {
+                UnitInstance other = all[u];
                 if (ReferenceEquals(other, unit)) continue;
                 if (other.Owner != unit.Owner) continue;
                 if (!other.IsFighting) continue;
@@ -1282,8 +1286,10 @@ namespace BattleChess.Rules
                 // Called for both ends of every leg tried, so this is asked far
                 // more than once per plan — a body too far off to possibly
                 // overlap costs one subtraction and a compare instead of a
-                // polygon clip against every regiment on the field.
-                if (Vec2.Distance(other.Position, at) > reach + other.Footprint.BoundingRadius)
+                // polygon clip against every regiment on the field. Squared, so
+                // that the compare that turns most bodies back costs no root.
+                float span = reach + other.Footprint.BoundingRadius;
+                if (Vec2.DistanceSquared(other.Position, at) > span * span)
                     continue;
 
                 if (OrientedRect.OverlapFraction(body, other.Shape) > OrderSystem.GrazingTolerance)
@@ -1292,6 +1298,18 @@ namespace BattleChess.Rules
 
             return true;
         }
+
+        /// <summary>
+        /// Somewhere for the index to put its answer without allocating. One per
+        /// thread and one per asking method: nothing nests today, but a shared
+        /// buffer would turn the day somebody adds a query inside one of these
+        /// loops into a wrong answer rather than a compile error.
+        /// </summary>
+        [ThreadStatic]
+        private static List<UnitInstance>? _standingNear;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _turningNear;
 
         /// <summary>
         /// Whether a regiment could turn where it stands without lapping one of
@@ -1311,8 +1329,12 @@ namespace BattleChess.Rules
 
             float reach = unit.Footprint.BoundingRadius;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> all = _turningNear ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, reach, all);
+
+            for (int u = 0; u < all.Count; u++)
             {
+                UnitInstance other = all[u];
                 if (ReferenceEquals(other, unit)) continue;
                 if (other.Owner != unit.Owner) continue;
                 if (!other.IsFighting) continue;
