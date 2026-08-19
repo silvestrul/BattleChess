@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Diagnostics;
 using System.IO;
 using BattleChess.Contracts;
@@ -149,29 +150,16 @@ namespace BattleChess.Tests.Battle
             // Warm, unmeasured.
             OrderEverybody(Load(key), null);
 
-            // Three passes with the instrumentation off, median reported. One
-            // pass on this machine has wandered by a fifth, which was enough to
-            // make the probes look as though they ran faster than no probes at
-            // all — a negative overhead, which is only ever noise wearing a
-            // number.
-            var runs = new List<double>();
+            // Nine passes now, not three. A pass is under a second, so nine cost
+            // seconds; and three was few enough that the middle one was still
+            // being nudged about by a single unlucky draw.
+            List<double> runs = Passes(key, null, out Tally bare, fewest: 9, most: 9);
 
-            Tally bare = default;
+            var ordered = new List<double>(runs);
+            ordered.Sort();
 
-            for (int pass = 0; pass < 3; pass++)
-            {
-                BattleState plain = Load(key);
-
-                var watch = Stopwatch.StartNew();
-                bare = OrderEverybody(plain, null);
-                watch.Stop();
-
-                runs.Add(watch.Elapsed.TotalMilliseconds);
-            }
-
-            runs.Sort();
-
-            double bareMilliseconds = runs[1];
+            // The least, not the middle. Noise is one-sided on work like this.
+            double bareMilliseconds = ordered[0];
 
             // And again with it on, so the report has something to describe.
             BattleState probed = Load(key);
@@ -191,12 +179,13 @@ namespace BattleChess.Tests.Battle
                 $"{bareMilliseconds / Math.Max(1, measured.Orders),7:0.00} ms an order   " +
                 $"{measured.Found} routed, {measured.Failed} refused, {measured.Pressed} pressed through");
             _out.WriteLine(
-                $"three bare passes {runs[0],8:0.0} / {runs[1],8:0.0} / {runs[2],8:0.0} ms" +
-                $"   spread {(runs[2] - runs[0]) / Math.Max(0.001, runs[0]),6:0.0%}");
+                Spread(runs));
+            _out.WriteLine(
+                $"dearest single order {bare.SlowestOrderMs,7:0.0} ms — the tail, which is what drops a frame");
             _out.WriteLine(
                 $"instrumented pass {probedWatch.Elapsed.TotalMilliseconds,9:0.0} ms " +
-                $"({(probedWatch.Elapsed.TotalMilliseconds / Math.Max(0.001, bareMilliseconds)) - 1d,6:0.0%} on the median) " +
-                "— the table below describes that pass, the headline above is the uninstrumented median");
+                $"({(probedWatch.Elapsed.TotalMilliseconds / Math.Max(0.001, bareMilliseconds)) - 1d,6:0.0%} on the least) " +
+                "— the table below describes that pass, the headline above is the uninstrumented least");
             _out.WriteLine(string.Empty);
             _out.WriteLine(PlanningProfile.Report($"where the {bareMilliseconds:0} ms went"));
 
@@ -263,24 +252,27 @@ namespace BattleChess.Tests.Battle
 
             foreach (IRoutePlanner planner in RoutePlanners.All)
             {
-                // Warm this planner, then measure it.
+                // Warm this planner, then measure it — repeatedly. Every row of
+                // this table used to be a single draw.
                 OrderEverybody(Load(key), planner);
 
-                BattleState plain = Load(key);
-                var watch = Stopwatch.StartNew();
-                Tally bare = OrderEverybody(plain, planner);
-                watch.Stop();
+                List<double> runs = Passes(key, planner, out Tally bare);
 
                 BattleState probed = Load(key);
                 PlanningProfile.Start();
                 Tally measured = OrderEverybody(probed, planner);
                 PlanningProfile.Stop();
 
-                double total = watch.Elapsed.TotalMilliseconds;
+                var sorted = new List<double>(runs);
+                sorted.Sort();
+
+                double total = sorted[0];
 
                 _out.WriteLine(
                     $"{planner.Name,-38} {total,10:0.0} ms   {total / 80d,8:0.00} ms an order   " +
                     $"{bare.Found} routed, {bare.Pressed} pressed");
+
+                _out.WriteLine($"{string.Empty,-38} {Spread(runs)}");
 
                 _out.WriteLine(
                     $"{string.Empty,-38} " +
@@ -317,7 +309,8 @@ namespace BattleChess.Tests.Battle
         private readonly struct Tally
         {
             public Tally(int orders, int found, int failed, int pressed,
-                long places, long legs, long states, long expanded, long bodies, long standChecks)
+                long places, long legs, long states, long expanded, long bodies, long standChecks,
+                double slowestOrderMs)
             {
                 Orders = orders;
                 Found = found;
@@ -329,6 +322,7 @@ namespace BattleChess.Tests.Battle
                 Expanded = expanded;
                 Bodies = bodies;
                 StandChecks = standChecks;
+                SlowestOrderMs = slowestOrderMs;
             }
 
             public readonly int Orders;
@@ -341,6 +335,113 @@ namespace BattleChess.Tests.Battle
             public readonly long Expanded;
             public readonly long Bodies;
             public readonly long StandChecks;
+
+            /// <summary>The dearest single order in the pass.</summary>
+            /// <remarks>
+            /// The total answers "is this implementation faster". It does not
+            /// answer "will a burst of orders hold a frame", which is the
+            /// question the whole planning budget exists for, and that one is a
+            /// tail question — one order of 40 ms drops a frame however good the
+            /// mean is.
+            /// </remarks>
+            public readonly double SlowestOrderMs;
+        }
+
+        /// <summary>
+        /// One measured pass, and everything that has to happen around it for a
+        /// second pass to be a sample of the same thing as the first.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Collected between passes, outside the clock.</b> Every pass builds
+        /// a fresh <see cref="BattleState"/> and nothing was collecting between
+        /// them, so pass three could be paying for the litter of passes one and
+        /// two. That is a drift rather than a spread: it biases every estimator
+        /// in the same direction, and taking the minimum does not remove it, it
+        /// just always picks the first pass.
+        /// </para>
+        /// <para>
+        /// <b>Reported in the order they ran.</b> The old report sorted the
+        /// passes before printing them, which is exactly the information needed
+        /// to tell drift from noise — three passes rising is a different fault
+        /// from three passes scattered, and sorted output cannot tell them
+        /// apart. Sorting is for choosing the median, not for the page.
+        /// </para>
+        /// </remarks>
+        private static double OnePass(string key, IRoutePlanner? planner, out Tally tally)
+        {
+            BattleState plain = Load(key);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            var watch = Stopwatch.StartNew();
+            tally = OrderEverybody(plain, planner);
+            watch.Stop();
+
+            return watch.Elapsed.TotalMilliseconds;
+        }
+
+        /// <summary>
+        /// Repeats a pass until there are enough of them to say anything, inside
+        /// a time budget so that a planner costing three minutes a pass does not
+        /// cost an hour.
+        /// </summary>
+        /// <remarks>
+        /// A single draw is not a measurement, and this bench reported one for
+        /// every row of its per-planner table — which is how a lone sample
+        /// landing 42% off its own median came to be written up as two
+        /// measurements disagreeing. Cheap planners now get <paramref
+        /// name="most"/> passes; the dear ones get <paramref name="fewest"/> and
+        /// the report says how many, so a thin number is visibly thin.
+        /// </remarks>
+        private static List<double> Passes(
+            string key, IRoutePlanner? planner, out Tally tally,
+            int fewest = 3, int most = 9, double budgetMs = 4000d)
+        {
+            var runs = new List<double>();
+            double spent = 0d;
+
+            tally = default;
+
+            while (runs.Count < most)
+            {
+                runs.Add(OnePass(key, planner, out tally));
+                spent += runs[^1];
+
+                if (runs.Count >= fewest && spent >= budgetMs) break;
+            }
+
+            return runs;
+        }
+
+        /// <summary>
+        /// The passes as a line: how many, the least, the middle, the most, and
+        /// the order they came in.
+        /// </summary>
+        /// <remarks>
+        /// The least is the headline. The work is deterministic and CPU-bound,
+        /// so noise can only ever add time — every pass above the minimum is the
+        /// minimum plus something that is not the code. The most is kept beside
+        /// it because "is this faster" and "does this hold a frame" are
+        /// different questions and only the first one is answered by a floor.
+        /// </remarks>
+        private static string Spread(IReadOnlyList<double> runs)
+        {
+            var sorted = new List<double>(runs);
+            sorted.Sort();
+
+            double least = sorted[0];
+            double middle = sorted[sorted.Count / 2];
+            double most = sorted[^1];
+
+            var order = new StringBuilder();
+            for (int i = 0; i < runs.Count; i++)
+                order.Append(i == 0 ? string.Empty : " ").Append($"{runs[i]:0}");
+
+            return $"n={runs.Count}   least {least,8:0.0}   median {middle,8:0.0}   most {most,8:0.0} ms   " +
+                   $"({(most - least) / Math.Max(0.001, least),0:0.0%} apart)   as they ran: {order}";
         }
 
         private static Tally OrderEverybody(BattleState battle, IRoutePlanner? planner)
@@ -349,12 +450,18 @@ namespace BattleChess.Tests.Battle
                 battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
 
             int orders = 0, found = 0, failed = 0, pressed = 0;
+            double slowestOrder = 0d;
             long places = 0, legs = 0, states = 0, expanded = 0, bodies = 0, standChecks = 0;
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
+                long began = Stopwatch.GetTimestamp();
+
                 Plan plan = Marching.PlanTo(
                     battle, unit, pathfinder, OrderFor(battle, unit), planner: planner);
+
+                double spent = (Stopwatch.GetTimestamp() - began) * 1000d / Stopwatch.Frequency;
+                if (spent > slowestOrder) slowestOrder = spent;
 
                 orders++;
 
@@ -372,7 +479,8 @@ namespace BattleChess.Tests.Battle
             }
 
             return new Tally(
-                orders, found, failed, pressed, places, legs, states, expanded, bodies, standChecks);
+                orders, found, failed, pressed, places, legs, states, expanded, bodies, standChecks,
+                slowestOrder);
         }
     }
 }
