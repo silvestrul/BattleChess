@@ -103,7 +103,24 @@ namespace BattleChess.Rules
             Movement = movement ?? throw new ArgumentNullException(nameof(movement));
             Seed = seed;
             Rng = new DeterministicRng(seed);
+
+            _whereEverybodyIs = new UnitIndex(Terrain.Bounds);
         }
+
+        private readonly UnitIndex _whereEverybodyIs;
+
+        /// <summary>
+        /// Where everybody is standing, bucketed. Planning asks this tens of
+        /// thousands of times a march and it is the difference between a
+        /// clearance check costing a walk down the whole army and costing a
+        /// lookup.
+        /// </summary>
+        internal UnitIndex WhereEverybodyIs => _whereEverybodyIs;
+
+        /// <summary>
+        /// Called by a regiment when it moves, so the index knows it is stale.
+        /// </summary>
+        internal void NoteUnitsMoved() => _whereEverybodyIs.Invalidate();
 
         /// <summary>Every unit ever raised, in id order, including the dead.</summary>
         public IReadOnlyList<UnitInstance> AllUnits => _units;
@@ -162,6 +179,10 @@ namespace BattleChess.Rules
             unit.ShotsLeft = perMan > 0 ? perMan * strength : -1;
 
             _units.Add(unit);
+
+            unit.Home = this;
+            _whereEverybodyIs.Invalidate();
+
             return unit;
         }
 

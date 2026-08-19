@@ -756,7 +756,7 @@ namespace BattleChess.Rules
                     lapped = $" It sets off already standing in {other.Def.DisplayName}, " +
                              $"{overlap:0.00} of a body deep.";
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) met++;
+                if (Sweep.Touches(body, travel, other.Shape)) met++;
             }
 
             return $" {met} of its own on that line.{lapped}";
@@ -1045,6 +1045,26 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
+        /// Somewhere for an index query to put its answer without allocating.
+        /// </summary>
+        /// <remarks>
+        /// One per thread and one per asking method, rather than one shared
+        /// between them. Nothing nests today — the body of a clearance check is
+        /// pure geometry and asks the index nothing — but a shared buffer would
+        /// make the day somebody adds a query inside one of these loops into a
+        /// silent wrong answer rather than a compile error, and that is the kind
+        /// of bug this sweep has spent its time removing.
+        /// </remarks>
+        [ThreadStatic]
+        private static List<UnitInstance>? _onTheLine;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _atThePlace;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _aheadOnTheLine;
+
+        /// <summary>
         /// Whether a regiment's whole body can travel from one point to another
         /// in a straight line without meeting anything.
         /// </summary>
@@ -1102,52 +1122,68 @@ namespace BattleChess.Rules
             // into a missed one — and since M32 it decides candidate places
             // too, by way of the blocker this hands back.
             float reach = unit.Footprint.BoundingRadius;
+            Vec2 along = travel / length;
 
+            List<UnitInstance> all = _onTheLine ??= new List<UnitInstance>(32);
+
+            // The query is inside the measured scope, not before it: narrowing
+            // the field is now part of what asking this question costs, and a
+            // stopwatch that started after it would report the saving without
+            // the price of it (W5).
             using (PlanningProfile.Measure(PlanningProfile.Step.BodyScan))
-            foreach (UnitInstance other in battle.UnitsOnField())
             {
-                if (!IsInTheWayOf(unit, other)) continue;
+                battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, reach, all);
 
-                // Measured on a real battle: this alone cut a plan's cost in
-                // half against an army of a hundred regiments none of which
-                // were anywhere near the march, because every clearance check
-                // on every leg was asking Sweep.FirstTouch and OverlapFraction
-                // about bodies the segment could not geometrically reach.
-                if (DistanceToSegment(other.Position, from, to, length) >
-                    reach + other.Footprint.BoundingRadius)
-                    continue;
-
-                if (WhereItIsStanding(body, travel, other)) continue;
-
-                if (leaving && OrientedRect.Overlaps(body, other.Shape))
+                for (int u = 0; u < all.Count; u++)
                 {
-                    // Ordinarily any overlap at the start is excused outright:
-                    // the regiment already occupies that ground and getting
-                    // clear of it is the steering's business (M25). A candidate
-                    // the search invented is not ground anybody occupies, so
-                    // <paramref name="leavingGrazeOnly"/> narrows that.
-                    //
-                    // Narrowed to a brush <i>at the start</i>, once, and it was
-                    // not enough. A leg from a candidate that grazed one percent
-                    // of a body at its near end was excused entirely — not just
-                    // at that one point, but for the whole leg, because the
-                    // excuse skips this body's <see cref="Sweep.FirstTouch"/>
-                    // altogether. Measured: the same leg reached 66% inside that
-                    // body a fifth of the way along, unchecked, because nothing
-                    // after the first instant was ever asked about again. A
-                    // route through it read as clear and, on screen, plainly
-                    // was not.
-                    //
-                    // So a graze has to be a graze along the whole leg, not only
-                    // at the door.
-                    if (!leavingGrazeOnly || WorstOverlapAlong(body, travel, other.Shape) <= OrderSystem.GrazingTolerance)
+                    UnitInstance other = all[u];
+                    if (!other.IsOnField) continue;
+                    if (!IsInTheWayOf(unit, other)) continue;
+
+                    // Measured on a real battle: this alone cut a plan's cost in
+                    // half against an army of a hundred regiments none of which
+                    // were anywhere near the march, because every clearance check
+                    // on every leg was asking Sweep.FirstTouch and OverlapFraction
+                    // about bodies the segment could not geometrically reach.
+                    float span = reach + other.Footprint.BoundingRadius;
+                    if (DistanceSquaredToSegment(other.Position, from, along, length) > span * span)
                         continue;
-                }
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _))
-                {
-                    blocker = other;
-                    return false;
+                    if (WhereItIsStanding(body, travel, other)) continue;
+
+                    if (leaving && OrientedRect.Overlaps(body, other.Shape))
+                    {
+                        // Ordinarily any overlap at the start is excused outright:
+                        // the regiment already occupies that ground and getting
+                        // clear of it is the steering's business (M25). A candidate
+                        // the search invented is not ground anybody occupies, so
+                        // <paramref name="leavingGrazeOnly"/> narrows that.
+                        //
+                        // Narrowed to a brush <i>at the start</i>, once, and it was
+                        // not enough. A leg from a candidate that grazed one percent
+                        // of a body at its near end was excused entirely — not just
+                        // at that one point, but for the whole leg, because the
+                        // excuse skips this body's <see cref="Sweep.FirstTouch"/>
+                        // altogether. Measured: the same leg reached 66% inside that
+                        // body a fifth of the way along, unchecked, because nothing
+                        // after the first instant was ever asked about again. A
+                        // route through it read as clear and, on screen, plainly
+                        // was not.
+                        //
+                        // So a graze has to be a graze along the whole leg, not only
+                        // at the door.
+                        if (!leavingGrazeOnly || WorstOverlapAlong(body, travel, other.Shape) <= OrderSystem.GrazingTolerance)
+                            continue;
+                    }
+
+                    // Touches rather than FirstTouch: M36 wants to know *which*
+                    // body refused the line, which is this loop variable, and never
+                    // how far along it was met.
+                    if (Sweep.Touches(body, travel, other.Shape))
+                    {
+                        blocker = other;
+                        return false;
+                    }
                 }
             }
 
@@ -1171,16 +1207,20 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// How far a point stands from the nearest point on a segment.
+        /// How far a point stands from the nearest point on a segment, squared.
         /// </summary>
-        private static float DistanceToSegment(Vec2 point, Vec2 from, Vec2 to, float length)
+        /// <remarks>
+        /// Squared, and given the segment's unit direction rather than its far
+        /// end, because this is the broad-phase test every body on the field
+        /// pays on every leg: the caller already has the direction, and a
+        /// comparison against a squared span says the same thing as a distance
+        /// without the square root.
+        /// </remarks>
+        private static float DistanceSquaredToSegment(Vec2 point, Vec2 from, Vec2 along, float length)
         {
-            if (length <= 0f) return Vec2.Distance(point, from);
-
-            Vec2 along = (to - from) / length;
             float projected = MathF.Max(0f, MathF.Min(length, Vec2.Dot(point - from, along)));
 
-            return Vec2.Distance(point, from + along * projected);
+            return Vec2.DistanceSquared(point, from + along * projected);
         }
 
         /// <summary>How many points along a leg a graze is checked at.</summary>
@@ -1390,8 +1430,13 @@ namespace BattleChess.Rules
         {
             var body = new OrientedRect(at, unit.Facing, unit.Footprint);
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> near = _atThePlace ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, unit.Footprint.BoundingRadius, near);
+
+            for (int i = 0; i < near.Count; i++)
             {
+                UnitInstance other = near[i];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 if (OrientedRect.Overlaps(body, other.Shape)) return false;
@@ -1462,8 +1507,13 @@ namespace BattleChess.Rules
             UnitInstance? nearest = null;
             float closest = float.MaxValue;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> near = _aheadOnTheLine ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, unit.Footprint.BoundingRadius, near);
+
+            for (int i = 0; i < near.Count; i++)
             {
+                UnitInstance other = near[i];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 // M25, and asked here too so that "what is in the way" and "is

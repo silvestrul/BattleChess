@@ -1765,6 +1765,35 @@ namespace BattleChess.Rules
             // whose cost improves is pushed again, and the older, dearer copy is
             // recognised on the way out. That is what keeps this a heap of plain
             // numbers with no index to maintain.
+            void Price(int leg, int k, int from, int to, Vec2 here, Vec2 there)
+            {
+                if (asked[leg])
+                {
+                    ledger.CacheHits++;
+                    return;
+                }
+
+                Facing bearing = Marching.AlongTheLine(here, there, unit.Facing);
+
+                Facing walking =
+                    k == 0 ? bearing
+                    : k == 1 ? Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f)
+                    : Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f);
+
+                legFront[leg] = walking;
+                legStandNear[leg] = Stands(ledger, battle, unit, from, here, walking);
+                legStandFar[leg] = Stands(ledger, battle, unit, to, there, walking);
+                ledger.LineChecks++;
+                legClear[leg] = Marching.IsClearLine(
+                    battle, unit, here, there, walking, out UnitInstance? refused,
+                    leaving: true, leavingGrazeOnly: true);
+
+                if (!legClear[leg]) ledger.Refuse(refused);
+
+                asked[leg] = true;
+                ledger.LegsPriced++;
+            }
+
             Frontier frontier = ledger.Heap;
             frontier.Clear();
             frontier.Push(0, leftToWalk[0], ledger);
@@ -1825,46 +1854,17 @@ namespace BattleChess.Rules
                     // Face-on, or side-on either way. Three fronts, because those
                     // are the three a body of men actually walks a line on: front
                     // first, or presenting a flank to thread something narrow.
-                    for (int k = 0; k < 3; k++)
+                    int faceOn = (from * ledger.Stride + to) * 3;
+                    Price(faceOn, 0, from, to, here, there);
+
+                    int presentations =
+                        legClear[faceOn] && legStandNear[faceOn] && legStandFar[faceOn] ? 1 : 3;
+
+                    for (int k = 0; k < presentations; k++)
                     {
-                        int leg = (from * ledger.Stride + to) * 3 + k;
+                        int leg = faceOn + k;
 
-                        if (asked[leg])
-                        {
-                            ledger.CacheHits++;
-                        }
-                        else
-                        {
-                            // unit.Facing only stands in for a leg of no length,
-                            // and those are skipped above, so this bearing and
-                            // everything drawn from it is a property of the two
-                            // places alone.
-                            Facing bearing = Marching.AlongTheLine(here, there, unit.Facing);
-
-                            Facing walking =
-                                k == 0 ? bearing
-                                : k == 1 ? Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f)
-                                : Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f);
-
-                            legFront[leg] = walking;
-                            legStandNear[leg] = Stands(ledger, battle, unit, from, here, walking);
-                            legStandFar[leg] = Stands(ledger, battle, unit, to, there, walking);
-                            ledger.LineChecks++;
-                            legClear[leg] = Marching.IsClearLine(
-                                battle, unit, here, there, walking, out UnitInstance? refused,
-                                leaving: true, leavingGrazeOnly: true);
-
-                            // The refusal is the whole reason this body will get
-                            // places to bend at. Recorded only when the leg is
-                            // freshly priced, which is exactly when the search
-                            // wanted to walk it: the bound above turns back every
-                            // leg that could not have been on the answer, before
-                            // any geometry, so nothing here is asked idly.
-                            if (!legClear[leg]) ledger.Refuse(refused);
-
-                            asked[leg] = true;
-                            ledger.LegsPriced++;
-                        }
+                        Price(leg, k, from, to, here, there);
 
                         Facing walkOn = legFront[leg];
 
