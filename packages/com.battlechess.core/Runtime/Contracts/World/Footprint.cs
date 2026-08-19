@@ -243,6 +243,8 @@ namespace BattleChess.Contracts
         /// </remarks>
         public static float OverlapFraction(in OrientedRect a, in OrientedRect b)
         {
+            PlanningProfile.Tally(PlanningProfile.Step.OverlapTest);
+
             if (!Overlaps(a, b)) return 0f;
 
             // Two convex quadrilaterals meet in at most an octagon.

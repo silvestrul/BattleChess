@@ -113,6 +113,8 @@ namespace BattleChess.Rules
 
         public PathResult FindPath(Vec2 from, Vec2 to, MovementType movementType)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.HexSearch);
+
             float fastest = _fastestMultiplier[(int)movementType];
             if (fastest <= 0f)
                 return PathResult.Failed(PathFailure.MovementTypeCannotMove,

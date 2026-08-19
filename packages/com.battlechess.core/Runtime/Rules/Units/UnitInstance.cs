@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -136,6 +136,40 @@ namespace BattleChess.Rules
         /// contact system fight each other every tick.
         /// </remarks>
         public UnitId HeldUpBy { get; set; } = UnitId.None;
+
+        /// <summary>
+        /// Who the first leg of this unit's chase route was planned against, or
+        /// <see cref="UnitId.None"/> if that leg was clear when it was planned.
+        /// </summary>
+        /// <remarks>
+        /// <b>M39.</b> A route is worth re-planning when the answer could have
+        /// changed, and the cheapest thing that says so is the first leg meeting
+        /// somebody other than whoever it was drawn around. One swept rectangle
+        /// a tick against a whole plan's several hundred legs.
+        /// </remarks>
+        public UnitId ChasePlannedAgainst { get; set; } = UnitId.None;
+
+        /// <summary>
+        /// The tick a stuck chase may ask for a new route again.
+        /// </summary>
+        /// <remarks>
+        /// Set from the route's own first leg — a quarter of the time that leg
+        /// takes to walk — so a regiment shuffling a few metres asks often and
+        /// one crossing a field asks rarely, and neither needs a constant
+        /// choosing for it.
+        /// </remarks>
+        public int AskAboutTheChaseOnTick { get; set; }
+
+        /// <summary>Where the quarry stood when this chase was last planned.</summary>
+        /// <remarks>
+        /// A cadence alone cannot govern a pursuit: hold a chase back five ticks
+        /// and a broken enemy walks away, which is the failure that killed the
+        /// first attempt at this and killed the second. A quarry that has moved
+        /// is the plainest case of the answer having changed, so it re-plans on
+        /// the movement and waits on the clock only while its quarry stands
+        /// still.
+        /// </remarks>
+        public Vec2 ChaseAimedAt { get; set; }
 
         /// <summary>
         /// Morale damage reported by combat this pulse, waiting to be applied.

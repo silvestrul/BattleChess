@@ -144,6 +144,8 @@ namespace BattleChess.Rules
         {
             if (points == null) throw new ArgumentNullException(nameof(points));
 
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.PathSmooth);
+
             var result = new List<Vec2>();
             if (points.Count == 0) return result;
 

@@ -69,6 +69,12 @@ namespace BattleChess.Unity
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
 
+        [Tooltip("Routes the tick may work out in one frame before the rest wait their turn.")]
+        public int RoutesPerFrame = PlanningBudget.DefaultRoutesPerFrame;
+
+        [Tooltip("Milliseconds one frame may spend working out routes before the rest wait their turn.")]
+        public float MillisecondsPerFrame = PlanningBudget.DefaultMillisecondsPerFrame;
+
         private BattleState _battle;
         private BattleMapDefinition _map;
         private TerrainCatalogue _terrainCatalogue;
@@ -134,6 +140,14 @@ namespace BattleChess.Unity
         private void Start()
         {
             _quietened = new SteadyStateLog(_console);
+
+            // Recording is on from the first tick, not from whenever somebody
+            // remembers to press the button. Every fault in this project has
+            // been found in a recording and several were found late because the
+            // session that showed them was not being written down — a log that
+            // has to be asked for is a log that is missing exactly when it is
+            // wanted. The button now stops it rather than starting it.
+            _console.StartRecording(DebugConsole.DefaultLogDirectory());
 
             try
             {
@@ -244,9 +258,139 @@ namespace BattleChess.Unity
             _pathLine.positionCount = 0;
         }
 
+        /// <summary>
+        /// A frame slower than this is worth a line in the recording.
+        /// </summary>
+        /// <remarks>
+        /// Two frames' worth at sixty. Below that nobody feels anything; above
+        /// it, something stopped for long enough to see.
+        /// </remarks>
+        private const float ASlowFrameMs = 33f;
+
+        private readonly System.Diagnostics.Stopwatch _frame = new System.Diagnostics.Stopwatch();
+
+        private int _collectionsLastFrame;
+        private long _heapLastFrame;
+
+        // Where a frame goes. Fifty-two of sixty-eight slow frames ran no
+        // collection at all, so the litter was real and was not the whole
+        // story — and a frame that only knows its own total cannot say which
+        // part of itself is slow (W5).
+        private readonly System.Diagnostics.Stopwatch _simClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch _viewClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch _trackClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch _guiClock = new System.Diagnostics.Stopwatch();
+
+        private int _ticksThisFrame;
+
+        // Where the battle's own planning clock stood at the top of the last
+        // frame, so the frame line can report the difference rather than the
+        // running total.
+        private long _planningTicksLastFrame;
+        private int _routesPlannedLastFrame;
+
+        // The same splits, named for the Unity profiler, so a capture and the
+        // frame line in the console answer the same question the same way. A
+        // profiler that only knows Update() cannot say which part of a frame
+        // is slow, which is the whole reason the console line exists — but a
+        // capture is what gets taken when something is felt rather than
+        // reproduced, so both have to work.
+        private static readonly global::Unity.Profiling.ProfilerMarker SimMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Simulation");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker ViewMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Views");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker TrackMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Tracking");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker GuiMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Interface");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker PlanMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.PlanRoute");
+
         private void Update()
         {
             if (_battle == null) return;
+
+            // What the last frame cost, reported at the top of this one, because
+            // a frame cannot time itself: the drawing that makes it slow happens
+            // after Update returns. So the clock runs across the whole frame and
+            // is read at the next.
+            if (_frame.IsRunning)
+            {
+                _frame.Stop();
+
+                float ms = (float)_frame.Elapsed.TotalMilliseconds;
+
+                if (ms >= ASlowFrameMs)
+                {
+                    int marching = 0;
+                    int onField = 0;
+
+                    foreach (UnitInstance unit in _battle.UnitsOnField())
+                    {
+                        onField++;
+                        if (unit.IsMarching) marching++;
+                    }
+
+                    // The two numbers together are the whole question: a slow
+                    // frame with nobody marching is drawing, and one that only
+                    // arrives when a wing is on the move is the movement.
+                    // <b>Whether it collected.</b> Measured on the bench, one
+                    // route plan allocates 205 kB against a whole simulation
+                    // tick's 1,1 — so the frames that stop are far more likely
+                    // to be the collector running than anything the battle did,
+                    // and a frame line that cannot say which sends the next
+                    // investigation the same way this one went.
+                    int collections = System.GC.CollectionCount(0);
+                    long heap = System.GC.GetTotalMemory(forceFullCollection: false);
+
+                    // Planning is inside sim, not beside it, so it is
+                    // reported as a share of that rather than as another
+                    // column that would not add up.
+                    double planningMs =
+                        (_battle.RoutePlanningTicks - _planningTicksLastFrame)
+                        * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+                    int planned = _battle.RoutesPlanned - _routesPlannedLastFrame;
+
+                    _console.Info("Frame",
+                        $"{ms:0} ms on one frame — sim {_simClock.Elapsed.TotalMilliseconds:0.0} " +
+                        $"({_ticksThisFrame} ticks, of which planning {planningMs:0.0} for " +
+                        $"{planned} routes, {_battle.Planning.Waiting} waiting), " +
+                        $"views {_viewClock.Elapsed.TotalMilliseconds:0.0}, " +
+                        $"tracking {_trackClock.Elapsed.TotalMilliseconds:0.0}, " +
+                        $"gui {_guiClock.Elapsed.TotalMilliseconds:0.0}, " +
+                        $"rest {ms - _simClock.Elapsed.TotalMilliseconds - _viewClock.Elapsed.TotalMilliseconds - _trackClock.Elapsed.TotalMilliseconds - _guiClock.Elapsed.TotalMilliseconds:0.0}. " +
+                        $"{marching} of {onField} marching, {_views.Count} drawn, " +
+                        $"{_selection.Count} selected, " +
+                        $"{collections - _collectionsLastFrame} collections, heap " +
+                        $"{heap / 1048576.0:0.0} MB ({(heap - _heapLastFrame) / 1024.0:+0;-0} kB).");
+                }
+            }
+
+            // Reset here rather than in OnGUI: OnGUI runs more than once a
+            // frame (a layout pass and a repaint pass at least), and what is
+            // wanted is what all of them together cost.
+            _guiClock.Reset();
+
+            _collectionsLastFrame = System.GC.CollectionCount(0);
+            _heapLastFrame = System.GC.GetTotalMemory(forceFullCollection: false);
+            _planningTicksLastFrame = _battle.RoutePlanningTicks;
+            _routesPlannedLastFrame = _battle.RoutesPlanned;
+
+            // A fresh allowance for this frame. This is the call that turns
+            // rationing on at all — without a host doing it every request is
+            // granted, which is how the CLI and the tests stay as they were.
+            // It belongs here rather than beside AdvanceClock because it is a
+            // *frame's* allowance: a frame that has fallen behind runs up to
+            // eight ticks to catch up, and the whole point is that those eight
+            // share one allowance instead of taking one each.
+            _battle.Planning.OpenFrame(RoutesPerFrame, MillisecondsPerFrame);
+
+            _frame.Restart();
 
             if (Input.GetKeyDown(KeyCode.F1))
                 _options.Visible = !_options.Visible;
@@ -255,7 +399,15 @@ namespace BattleChess.Unity
 
             HandleClockKeys();
             HandleFogKeys();
+
+            _simClock.Restart();
+            SimMarker.Begin();
+            int before = _clock?.Tick ?? 0;
             AdvanceClock();
+            _ticksThisFrame = (_clock?.Tick ?? 0) - before;
+            SimMarker.End();
+            _simClock.Stop();
+
             HandleFormationKeys();
             HandleStanceKeys();
 
@@ -264,16 +416,28 @@ namespace BattleChess.Unity
             // clock is running.
             float alpha = Mathf.Clamp01(_tickAccumulator / BattleClock.SecondsPerTick);
 
+            _viewClock.Restart();
+            ViewMarker.Begin();
+
             ApplyFog();
 
             foreach (UnitView view in _views)
                 view.Render(alpha);
+
+            ViewMarker.End();
+            _viewClock.Stop();
+
+            _trackClock.Restart();
+            TrackMarker.Begin();
 
             RefreshOverlayUnits();
             ForgetAFinishedRoute();
 
             TrackSelection();
             TrackOrders();
+
+            TrackMarker.End();
+            _trackClock.Stop();
         }
 
         /// <summary>
@@ -745,8 +909,19 @@ namespace BattleChess.Unity
                 $"keeping their shape" +
                 (bearing.HasValue ? $", to arrive facing {bearing.Value.Degrees:0}°." : "."));
 
+            // The whole wing on one clock. A regiment's own plan is a few
+            // milliseconds and nobody would feel it; a wing of them lands inside
+            // a single frame, and that is what a stutter on a group order is.
+            var spent = System.Diagnostics.Stopwatch.StartNew();
+
             foreach (UnitInstance unit in _selection)
                 PlanRoute(unit, destination + (unit.Position - origin), bearing, quiet: true);
+
+            spent.Stop();
+
+            _console.Info("Group",
+                $"{_selection.Count} routes worked out in {spent.Elapsed.TotalMilliseconds:0.0} ms, " +
+                $"all inside the one frame that ordered them.");
 
             _status = $"{_selection.Count} regiments marching, keeping their formation.";
         }
@@ -1748,8 +1923,19 @@ namespace BattleChess.Unity
             // if there is one, otherwise the line of march.
             Facing willArriveOn = bearing ?? Marching.AlongTheLine(unit.Position, destination, unit.Facing);
 
+            // Timed, because "it lags when you move several at once" is a
+            // question about milliseconds and the recording could only ever
+            // answer it in legs. Legs were a stand-in for a clock, and a bad one:
+            // measured on the bench, the same leg count cost between six and
+            // nineteen microseconds depending on what else was running (W5).
+            var spent = System.Diagnostics.Stopwatch.StartNew();
+            PlanMarker.Begin();
+
             Plan plan = Marching.PlanTo(
                 _battle, unit, pathfinder, destination, _console, arriveOn: willArriveOn);
+
+            PlanMarker.End();
+            spent.Stop();
 
             PathResult path = plan.Path;
 
@@ -1789,7 +1975,8 @@ namespace BattleChess.Unity
             // so it was measured by hand four times over in one afternoon
             // before it was simply written down.
             _console.Info("Cost",
-                $"{unit.Def.DisplayName} planned by {RoutePlanners.Default.Name}: {plan.Effort}.", unit.Id);
+                $"{unit.Def.DisplayName} planned by {RoutePlanners.Default.Name} " +
+                $"in {spent.Elapsed.TotalMilliseconds:0.0} ms: {plan.Effort}.", unit.Id);
 
             if (!quiet)
                 _console.Decision("Path",
@@ -1950,6 +2137,22 @@ namespace BattleChess.Unity
         }
 
         private void OnGUI()
+        {
+            _guiClock.Start();
+            GuiMarker.Begin();
+
+            try
+            {
+                DrawTheInterface();
+            }
+            finally
+            {
+                GuiMarker.End();
+                _guiClock.Stop();
+            }
+        }
+
+        private void DrawTheInterface()
         {
             if (_error != null)
             {

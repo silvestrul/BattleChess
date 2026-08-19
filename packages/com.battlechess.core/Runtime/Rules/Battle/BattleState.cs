@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -176,12 +176,156 @@ namespace BattleChess.Rules
         }
 
         /// <summary>Units still physically on the battlefield, in id order.</summary>
-        public IEnumerable<UnitInstance> UnitsOnField()
+        /// <summary>
+        /// Routes planned since the battle began. Whoever reports it takes the
+        /// difference across a tick.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M38.</b> Every plan made inside the simulation was invisible: the
+        /// recording's cost lines are written by the Unity controller when an
+        /// order is given, and a regiment re-planning a chase writes nothing at
+        /// all. One session logged 33 plans while freezing for 608 ms on a
+        /// single frame, and the plans that caused it were not among the 33.
+        /// </para>
+        /// <para>
+        /// Counted here rather than in the planner because the planner is static
+        /// and a battle is not: two battles in one process — which is every test
+        /// run — would otherwise share a counter.
+        /// </para>
+        /// </remarks>
+        public int RoutesPlanned;
+
+        /// <summary>
+        /// Stopwatch ticks spent inside <see cref="Marching.PlanTo"/> in this
+        /// battle, ever.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A count of plans was never going to answer "why did that frame
+        /// stop": measured on the bench, the same leg count cost between six
+        /// and nineteen microseconds depending on what else was running, and
+        /// a plan is not a fixed price. The harness could already say what a
+        /// frame spent in the simulation, but not how much of that was
+        /// working out routes — so a frame that stopped while a wing was
+        /// marching could not distinguish re-planning from the tick doing
+        /// its ordinary work, which is the one split that decides what to
+        /// fix.
+        /// </para>
+        /// <para>
+        /// Raw stopwatch ticks rather than milliseconds so accumulating
+        /// thousands of short plans does not round each of them to nothing.
+        /// On the battle rather than static, for the same reason
+        /// <see cref="RoutesPlanned"/> is: two battles in one process is
+        /// every test run.
+        /// </para>
+        /// </remarks>
+        public long RoutePlanningTicks;
+
+        /// <summary>
+        /// How much route planning one drawn frame may do, and who gets to do
+        /// it.
+        /// </summary>
+        /// <remarks>
+        /// Does nothing at all unless a host calls
+        /// <see cref="PlanningBudget.OpenFrame"/>, so the CLI, the benches and
+        /// the test suite are unaffected. On the battle rather than static for
+        /// the same reason <see cref="RoutesPlanned"/> is.
+        /// </remarks>
+        public readonly PlanningBudget Planning = new PlanningBudget();
+
+        private readonly Dictionary<MovementType, PassableGround> _passable =
+            new Dictionary<MovementType, PassableGround>();
+
+        /// <summary>
+        /// Where <paramref name="moving"/> cannot go on this field, for asking
+        /// about whole rectangles at once.
+        /// </summary>
+        /// <remarks>
+        /// Built the first time it is wanted and kept: terrain does not move,
+        /// so the answer is good for the life of the battle. Per battle rather
+        /// than static because two battles in one process is every test run —
+        /// the same reason <see cref="RoutesPlanned"/> lives here.
+        /// </remarks>
+        public PassableGround PassableFor(MovementType moving)
         {
-            for (int i = 0; i < _units.Count; i++)
+            if (_passable.TryGetValue(moving, out PassableGround known)) return known;
+
+            PassableGround built = PassableGround.Build(Terrain, Movement, moving);
+            _passable[moving] = built;
+
+            return built;
+        }
+
+        /// <summary>
+        /// The one scratchpad every march in this battle plans on (<b>M40</b>).
+        /// </summary>
+        /// <remarks>
+        /// Per battle, not static: two battles in one process share nothing, and
+        /// a battle only ever plans one march at a time.
+        /// </remarks>
+        internal RouteSearch.Ledger PlanningScratch { get; } = new RouteSearch.Ledger();
+
+        public OnField UnitsOnField() => new OnField(_units);
+
+        /// <summary>
+        /// The regiments still on the field, walked without littering.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M40.</b> This was an iterator method, so every <c>foreach</c> over
+        /// it allocated a compiler-generated object — and it is asked once per
+        /// clearance test, thousands of times in a single plan. Measured: a plan
+        /// allocated 205 kB against a whole simulation tick's 1,1, and a session
+        /// churning megabytes through a stop-the-world collector stopped for
+        /// forty to fifty milliseconds at a time.
+        /// </para>
+        /// <para>
+        /// A struct enumerator costs nothing, and <c>foreach</c> takes it by
+        /// shape rather than through the interface, so all sixty-four callers
+        /// are unchanged. <see cref="IEnumerable{T}"/> is still implemented for
+        /// anything that genuinely wants it — that path allocates as before, and
+        /// nothing in the tree uses it.
+        /// </para>
+        /// </remarks>
+        public readonly struct OnField : IEnumerable<UnitInstance>
+        {
+            private readonly List<UnitInstance> _units;
+
+            public OnField(List<UnitInstance> units) => _units = units;
+
+            public Enumerator GetEnumerator() => new Enumerator(_units);
+
+            IEnumerator<UnitInstance> IEnumerable<UnitInstance>.GetEnumerator()
             {
-                if (_units[i].IsOnField)
-                    yield return _units[i];
+                foreach (UnitInstance unit in this) yield return unit;
+            }
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+                ((IEnumerable<UnitInstance>)this).GetEnumerator();
+
+            public struct Enumerator
+            {
+                private readonly List<UnitInstance> _units;
+                private int _at;
+
+                public Enumerator(List<UnitInstance> units)
+                {
+                    _units = units;
+                    _at = -1;
+                }
+
+                public UnitInstance Current => _units[_at];
+
+                public bool MoveNext()
+                {
+                    while (++_at < _units.Count)
+                    {
+                        if (_units[_at].IsOnField) return true;
+                    }
+
+                    return false;
+                }
             }
         }
 
@@ -359,6 +503,8 @@ namespace BattleChess.Rules
         public bool FormationFits(UnitInstance unit, Vec2 centre, Facing facing)
         {
             if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.FormationFits);
 
             Footprint footprint = unit.Footprint;
             var shape = new OrientedRect(centre, facing, footprint);

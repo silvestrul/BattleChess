@@ -90,6 +90,8 @@ namespace BattleChess.Contracts
         public static bool FirstTouch(
             in OrientedRect moving, Vec2 travel, in OrientedRect obstacle, out float distance)
         {
+            PlanningProfile.Tally(PlanningProfile.Step.SweepTest);
+
             float length = travel.Length;
 
             // Standing still. Only the position it is already in can be in the

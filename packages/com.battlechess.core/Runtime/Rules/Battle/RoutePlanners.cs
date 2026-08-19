@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using BattleChess.Contracts;
+using BattleChess.Rules.HybridPlanning;
 
 namespace BattleChess.Rules
 {
@@ -39,8 +40,30 @@ namespace BattleChess.Rules
         /// </summary>
         public static readonly IRoutePlanner TheSearch = new Search();
 
+        /// <summary>
+        /// <b>M36</b>: the same search over a reduced visibility graph — inflated
+        /// corners, joined only where the leg is tangent to both.
+        /// </summary>
+        public static readonly IRoutePlanner TheTangents = new Tangents();
+
+        /// <summary>
+        /// Half of <b>M36</b>: the corners, joined the old way. Here to say which
+        /// half of the change any difference belongs to.
+        /// </summary>
+        public static readonly IRoutePlanner TheCorners =
+            new Shaped("over corners", RouteSearch.Shape.Corners);
+
+        /// <summary>
+        /// A prototype: Hybrid A* over states of (x, y, heading), independent
+        /// of everything above. See
+        /// <see cref="HybridPlanning.HybridAStarRoutePlanner"/>.
+        /// Not the default — put here to be measured, not trusted yet.
+        /// </summary>
+        public static readonly IRoutePlanner TheHybridAStar = new HybridAStarRoutePlanner();
+
         /// <summary>Every way of planning, for the harness that compares them.</summary>
-        public static IReadOnlyList<IRoutePlanner> All { get; } = new[] { TheLadder, TheSearch };
+        public static IReadOnlyList<IRoutePlanner> All { get; } =
+            new[] { TheLadder, TheSearch, TheCorners, TheTangents, TheHybridAStar };
 
         /// <summary>
         /// What a march uses when nobody says otherwise.
@@ -58,8 +81,17 @@ namespace BattleChess.Rules
         /// the next recording. The ladder stays in the tree, one line away, until
         /// the recordings agree.
         /// </para>
+        /// <para>
+        /// <b>Over tangents since M36</b>, which is the same search over the same
+        /// places with the legs that cannot be on any route left unnamed. Taken
+        /// on the numbers: identical on the angle gate at 17 of 19, identical on
+        /// the suite at 563 passing and 11 failing over two runs, and 2.2 times
+        /// quicker on sixty-four regiments ordered at once for 2.9 times fewer
+        /// legs priced. A pruning that changes no answer is worth having whether
+        /// or not the rest of the pass lands.
+        /// </para>
         /// </remarks>
-        public static IRoutePlanner Default { get; } = TheSearch;
+        public static IRoutePlanner Default { get; } = TheTangents;
 
         private sealed class Search : IRoutePlanner
         {
@@ -80,6 +112,38 @@ namespace BattleChess.Rules
                 BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
                 IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
                 RouteSearch.Find(battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder);
+        }
+
+        private sealed class Tangents : IRoutePlanner
+        {
+            public string Name => "over tangents";
+
+            public Plan PlanTo(
+                BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+                IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
+                RouteSearch.Find(
+                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
+                    RouteSearch.Shape.Tangents);
+        }
+
+        /// <summary>The same search, over whichever shape of graph it is given.</summary>
+        private sealed class Shaped : IRoutePlanner
+        {
+            private readonly RouteSearch.Shape _shape;
+
+            public Shaped(string name, RouteSearch.Shape shape)
+            {
+                Name = name;
+                _shape = shape;
+            }
+
+            public string Name { get; }
+
+            public Plan PlanTo(
+                BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+                IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
+                RouteSearch.Find(
+                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder, _shape);
         }
 
         private sealed class Ladder : IRoutePlanner

@@ -220,6 +220,23 @@ namespace BattleChess.Tests.Battle
                 Clock.AdvanceTurn(State, Transcript);
         }
 
+        /// <summary>Runs a given number of ticks, and says how many routes they planned.</summary>
+        /// <remarks>
+        /// The count is the point. Re-planning is work nobody sees — it changes
+        /// no position, writes no line, and shows up only as the game stopping —
+        /// so a test that watches where regiments end up cannot catch it, and
+        /// none of them did (<b>M38</b>).
+        /// </remarks>
+        public int RunTicksCountingRoutes(int ticks)
+        {
+            int before = State.RoutesPlanned;
+
+            for (int i = 0; i < ticks; i++)
+                Clock.Advance(State, Transcript);
+
+            return State.RoutesPlanned - before;
+        }
+
         /// <summary>Runs combat pulses only — ten ticks each.</summary>
         public void RunPulses(int pulses)
         {

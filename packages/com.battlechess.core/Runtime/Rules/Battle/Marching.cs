@@ -83,8 +83,12 @@ namespace BattleChess.Rules
         public RouteEffort(
             int places, int legs, int expansions, int rounds = 0,
             int states = 0, long frontierScans = 0, int cacheHits = 0, int pruned = 0,
-            int lineChecks = 0, int standChecks = 0, int turnChecks = 0)
+            int lineChecks = 0, int standChecks = 0, int turnChecks = 0, bool askedTheLadder = false,
+            int bodies = 0, int filteredPlaces = 0)
         {
+            AskedTheLadder = askedTheLadder;
+            Bodies = bodies;
+            FilteredPlaces = filteredPlaces;
             Places = places;
             Legs = legs;
             Expansions = expansions;
@@ -157,6 +161,42 @@ namespace BattleChess.Rules
         /// <summary>Room-to-turn checks actually run.</summary>
         public readonly int TurnChecks;
 
+        /// <summary>
+        /// Whether the ladder was asked for a second opinion (<b>M33</b>).
+        /// </summary>
+        /// <remarks>
+        /// Recorded because the clock and the counters stopped agreeing: a plan
+        /// with two places and three legs priced — no search worth the name —
+        /// was measured at 13,3 ms in play, while plans plainly larger came in
+        /// under four. Legs cannot explain that, and a flag can.
+        /// </remarks>
+        public readonly bool AskedTheLadder;
+
+        /// <summary>
+        /// How many regiments were pulled into the corridor and asked for
+        /// candidate places.
+        /// </summary>
+        /// <remarks>
+        /// The number worth arguing about when a plan looks expensive for what
+        /// is actually on the field — the graph is built from these, and their
+        /// count times up to twenty-four points each is most of the answer to
+        /// "why does this cost so much".
+        /// </remarks>
+        public readonly int Bodies;
+
+        /// <summary>
+        /// Of the graph's places, how many actually have their legs pruned by
+        /// tangency. The rest are unfiltered by design (<b>M36</b>).
+        /// </summary>
+        public readonly int FilteredPlaces;
+
+        /// <summary>The same effort, with the ladder recorded as asked.</summary>
+        public RouteEffort WithLadder() =>
+            new RouteEffort(
+                Places, Legs, Expansions, Rounds, States, FrontierScans, CacheHits, Pruned,
+                LineChecks, StandChecks, TurnChecks, askedTheLadder: true,
+                bodies: Bodies, filteredPlaces: FilteredPlaces);
+
         /// <summary>Every dear geometric question this plan asked.</summary>
         public int Geometry => LineChecks + StandChecks + TurnChecks;
 
@@ -176,8 +216,10 @@ namespace BattleChess.Rules
 
         public override string ToString() =>
             Searched
-                ? $"{Places} places, {Legs} legs priced, {Expansions} expanded, " +
-                  $"{Rounds} round{(Rounds == 1 ? string.Empty : "s")}"
+                ? $"{Places} places ({Bodies} bodies, {FilteredPlaces} corners filtered), " +
+                  $"{Legs} legs priced, {Expansions} expanded, " +
+                  $"{Rounds} round{(Rounds == 1 ? string.Empty : "s")}" +
+                  (AskedTheLadder ? ", asked the ladder too" : string.Empty)
                 : "straight line, nothing searched";
     }
 
@@ -251,9 +293,37 @@ namespace BattleChess.Rules
         public static Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
             IBattleLog? log = null, IWayRound? wayRound = null, IRoutePlanner? planner = null,
-            Facing? arriveOn = null) =>
-            (planner ?? RoutePlanners.Default).PlanTo(
-                battle, unit, pathfinder, destination, log, wayRound, arriveOn);
+            Facing? arriveOn = null)
+        {
+            // Counted here because this is the one door every plan comes
+            // through, whoever opened it (M38) — and timed here for the same
+            // reason, so an order given by hand and a re-plan the tick
+            // decided on land on the same clock without either caller
+            // needing to know it is being timed.
+            battle.RoutesPlanned++;
+
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.Plan);
+
+            long began = System.Diagnostics.Stopwatch.GetTimestamp();
+
+            try
+            {
+                return (planner ?? RoutePlanners.Default).PlanTo(
+                    battle, unit, pathfinder, destination, log, wayRound, arriveOn);
+            }
+            finally
+            {
+                long spent = System.Diagnostics.Stopwatch.GetTimestamp() - began;
+
+                battle.RoutePlanningTicks += spent;
+
+                // Charged against this frame's allowance whoever asked, so a
+                // person's own order still shortens what the tick may spend
+                // after it. Orders are never *refused* — see PlanningBudget —
+                // but they are not invisible either.
+                battle.Planning.Spent(unit.Id, spent);
+            }
+        }
 
         /// <summary>
         /// <b>M18</b>'s ladder: straight line, round it, through its own, and the
@@ -272,6 +342,7 @@ namespace BattleChess.Rules
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.Ladder);
 
             // Rung 1: straight there — asked of the body squared to the line
             // it is about to walk, not the one it is standing in (M24).
@@ -1015,6 +1086,8 @@ namespace BattleChess.Rules
         {
             blocker = null;
 
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.ClearLine);
+
             Vec2 travel = to - from;
             float length = travel.Length;
 
@@ -1030,6 +1103,7 @@ namespace BattleChess.Rules
             // too, by way of the blocker this hands back.
             float reach = unit.Footprint.BoundingRadius;
 
+            using (PlanningProfile.Measure(PlanningProfile.Step.BodyScan))
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 if (!IsInTheWayOf(unit, other)) continue;
@@ -1135,6 +1209,8 @@ namespace BattleChess.Rules
         /// </remarks>
         private static float WorstOverlapAlong(in OrientedRect moving, Vec2 travel, in OrientedRect obstacle)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GrazeAlong);
+
             float length = travel.Length;
             if (length <= 0f) return OrientedRect.OverlapFraction(moving, obstacle);
 
@@ -1327,6 +1403,31 @@ namespace BattleChess.Rules
         private static bool GroundIsClear(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 travel, float length, Facing facing)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GroundClear);
+
+            // Everything this leg could possibly touch, however the body is
+            // turned: both ends, each grown by the footprint's own bounding
+            // circle. If none of that rectangle is ground this unit cannot
+            // enter, no point inside it can be either, and the sampling below
+            // would spend a thousand lookups proving it.
+            Vec2 to = from + travel;
+            float reach = unit.Footprint.BoundingRadius;
+
+            var min = new Vec2(MathF.Min(from.X, to.X) - reach, MathF.Min(from.Y, to.Y) - reach);
+            var max = new Vec2(MathF.Max(from.X, to.X) + reach, MathF.Max(from.Y, to.Y) + reach);
+
+            if (battle.PassableFor(unit.Def.Movement).NothingInTheWay(min, max))
+                return true;
+
+            // Asking the same question again per step was built and measured
+            // and is deliberately not here. A regiment 229 m across has a
+            // bounding circle of 128 m, so a step's own rectangle is over a
+            // quarter of a kilometre wide: on a map with mountains in it that
+            // rectangle catches one nearly everywhere the whole leg did, the
+            // table answers no, and the query is pure overhead on top of the
+            // sampling it failed to avoid. Measured: the default planner went
+            // from 48,1 ms a plan back up to 52,8, and the ladder from 20,0
+            // to 30,4.
             int steps = Math.Max(1, (int)MathF.Ceiling(length / GroundStepMetres));
 
             for (int i = 0; i <= steps; i++)

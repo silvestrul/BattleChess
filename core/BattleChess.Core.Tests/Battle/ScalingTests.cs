@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using BattleChess.Contracts;
@@ -177,6 +177,7 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void WhatAWholeArmyCostsToOrder()
         {
+            foreach (IRoutePlanner planner in RoutePlanners.All)
             foreach (int regiments in new[] { 8, 16, 32, 64 })
             {
                 var field = new Battlefield("plains", 99ul);
@@ -192,25 +193,44 @@ namespace BattleChess.Tests.Battle
 
                 foreach (UnitInstance unit in army) Battlefield.Hold(unit);
 
-                var watch = Stopwatch.StartNew();
-
                 long legs = 0;
                 long searched = 0;
 
-                foreach (UnitInstance unit in army)
+                void Order()
                 {
-                    Plan plan = Marching.PlanTo(
-                        field.State, unit, field.Pathfinder,
-                        unit.Position + new Vec2(0f, 350f), planner: RoutePlanners.TheSearch);
+                    legs = 0;
+                    searched = 0;
 
-                    legs += plan.Effort.Legs;
-                    if (plan.Effort.Searched) searched++;
+                    foreach (UnitInstance unit in army)
+                    {
+                        Plan plan = Marching.PlanTo(
+                            field.State, unit, field.Pathfinder,
+                            unit.Position + new Vec2(0f, 350f), planner: planner);
+
+                        legs += plan.Effort.Legs;
+                        if (plan.Effort.Searched) searched++;
+                    }
                 }
+
+                // Warmed and repeated, like the rows above, and it was not
+                // before. Timing one unwarmed pass put the whole cost of getting
+                // the planner compiled into the first order it ever made, and
+                // the number wandered by a fifth run to run — enough to show a
+                // 16% gain from a change a warmed harness then measured at
+                // nothing. Planning moves nobody, so every pass is the same work
+                // and repeating it is honest.
+                Order();
+
+                var watch = Stopwatch.StartNew();
+
+                const int passes = 5;
+                for (int pass = 0; pass < passes; pass++) Order();
 
                 watch.Stop();
 
                 _out.WriteLine(
-                    $"{regiments,3} regiments ordered   {watch.Elapsed.TotalMilliseconds,8:0.0} ms   " +
+                    $"{planner.Name,-22} {regiments,3} regiments ordered   " +
+                    $"{watch.Elapsed.TotalMilliseconds / passes,8:0.0} ms   " +
                     $"{searched} searched   {legs} legs in total");
             }
         }

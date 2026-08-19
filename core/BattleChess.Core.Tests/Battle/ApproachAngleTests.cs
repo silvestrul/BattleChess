@@ -112,14 +112,28 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void EveryApproachAngleFindsAWayThroughTheGap()
         {
+            var failures = new Dictionary<IRoutePlanner, List<string>>();
+
+            // Every planner is swept before any is judged, so one planner's
+            // failure does not stop the others being measured.
             foreach (IRoutePlanner planner in RoutePlanners.All)
             {
                 _out.WriteLine($"--- {planner.Name} ---");
-                Sweep(planner);
+                failures[planner] = Sweep(planner);
             }
+
+            // The gate guards whatever a march actually uses, so switching the
+            // default cannot quietly switch off the test that made it credible.
+            List<string> failed = failures[RoutePlanners.Default];
+
+            Assert.True(failed.Count == 0,
+                $"{failed.Count} of 19 approach angles cannot cross a 30 m gap with a regiment 20 m " +
+                $"across side-on: {string.Join(", ", failed)}. The gap admits it at every angle, so " +
+                "any angle that fails is the planner measuring against the line of march rather than " +
+                "against the bodies.");
         }
 
-        private void Sweep(IRoutePlanner planner)
+        private List<string> Sweep(IRoutePlanner planner)
         {
             var failed = new List<string>();
 
@@ -147,13 +161,7 @@ namespace BattleChess.Tests.Battle
 
             _out.WriteLine($"  {19 - failed.Count} of 19 clear.");
 
-            if (planner != RoutePlanners.TheSearch) return;
-
-            Assert.True(failed.Count == 0,
-                $"{failed.Count} of 19 approach angles cannot cross a 30 m gap with a regiment 20 m " +
-                $"across side-on: {string.Join(", ", failed)}. The gap admits it at every angle, so " +
-                "any angle that fails is the planner measuring against the line of march rather than " +
-                "against the bodies.");
+            return failed;
         }
     }
 }
