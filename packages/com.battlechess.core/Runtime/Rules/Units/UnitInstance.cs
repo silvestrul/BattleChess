@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -34,11 +34,43 @@ namespace BattleChess.Rules
         /// <summary>What kind of unit this is. Its per-man qualities live here.</summary>
         public UnitDef Def { get; }
 
+        private Vec2 _position;
+
         /// <summary>Centre of the formation, in world metres.</summary>
-        public Vec2 Position { get; set; }
+        /// <remarks>
+        /// Backed rather than automatic so that moving a regiment can tell the
+        /// battle it has moved. <see cref="BattleState"/> keeps a spatial index
+        /// of where everybody is standing, and the only thing that can
+        /// invalidate it is this setter. Written this way rather than by
+        /// rebuilding the index every time somebody asks, because "who is near
+        /// this line" is asked tens of thousands of times per plan and answered
+        /// far less often than it changes.
+        /// </remarks>
+        public Vec2 Position
+        {
+            get => _position;
+            set
+            {
+                _position = value;
+                Home?.NoteUnitsMoved();
+            }
+        }
 
         /// <summary>Which way the formation is facing.</summary>
+        /// <remarks>
+        /// Not indexed on: the index buckets a regiment by its centre and widens
+        /// every query by the widest bounding radius on the field, so which way
+        /// a body points can never move it into a bucket the query did not
+        /// already look in.
+        /// </remarks>
         public Facing Facing { get; set; }
+
+        /// <summary>
+        /// The battle this regiment was raised into, so that moving it can
+        /// invalidate what the battle has cached about where everybody is.
+        /// Null until it is raised.
+        /// </summary>
+        internal BattleState? Home { get; set; }
 
         public UnitState State { get; set; }
 

@@ -613,7 +613,7 @@ namespace BattleChess.Rules
                     lapped = $" It sets off already standing in {other.Def.DisplayName}, " +
                              $"{overlap:0.00} of a body deep.";
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) met++;
+                if (Sweep.Touches(body, travel, other.Shape)) met++;
             }
 
             return $" {met} of its own on that line.{lapped}";
@@ -917,6 +917,26 @@ namespace BattleChess.Rules
         /// obstacle, because being inside it is the reason a way round is wanted
         /// — see <see cref="IsClearLeg"/>, which is the only caller that says so.
         /// </param>
+        /// <summary>
+        /// Somewhere for an index query to put its answer without allocating.
+        /// </summary>
+        /// <remarks>
+        /// One per thread and one per asking method, rather than one shared
+        /// between them. Nothing nests today — the body of a clearance check is
+        /// pure geometry and asks the index nothing — but a shared buffer would
+        /// make the day somebody adds a query inside one of these loops into a
+        /// silent wrong answer rather than a compile error, and that is the kind
+        /// of bug this sweep has spent its time removing.
+        /// </remarks>
+        [ThreadStatic]
+        private static List<UnitInstance>? _onTheLine;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _atThePlace;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _aheadOnTheLine;
+
         public static bool IsClearLine(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
             bool leaving = false, bool leavingGrazeOnly = false)
@@ -935,9 +955,15 @@ namespace BattleChess.Rules
             // choosing candidates — this only has to be provably safe, not
             // tight, so it can never turn a real collision into a missed one.
             float reach = unit.Footprint.BoundingRadius;
+            Vec2 along = travel / length;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> all = _onTheLine ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, reach, all);
+
+            for (int u = 0; u < all.Count; u++)
             {
+                UnitInstance other = all[u];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 // Measured on a real battle: this alone cut a plan's cost in
@@ -945,8 +971,8 @@ namespace BattleChess.Rules
                 // were anywhere near the march, because every clearance check
                 // on every leg was asking Sweep.FirstTouch and OverlapFraction
                 // about bodies the segment could not geometrically reach.
-                if (DistanceToSegment(other.Position, from, to, length) >
-                    reach + other.Footprint.BoundingRadius)
+                float span = reach + other.Footprint.BoundingRadius;
+                if (DistanceSquaredToSegment(other.Position, from, along, length) > span * span)
                     continue;
 
                 if (WhereItIsStanding(body, travel, other)) continue;
@@ -976,7 +1002,7 @@ namespace BattleChess.Rules
                         continue;
                 }
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
+                if (Sweep.Touches(body, travel, other.Shape)) return false;
             }
 
             // The ground last, and it is worth saying why, because it used to be
@@ -999,16 +1025,20 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// How far a point stands from the nearest point on a segment.
+        /// How far a point stands from the nearest point on a segment, squared.
         /// </summary>
-        private static float DistanceToSegment(Vec2 point, Vec2 from, Vec2 to, float length)
+        /// <remarks>
+        /// Squared, and given the segment's unit direction rather than its far
+        /// end, because this is the broad-phase test every body on the field
+        /// pays on every leg: the caller already has the direction, and a
+        /// comparison against a squared span says the same thing as a distance
+        /// without the square root.
+        /// </remarks>
+        private static float DistanceSquaredToSegment(Vec2 point, Vec2 from, Vec2 along, float length)
         {
-            if (length <= 0f) return Vec2.Distance(point, from);
-
-            Vec2 along = (to - from) / length;
             float projected = MathF.Max(0f, MathF.Min(length, Vec2.Dot(point - from, along)));
 
-            return Vec2.Distance(point, from + along * projected);
+            return Vec2.DistanceSquared(point, from + along * projected);
         }
 
         /// <summary>How many points along a leg a graze is checked at.</summary>
@@ -1216,8 +1246,13 @@ namespace BattleChess.Rules
         {
             var body = new OrientedRect(at, unit.Facing, unit.Footprint);
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> near = _atThePlace ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, unit.Footprint.BoundingRadius, near);
+
+            for (int i = 0; i < near.Count; i++)
             {
+                UnitInstance other = near[i];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 if (OrientedRect.Overlaps(body, other.Shape)) return false;
@@ -1263,8 +1298,13 @@ namespace BattleChess.Rules
             UnitInstance? nearest = null;
             float closest = float.MaxValue;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> near = _aheadOnTheLine ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, unit.Footprint.BoundingRadius, near);
+
+            for (int i = 0; i < near.Count; i++)
             {
+                UnitInstance other = near[i];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 // M25, and asked here too so that "what is in the way" and "is
