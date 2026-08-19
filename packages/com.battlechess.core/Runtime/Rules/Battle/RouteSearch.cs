@@ -116,37 +116,96 @@ namespace BattleChess.Rules
             int legs = 0;
             int expanded = 0;
 
-            // Clean first, shouldering through only if nothing else reaches.
+            // What a leg is, geometrically, is asked once and remembered.
+            // Smoothing asks about the same legs the search already priced, and
+            // before the press was priced there was a second whole search that
+            // did too.
+            var known = new LegCache(places.Count);
+
+            // One search, with shouldering through priced into it rather than
+            // held back as a last resort.
             //
-            // Pricing a press-through as one edge among many is the goal and is
-            // deliberately *not* done yet: measured, at M20's pace of 0.6 it wins
-            // almost everywhere, which is the same result the M26 experiment gave
-            // twice. That is a designer's number, not a planner's, so until it is
-            // settled the last resort stays a last resort — which is what M18
-            // always said and what this rung of it got right.
-            Route? clean = Cheapest(
-                battle, unit, places, destination, arriveOn, mayPress: false, ref legs, ref expanded);
-
-            if (clean.HasValue)
-            {
-                return Assemble(
-                    Smooth(battle, unit, clean.Value, arriveOn), pressed: false,
-                    new RouteEffort(places.Count, legs, expanded));
-            }
-
-            // A second search, and its cost is added rather than replacing the
-            // first: the regiment really did pay for both.
-            Route? forced = Cheapest(
-                battle, unit, places, destination, arriveOn, mayPress: true, ref legs, ref expanded);
+            // What M18 could not do was compare "go round" against "go
+            // through", because going through had no price — so it sat as a
+            // rung below everything else and the planner ran twice, once
+            // forbidding it and once permitting it. Two searches over one graph
+            // for one answer.
+            //
+            // Why it stayed that way is worth stating, because it is not that
+            // nobody tried. Pricing the press by pace alone was measured twice
+            // and won almost everywhere, and the shape of the cost is why:
+            // MovementSystem.PaceWhileInsideItsOwn is a *rate*. It charges only
+            // for the ground spent inside somebody, so clipping a corner for
+            // five metres costs about three metres of penalty — nothing against
+            // a detour of tens of metres and a wheel. What makes shouldering
+            // through bad is not that it is slow. It is the shoving.
+            //
+            // So the rate keeps its job and ShoulderTollSeconds is charged on
+            // top, once, for a leg that genuinely presses. A toll rather than a
+            // rate is what lets a long way round lose to it and a short one beat
+            // it, which is the rule as the designer stated it.
+            Route? found = Cheapest(
+                battle, unit, places, destination, arriveOn, known, ref legs, ref expanded);
 
             var effort = new RouteEffort(places.Count, legs, expanded);
 
-            return forced.HasValue
-                ? Assemble(forced.Value, pressed: true, effort)
-                : new Plan(
+            if (!found.HasValue)
+                return new Plan(
                     PathResult.Failed(PathFailure.NoRouteExists,
                         "nothing reaches that ground, going round or through", 0),
                     null, false, effort);
+
+            Route route = Smooth(battle, unit, found.Value, arriveOn);
+
+            return Assemble(route, pressed: Presses(battle, unit, route), effort);
+        }
+
+        /// <summary>
+        /// How dear it is to shoulder through one of your own, in seconds.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The designer's number, and the one that decides how often a
+        /// regiment walks through its own men.</b> Everything else about a press
+        /// is measured; this says what the shoving is worth.
+        /// </para>
+        /// <para>
+        /// Forty-five seconds, chosen against what a detour costs rather than
+        /// out of the air: a way round an ordinary body runs thirty to eighty
+        /// metres of extra ground plus a wheel, which at a regiment's pace comes
+        /// to twenty to sixty seconds. Set here, an ordinary detour is worth
+        /// taking and a long way round something distant is not — which is the
+        /// rule as stated. Raise it and the line holds M1 harder at the price of
+        /// longer marches; lower it and regiments start shoving.
+        /// </para>
+        /// <para>
+        /// Charged once per pressing leg, not per metre and not per body. Per
+        /// metre is the rate, which already exists and is not what was wrong.
+        /// Per body would be finer and costs an <see cref="Marching.IsClearLine"/>
+        /// that counts rather than one that stops at the first thing it meets —
+        /// worth doing if one number turns out to be too blunt a control.
+        /// </para>
+        /// </remarks>
+        public const float ShoulderTollSeconds = 120f;
+
+        /// <summary>Whether a finished route shoulders through anything.</summary>
+        /// <remarks>
+        /// Asked of the route that won rather than carried through the search,
+        /// because it is wanted once and the answer is a handful of legs. What
+        /// it drives is the log line and the flag the movement system reads,
+        /// both of which are about the march that is actually going to happen.
+        /// </remarks>
+        private static bool Presses(BattleState battle, UnitInstance unit, Route route)
+        {
+            for (int i = 1; i < route.Places.Count; i++)
+            {
+                if (!Marching.IsClearLine(
+                        battle, unit, route.Places[i - 1], route.Places[i], route.Fronts[i],
+                        leaving: true, leavingGrazeOnly: i > 1))
+                    return true;
+            }
+
+            return false;
         }
 
         private static Plan Straight(Vec2 from, Vec2 to)
@@ -337,14 +396,37 @@ namespace BattleChess.Rules
         /// </summary>
         private static float Seconds(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing arrivingOn,
-            Facing walkOn, bool inside)
+            Facing walkOn, bool inside) =>
+            Seconds(
+                Vec2.Distance(from, to),
+                Marching.AlongTheLine(from, to, walkOn),
+                MathF.Max(0.1f, battle.SpeedOf(unit)),
+                MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate)),
+                arrivingOn, walkOn, inside);
+
+        /// <summary>
+        /// The same leg, priced by a caller that already knows the four things
+        /// the convenience overload works out for itself.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// None of the four depends on the leg being priced. The pace is a
+        /// terrain sample under the regiment's own feet and the turn rate is a
+        /// look-up in its definition — both fixed for the whole plan — while the
+        /// length and the bearing are properties of two places the search has
+        /// already measured and cached.
+        /// </para>
+        /// <para>
+        /// Measured on a hundred and sixty regiments planning at once: this was
+        /// asked <b>2,827,980 times</b> in one pass, so the plan was taking that
+        /// many terrain samples, that many attribute look-ups, and that many
+        /// arc-tangents to re-derive numbers it was holding in a local variable.
+        /// </para>
+        /// </remarks>
+        private static float Seconds(
+            float length, Facing bearing, float pace, float turnRate,
+            Facing arrivingOn, Facing walkOn, bool inside)
         {
-            float length = Vec2.Distance(from, to);
-            float pace = MathF.Max(0.1f, battle.SpeedOf(unit));
-            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
-
-            Facing bearing = Marching.AlongTheLine(from, to, walkOn);
-
             float toTurn = Degrees(arrivingOn, walkOn);
             float settled = Degrees(walkOn, bearing);
 
@@ -411,13 +493,23 @@ namespace BattleChess.Rules
         /// has already chosen ground that fits.
         /// </para>
         /// </remarks>
+        [ThreadStatic]
+        private static List<UnitInstance>? _standingNear;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _turningNear;
+
         private static bool CanStandHere(BattleState battle, UnitInstance unit, Vec2 at, Facing front)
         {
             var body = new OrientedRect(at, front, unit.Footprint);
             float reach = unit.Footprint.BoundingRadius;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> all = _standingNear ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, reach, all);
+
+            for (int u = 0; u < all.Count; u++)
             {
+                UnitInstance other = all[u];
                 if (ReferenceEquals(other, unit)) continue;
                 if (other.Owner != unit.Owner) continue;
                 if (!other.IsFighting) continue;
@@ -426,7 +518,8 @@ namespace BattleChess.Rules
                 // more than once per plan — a body too far off to possibly
                 // overlap costs one subtraction and a compare instead of a
                 // polygon clip against every regiment on the field.
-                if (Vec2.Distance(other.Position, at) > reach + other.Footprint.BoundingRadius)
+                float span = reach + other.Footprint.BoundingRadius;
+                if (Vec2.DistanceSquared(other.Position, at) > span * span)
                     continue;
 
                 if (OrientedRect.OverlapFraction(body, other.Shape) > OrderSystem.GrazingTolerance)
@@ -452,8 +545,12 @@ namespace BattleChess.Rules
         {
             float reach = unit.Footprint.BoundingRadius;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> all = _turningNear ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, reach, all);
+
+            for (int u = 0; u < all.Count; u++)
             {
+                UnitInstance other = all[u];
                 if (ReferenceEquals(other, unit)) continue;
                 if (other.Owner != unit.Owner) continue;
                 if (!other.IsFighting) continue;
@@ -745,11 +842,42 @@ namespace BattleChess.Rules
         /// of the geometry was the same question asked again.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// What has already been worked out about a leg, kept across both
+        /// searches over the same places.
+        /// </summary>
+        private sealed class LegCache
+        {
+            public LegCache(int places)
+            {
+                Asked = new bool[places * places * 3];
+                Front = new Facing[Asked.Length];
+                StandNear = new bool[Asked.Length];
+                StandFar = new bool[Asked.Length];
+                Clear = new bool[Asked.Length];
+
+                // Room to turn is a property of the ground, so it is asked once
+                // for each place. Nought means not yet asked.
+                RoomToTurn = new sbyte[places];
+            }
+
+            public readonly bool[] Asked;
+            public readonly Facing[] Front;
+            public readonly bool[] StandNear;
+            public readonly bool[] StandFar;
+            public readonly bool[] Clear;
+            public readonly sbyte[] RoomToTurn;
+        }
+
         private static Route? Cheapest(
             BattleState battle, UnitInstance unit, List<Vec2> places, Vec2 destination,
-            Facing arriveOn, bool mayPress, ref int legsPriced, ref int expanded)
+            Facing arriveOn, LegCache known, ref int legsPriced, ref int expanded)
         {
             int count = places.Count;
+
+            // A local tally rather than the ref parameter, which a local
+            // function may not touch. Added to the caller's on the way out.
+            int priced = 0;
 
             // A state is a place reached on a front. Fronts are never sampled
             // round the circle: they are the ones some leg actually delivers.
@@ -759,17 +887,12 @@ namespace BattleChess.Rules
             var cameFrom = new List<int>();
             var settled = new List<bool>();
 
-            int legs = count * count * 3;
-
-            var asked = new bool[legs];
-            var legFront = new Facing[legs];
-            var legStandNear = new bool[legs];
-            var legStandFar = new bool[legs];
-            var legClear = new bool[legs];
-
-            // Room to turn is a property of the ground, so it is asked once for
-            // each place. Nought means not yet asked.
-            var roomToTurn = new sbyte[count];
+            bool[] asked = known.Asked;
+            Facing[] legFront = known.Front;
+            bool[] legStandNear = known.StandNear;
+            bool[] legStandFar = known.StandFar;
+            bool[] legClear = known.Clear;
+            sbyte[] roomToTurn = known.RoomToTurn;
 
             // Finding a state was a walk down the whole list, which came to three
             // quarters of a million list elements on one plan.
@@ -797,25 +920,32 @@ namespace BattleChess.Rules
             // estimate never overshoots, and the cheapest route found is still
             // the cheapest route there is.
             float pace = MathF.Max(0.1f, battle.SpeedOf(unit));
+            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
             var leftToWalk = new float[count];
 
             for (int i = 0; i < count; i++)
                 leftToWalk[i] = Vec2.Distance(places[i], destination) / pace;
+
+            var frontier = new List<(float Reckoned, int State)>();
+            void Offer(int state, float total) => Push(frontier, (total + leftToWalk[stateAt[state]], state));
+
+            Offer(0, 0f);
 
             while (true)
             {
                 int at = -1;
                 float nearest = float.MaxValue;
 
-                for (int i = 0; i < stateAt.Count; i++)
+                while (frontier.Count > 0)
                 {
-                    if (settled[i]) continue;
+                    (float Reckoned, int State) top = Pop(frontier);
 
-                    float reckoned = best[i] + leftToWalk[stateAt[i]];
-                    if (reckoned >= nearest) continue;
+                    if (settled[top.State]) continue;
+                    if (top.Reckoned > best[top.State] + leftToWalk[stateAt[top.State]] + 1e-4f) continue;
 
-                    nearest = reckoned;
-                    at = i;
+                    at = top.State;
+                    nearest = top.Reckoned;
+                    break;
                 }
 
                 if (at < 0 || nearest >= arrivedCost) break;
@@ -826,6 +956,37 @@ namespace BattleChess.Rules
                 int from = stateAt[at];
                 Vec2 here = places[from];
                 Facing on = stateOn[at];
+
+                void Ask(int leg)
+                {
+                    if (asked[leg]) return;
+
+                    int k = leg % 3;
+                    int a = leg / 3 / count;
+                    int b = leg / 3 % count;
+
+                    Vec2 one = places[a];
+                    Vec2 other = places[b];
+
+                    // unit.Facing only stands in for a leg of no length, and
+                    // those are skipped below, so this bearing and everything
+                    // drawn from it is a property of the two places alone.
+                    Facing bearing = Marching.AlongTheLine(one, other, unit.Facing);
+
+                    Facing walking =
+                        k == 0 ? bearing
+                        : k == 1 ? Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f)
+                        : Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f);
+
+                    legFront[leg] = walking;
+                    legStandNear[leg] = CanStandHere(battle, unit, one, walking);
+                    legStandFar[leg] = CanStandHere(battle, unit, other, walking);
+                    legClear[leg] = Marching.IsClearLine(
+                        battle, unit, one, other, walking, leaving: true, leavingGrazeOnly: true);
+
+                    asked[leg] = true;
+                    priced++;
+                }
 
                 for (int to = 0; to < count; to++)
                 {
@@ -857,32 +1018,36 @@ namespace BattleChess.Rules
                     // Face-on, or side-on either way. Three fronts, because those
                     // are the three a body of men actually walks a line on: front
                     // first, or presenting a flank to thread something narrow.
-                    for (int k = 0; k < 3; k++)
+                    int first = (from * count + to) * 3;
+
+                    Ask(first);
+
+                    // Face-on serves, so the flanks are not asked about.
+                    //
+                    // The two side-on presentations exist for one purpose: to
+                    // put the regiment's narrow dimension across a gap its front
+                    // will not fit through. Where the front fits, they are not a
+                    // cheaper way of doing the same thing — walking sideways
+                    // costs the alignment penalty every metre — they are only
+                    // two more fronts to reach the same place on, and each one
+                    // is a state, three geometry questions, and every leg
+                    // leading out of it.
+                    //
+                    // Measured before this: 1,964 candidate places carrying
+                    // 9,018 states, four and a half fronts to a place, on fields
+                    // where the overwhelming majority of legs run across open
+                    // ground. This is the width-or-length question asked of the
+                    // leg, where it is a property of two points and some
+                    // geometry, instead of asked of the search, where it is a
+                    // dimension.
+                    int presentations =
+                        legClear[first] && legStandNear[first] && legStandFar[first] ? 1 : 3;
+
+                    for (int k = 0; k < presentations; k++)
                     {
-                        int leg = (from * count + to) * 3 + k;
+                        int leg = first + k;
 
-                        if (!asked[leg])
-                        {
-                            // unit.Facing only stands in for a leg of no length,
-                            // and those are skipped above, so this bearing and
-                            // everything drawn from it is a property of the two
-                            // places alone.
-                            Facing bearing = Marching.AlongTheLine(here, there, unit.Facing);
-
-                            Facing walking =
-                                k == 0 ? bearing
-                                : k == 1 ? Facing.FromRadians(bearing.Radians + MathF.PI * 0.5f)
-                                : Facing.FromRadians(bearing.Radians - MathF.PI * 0.5f);
-
-                            legFront[leg] = walking;
-                            legStandNear[leg] = CanStandHere(battle, unit, here, walking);
-                            legStandFar[leg] = CanStandHere(battle, unit, there, walking);
-                            legClear[leg] = Marching.IsClearLine(
-                                battle, unit, here, there, walking, leaving: true, leavingGrazeOnly: true);
-
-                            asked[leg] = true;
-                            legsPriced++;
-                        }
+                        Ask(leg);
 
                         Facing walkOn = legFront[leg];
 
@@ -904,7 +1069,10 @@ namespace BattleChess.Rules
                             ? Marching.IsClearLine(battle, unit, here, there, walkOn, leaving: true)
                             : legClear[leg];
 
-                        if (!clear && !mayPress) continue;
+                        // Not a gate any more. A leg that presses is one the
+                        // search may take; what stops it taking one lightly is
+                        // that it costs.
+                        float toll = clear ? 0f : ShoulderTollSeconds;
 
                         // Turning above the cap means turning on the spot, and
                         // there has to be room for it where it stands.
@@ -916,10 +1084,11 @@ namespace BattleChess.Rules
                             if (roomToTurn[from] < 0) continue;
                         }
 
-                        float seconds = Seconds(battle, unit, here, there, on, walkOn, inside: !clear);
+                        float seconds = Seconds(
+                            apart, legFront[first], pace, turnRate, on, walkOn, inside: !clear);
                         if (seconds < 0f) continue;
 
-                        float total = best[at] + seconds;
+                        float total = best[at] + seconds + toll;
 
                         if (to == 1)
                         {
@@ -927,8 +1096,6 @@ namespace BattleChess.Rules
                             // it was ordered to arrive on. Counting it here is
                             // what stops a route that arrives conveniently but
                             // pointing the wrong way from winning on paper.
-                            float turnRate = MathF.Max(1f, unit.Def.Get(UnitAttributes.TurnRate));
-
                             total += Degrees(walkOn, arriveOn)
                                      / (turnRate * MovementSystem.PivotBonusWhileHalted);
 
@@ -950,22 +1117,29 @@ namespace BattleChess.Rules
 
                         if (!index.TryGetValue(key, out int state))
                         {
-                            index[key] = stateAt.Count;
+                            state = stateAt.Count;
+                            index[key] = state;
 
                             stateAt.Add(to);
                             stateOn.Add(walkOn);
                             best.Add(total);
                             cameFrom.Add(at);
                             settled.Add(false);
+
+                            Offer(state, total);
                         }
                         else if (total < best[state] && !settled[state])
                         {
                             best[state] = total;
                             cameFrom[state] = at;
+
+                            Offer(state, total);
                         }
                     }
                 }
             }
+
+            legsPriced += priced;
 
             if (arrivedFrom < 0) return null;
 
@@ -983,6 +1157,48 @@ namespace BattleChess.Rules
 
             return backwards.Count < 2 ? null : new Route(backwards, fronts, arrivedCost);
         }
+
+        private static void Push(List<(float Reckoned, int State)> heap, (float Reckoned, int State) item)
+        {
+            heap.Add(item);
+            int i = heap.Count - 1;
+
+            while (i > 0)
+            {
+                int parent = (i - 1) / 2;
+                if (!Before(heap[i], heap[parent])) break;
+                (heap[i], heap[parent]) = (heap[parent], heap[i]);
+                i = parent;
+            }
+        }
+
+        private static (float Reckoned, int State) Pop(List<(float Reckoned, int State)> heap)
+        {
+            (float Reckoned, int State) top = heap[0];
+            int last = heap.Count - 1;
+            heap[0] = heap[last];
+            heap.RemoveAt(last);
+
+            int i = 0;
+            while (true)
+            {
+                int left = i * 2 + 1;
+                if (left >= heap.Count) break;
+
+                int right = left + 1;
+                int best = right < heap.Count && Before(heap[right], heap[left]) ? right : left;
+
+                if (!Before(heap[best], heap[i])) break;
+
+                (heap[i], heap[best]) = (heap[best], heap[i]);
+                i = best;
+            }
+
+            return top;
+        }
+
+        private static bool Before((float Reckoned, int State) a, (float Reckoned, int State) b) =>
+            a.Reckoned != b.Reckoned ? a.Reckoned < b.Reckoned : a.State < b.State;
 
         /// <summary>How many steps the circle is cut into when naming a front.</summary>
         /// <remarks>
