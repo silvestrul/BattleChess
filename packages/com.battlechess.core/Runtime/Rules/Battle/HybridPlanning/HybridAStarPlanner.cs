@@ -247,6 +247,8 @@ namespace BattleChess.Rules.HybridPlanning
             float topSpeedMetresPerSecond, float turnRateDegreesPerSecond,
             int? expansionBudget = null, float? heuristicWeight = null)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.HybridSearch);
+
             int budget = expansionBudget ?? MaxExpansions;
             float weight = heuristicWeight ?? HeuristicWeight;
 
@@ -257,7 +259,9 @@ namespace BattleChess.Rules.HybridPlanning
             // gap a point could. See HybridObstacleField's own remarks for
             // why both layers are kept and the larger answer taken.
             float inRadius = MathF.Min(moverFootprint.HalfWidth, moverFootprint.HalfDepth);
-            HybridObstacleField field = HybridObstacleField.Build(start, goal, obstacles, inRadius);
+            HybridObstacleField field;
+            using (PlanningProfile.Measure(PlanningProfile.Step.HybridField))
+                field = HybridObstacleField.Build(start, goal, obstacles, inRadius);
 
             // How far any one primitive can carry the mover's centre. Used
             // to cull the obstacle list once per state rather than once per
@@ -266,7 +270,7 @@ namespace BattleChess.Rules.HybridPlanning
             foreach (HybridPrimitive primitive in primitives)
                 reach = MathF.Max(reach, MathF.Abs(primitive.Advance));
 
-            var standing = new Standing(obstacles.Count);
+            var standing = new Standing(obstacles);
 
             var nodes = new List<Node>
             {
@@ -275,7 +279,8 @@ namespace BattleChess.Rules.HybridPlanning
             var bestAtBin = new Dictionary<(int, int, int), float>();
             var open = new MinHeap();
             float startHeuristic = Heuristic(
-                start, startHeading, goal, topSpeedMetresPerSecond, turnRateDegreesPerSecond, field);
+                start, startHeading, goal, goalHeading,
+                topSpeedMetresPerSecond, turnRateDegreesPerSecond, field);
             open.Push(0, weight * startHeuristic, startHeuristic);
             bestAtBin[BinOf(start, startHeading)] = 0f;
 
@@ -365,7 +370,8 @@ namespace BattleChess.Rules.HybridPlanning
                     });
 
                     float h = Heuristic(
-                        landed.position, landed.heading, goal, topSpeedMetresPerSecond, turnRateDegreesPerSecond, field);
+                        landed.position, landed.heading, goal, goalHeading,
+                        topSpeedMetresPerSecond, turnRateDegreesPerSecond, field);
                     open.Push(nodes.Count - 1, g + weight * h, h);
                 }
             }
@@ -430,7 +436,8 @@ namespace BattleChess.Rules.HybridPlanning
         /// </para>
         /// </remarks>
         private static float Heuristic(
-            Vec2 from, Facing heading, Vec2 goal, float topSpeedMetresPerSecond, float turnRateDegreesPerSecond,
+            Vec2 from, Facing heading, Vec2 goal, Facing? goalHeading,
+            float topSpeedMetresPerSecond, float turnRateDegreesPerSecond,
             HybridObstacleField field)
         {
             float straight = Vec2.Distance(from, goal);
@@ -445,8 +452,29 @@ namespace BattleChess.Rules.HybridPlanning
                 return byDistance;
 
             float offBy = Facing.AbsoluteDelta(heading, Facing.FromVector(towards));
+            float turn = HybridPrimitives.SecondsToPivot(offBy, turnRateDegreesPerSecond);
 
-            return byDistance + HybridPrimitives.SecondsToPivot(offBy, turnRateDegreesPerSecond);
+            // The front the goal was asked for, which this used to ignore
+            // entirely — while AtGoal insists on it. Every state near the goal
+            // therefore scored the same whichever way it pointed, so the search
+            // had to expand all forty-eight heading bins around the finish to
+            // discover the turn it would need. Told about it, it can prefer the
+            // ones already coming round.
+            //
+            // Charged only as the travel runs out. Far away there is ground left
+            // to turn during and the term would be a fiction; within a few
+            // seconds of arriving there is not.
+            if (goalHeading.HasValue)
+            {
+                float toFinish = Facing.AbsoluteDelta(heading, goalHeading.Value);
+                float closing = 1f - MathF.Min(1f, straight / MathF.Max(1f, topSpeedMetresPerSecond * 4f));
+
+                turn = MathF.Max(
+                    turn,
+                    HybridPrimitives.SecondsToPivot(toFinish, turnRateDegreesPerSecond) * closing);
+            }
+
+            return byDistance + turn;
         }
 
         private static bool AtGoal(Vec2 position, Facing heading, Vec2 goal, Facing? goalHeading)
@@ -514,11 +542,27 @@ namespace BattleChess.Rules.HybridPlanning
             /// <summary>Separation at the previous sampled pose, while one primitive is being walked.</summary>
             public readonly float[] Behind;
 
-            public Standing(int obstacles)
+            /// <summary>
+            /// Each body's circumscribed radius, worked out once for the whole
+            /// search rather than per pose. It was a square root inside the
+            /// broad phase, taken millions of times for a number that cannot
+            /// change while the plan runs.
+            /// </summary>
+            public readonly float[] Circum;
+
+            public Standing(IReadOnlyList<HybridBox> obstacles)
             {
-                How = new Contact[obstacles];
-                Depth = new float[obstacles];
-                Behind = new float[obstacles];
+                How = new Contact[obstacles.Count];
+                Depth = new float[obstacles.Count];
+                Behind = new float[obstacles.Count];
+                Circum = new float[obstacles.Count];
+
+                for (int i = 0; i < obstacles.Count; i++)
+                {
+                    HybridBox body = obstacles[i];
+                    Circum[i] = MathF.Sqrt(
+                        body.HalfWidth * body.HalfWidth + body.HalfDepth * body.HalfDepth);
+                }
             }
         }
 
@@ -533,6 +577,8 @@ namespace BattleChess.Rules.HybridPlanning
             Vec2 at, Facing heading, Footprint moverFootprint, IReadOnlyList<HybridBox> obstacles,
             float reach, Standing standing, Tally tally)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.HybridStock);
+
             standing.Nearby.Clear();
 
             HybridBox trueSize = HybridBox.For(at, heading, moverFootprint);
@@ -543,7 +589,7 @@ namespace BattleChess.Rules.HybridPlanning
             for (int i = 0; i < obstacles.Count; i++)
             {
                 HybridBox body = obstacles[i];
-                float theirs = MathF.Sqrt(body.HalfWidth * body.HalfWidth + body.HalfDepth * body.HalfDepth);
+                float theirs = standing.Circum[i];
 
                 // Every primitive from here moves the mover's centre by at
                 // most `reach`, and every pose it strikes lies within `mine`
@@ -612,6 +658,8 @@ namespace BattleChess.Rules.HybridPlanning
             HybridPrimitive primitive, Vec2 from, Facing heading, Footprint moverFootprint,
             IReadOnlyList<HybridBox> obstacles, Standing standing, Tally tally)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.HybridClear);
+
             float circumradius = moverFootprint.BoundingRadius + ClearanceMarginMetres;
 
             List<int> nearby = standing.Nearby;
@@ -621,9 +669,15 @@ namespace BattleChess.Rules.HybridPlanning
                 standing.Behind[i] = standing.Depth[i];
             }
 
-            foreach ((Vec2 position, Facing sampledHeading) in
-                     primitive.Sweep(from, heading, MaxSweepSpacingMetres, circumradius))
+            // Walked here rather than with foreach over Sweep, which allocates
+            // an iterator for every one of the sixty thousand primitives a
+            // single march tries.
+            int samples = primitive.SampleCount(MaxSweepSpacingMetres, circumradius);
+
+            for (int i = 1; i <= samples; i++)
             {
+                (Vec2 position, Facing sampledHeading) = primitive.PoseAt(from, heading, (float)i / samples);
+
                 tally.SweepSamples++;
 
                 if (!PoseIsClear(position, sampledHeading, moverFootprint, obstacles, standing, tally))
@@ -640,15 +694,41 @@ namespace BattleChess.Rules.HybridPlanning
             List<int> nearby = standing.Nearby;
             if (nearby.Count == 0) return true;
 
+            PlanningProfile.Tally(PlanningProfile.Step.HybridPose);
+
             HybridBox trueSize = HybridBox.For(position, heading, moverFootprint);
             HybridBox withMargin = HybridBox.For(position, heading, moverFootprint, ClearanceMarginMetres);
+
+            // The mover's own circumscribed radius, which bounds every corner of
+            // both boxes above however they point.
+            float mine = moverFootprint.BoundingRadius + ClearanceMarginMetres;
 
             for (int n = 0; n < nearby.Count; n++)
             {
                 int i = nearby[n];
                 HybridBox body = obstacles[i];
 
+                // Two circles before two rectangles.
+                //
+                // Nearby is chosen once per expansion and bounds what any
+                // primitive from there *could* reach, so at any one pose most of
+                // it is nowhere near. Every one of them was still getting a full
+                // separating-axis test: measured at play scale, 6.621 expansions
+                // and 59.587 primitives an order, each primitive sampled six to
+                // ten times against a dozen bodies — some five million rectangle
+                // tests for one march.
+                //
+                // Circumscribed circles bound both boxes whichever way they
+                // point, so a pair too far apart to touch is turned back by one
+                // subtraction and a compare, and the answer is unchanged.
+                float apart = mine + standing.Circum[i];
+
+                if (Vec2.DistanceSquared(position, body.Centre) > apart * apart &&
+                    standing.How[i] == Contact.Apart)
+                    continue;
+
                 tally.OverlapTests++;
+                PlanningProfile.Tally(PlanningProfile.Step.HybridOverlap);
 
                 switch (standing.How[i])
                 {

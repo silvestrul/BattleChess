@@ -31,19 +31,44 @@ namespace BattleChess.Rules.HybridPlanning
         public readonly float HalfWidth;
         public readonly float HalfDepth;
 
+        private readonly Vec2 _forward;
+        private readonly Vec2 _right;
+        private readonly float _circumradius;
+
         public HybridBox(Vec2 centre, Facing heading, float halfWidth, float halfDepth)
         {
             Centre = centre;
             Heading = heading;
             HalfWidth = halfWidth;
             HalfDepth = halfDepth;
+
+            // Worked out once here rather than on every read.
+            //
+            // Forward and Right were computed properties, so each was a cosine
+            // and a sine every time it was touched — and Overlap touches them
+            // four times directly and sixteen more through ProjectedRadius, for
+            // some forty trigonometric calls per rectangle pair. A single march
+            // runs millions of those pairs. The circumradius was two square
+            // roots on the same path, for a number fixed at construction.
+            //
+            // The same fix the review branch made to OrientedRect, in the one
+            // planner that shares none of its code and so never got it.
+            float cos = MathF.Cos(heading.Radians);
+            float sin = MathF.Sin(heading.Radians);
+
+            _forward = new Vec2(cos, sin);
+            _right = new Vec2(sin, -cos);
+            _circumradius = MathF.Sqrt(halfWidth * halfWidth + halfDepth * halfDepth);
         }
+
+        /// <summary>Radius of the circle that fully contains this box.</summary>
+        public float Circumradius => _circumradius;
 
         public static HybridBox For(Vec2 centre, Facing heading, Footprint footprint, float clearance = 0f) =>
             new HybridBox(centre, heading, footprint.HalfWidth + clearance, footprint.HalfDepth + clearance);
 
-        private Vec2 Forward => Heading.ToVector();
-        private Vec2 Right => Heading.RightVector();
+        private Vec2 Forward => _forward;
+        private Vec2 Right => _right;
 
         public void Corners(Span<Vec2> into)
         {
@@ -132,8 +157,7 @@ namespace BattleChess.Rules.HybridPlanning
         {
             Vec2 between = b.Centre - a.Centre;
 
-            float reach = MathF.Sqrt(a.HalfWidth * a.HalfWidth + a.HalfDepth * a.HalfDepth)
-                        + MathF.Sqrt(b.HalfWidth * b.HalfWidth + b.HalfDepth * b.HalfDepth);
+            float reach = a._circumradius + b._circumradius;
             if (between.LengthSquared > (reach + tolerance) * (reach + tolerance))
                 return false;
 

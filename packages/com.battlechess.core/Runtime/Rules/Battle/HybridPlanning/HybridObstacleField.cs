@@ -131,6 +131,20 @@ namespace BattleChess.Rules.HybridPlanning
         {
             var blocked = new bool[columns * rows];
 
+            // Only the cells a body could possibly cover, not every cell on the
+            // field for every body.
+            //
+            // This walked the whole grid once per obstacle. The grid is about
+            // 300 cells across — a hundred and fifty over the straight line and
+            // as much again in margin — so ninety thousand cells, times every
+            // regiment, times the two fills below. Thirteen regiments came to
+            // over two million point-in-box tests, and they were paid before
+            // the search ran at all: a march whose answer was the straight line
+            // cost 19 ms and tried not one primitive.
+            //
+            // A regiment is forty metres by twenty and a cell is four, so it
+            // covers about fifty cells. Bounding the sweep by the body's own
+            // extent is the same answer for about a thousandth of the work.
             for (int o = 0; o < obstacles.Count; o++)
             {
                 HybridBox body = obstacles[o];
@@ -138,8 +152,19 @@ namespace BattleChess.Rules.HybridPlanning
                     body.Centre, body.Heading,
                     body.HalfWidth + inflateByMetres, body.HalfDepth + inflateByMetres);
 
-                for (int row = 0; row < rows; row++)
-                for (int column = 0; column < columns; column++)
+                // Circumscribed radius: the widest the swollen box can reach
+                // from its own centre, whichever way it points. Provably safe
+                // rather than tight, which is what a broad phase has to be.
+                float reach = MathF.Sqrt(
+                    swollen.HalfWidth * swollen.HalfWidth + swollen.HalfDepth * swollen.HalfDepth);
+
+                int fromColumn = Math.Max(0, (int)MathF.Floor((body.Centre.X - reach - minX) / cellMetres));
+                int toColumn = Math.Min(columns - 1, (int)MathF.Ceiling((body.Centre.X + reach - minX) / cellMetres));
+                int fromRow = Math.Max(0, (int)MathF.Floor((body.Centre.Y - reach - minY) / cellMetres));
+                int toRow = Math.Min(rows - 1, (int)MathF.Ceiling((body.Centre.Y + reach - minY) / cellMetres));
+
+                for (int row = fromRow; row <= toRow; row++)
+                for (int column = fromColumn; column <= toColumn; column++)
                 {
                     int index = row * columns + column;
                     if (blocked[index]) continue;

@@ -111,13 +111,30 @@ namespace BattleChess.Rules.HybridPlanning
         /// closing it.
         /// </para>
         /// </remarks>
-        public IEnumerable<(Vec2 position, Facing heading)> Sweep(
-            Vec2 from, Facing heading, float maxSpacingMetres, float circumradiusMetres)
+        /// <summary>
+        /// How many poses <see cref="Sweep"/> would strike, so a caller can walk
+        /// them itself with <see cref="PoseAt"/>.
+        /// </summary>
+        /// <remarks>
+        /// <b>Why the caller does the walking.</b> <c>Sweep</c> is an iterator
+        /// method, so every <c>foreach</c> over it allocates a compiler-built
+        /// object — and the collision check calls it once per primitive, some
+        /// sixty thousand times for a single march. That is the same litter
+        /// <b>M40</b> found in <c>UnitsOnField</c>, in the one planner M40 never
+        /// looked at because it shares no code with the others.
+        /// </remarks>
+        public int SampleCount(float maxSpacingMetres, float circumradiusMetres)
         {
             float cornerArc = MathF.Abs(TurnRadians) * circumradiusMetres;
             float travelled = MathF.Max(MathF.Abs(Advance), cornerArc);
 
-            int samples = Math.Max(2, (int)MathF.Ceiling(travelled / maxSpacingMetres));
+            return Math.Max(2, (int)MathF.Ceiling(travelled / maxSpacingMetres));
+        }
+
+        public IEnumerable<(Vec2 position, Facing heading)> Sweep(
+            Vec2 from, Facing heading, float maxSpacingMetres, float circumradiusMetres)
+        {
+            int samples = SampleCount(maxSpacingMetres, circumradiusMetres);
 
             for (int i = 1; i <= samples; i++)
                 yield return PoseAt(from, heading, (float)i / samples);

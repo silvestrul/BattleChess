@@ -114,6 +114,21 @@ namespace BattleChess.Contracts
             /// <summary>String-pulling the hex route back into a few waypoints.</summary>
             PathSmooth,
 
+            /// <summary>The whole hybrid lattice search — the top of its own tree.</summary>
+            HybridSearch,
+
+            /// <summary>Flood-filling the obstacle field the hybrid steers by.</summary>
+            HybridField,
+
+            /// <summary>Working out which bodies are near, once per expansion.</summary>
+            HybridStock,
+
+            /// <summary>Sweeping one motion primitive against the bodies near it.</summary>
+            HybridClear,
+
+            /// <summary>Estimating what is left to travel, from one state.</summary>
+            HybridHeuristic,
+
             /// <summary>Swept-rectangle first contact. Counted only.</summary>
             SweepTest,
 
@@ -122,6 +137,12 @@ namespace BattleChess.Contracts
 
             /// <summary>One terrain lookup at one point. Counted only.</summary>
             TerrainLookup,
+
+            /// <summary>One pose of the mover, checked against everything near. Counted only.</summary>
+            HybridPose,
+
+            /// <summary>One rectangle against one rectangle, by separating axis. Counted only.</summary>
+            HybridOverlap,
 
             /// <summary>Not a step. The number of them.</summary>
             Count,
