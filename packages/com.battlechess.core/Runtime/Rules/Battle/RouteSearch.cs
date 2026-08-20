@@ -63,6 +63,26 @@ namespace BattleChess.Rules
         private const float MarginMetres = 4f;
 
         /// <summary>
+        /// How far outside a blocker its candidate places sit, on top of the
+        /// mover's own half-span.
+        /// </summary>
+        /// <remarks>
+        /// Was four metres, which hugged the blocker. Measured against the
+        /// hybrid — which may bend anywhere — the route the search wants bends a
+        /// mean <b>15,8 m outside</b> the nearest place four metres offered, and
+        /// forcing the hybrid's own route onto those places threw its whole
+        /// advantage away: 100,9 s against its own 88,2, and worse than the
+        /// search's own 99,6. So the graph was the limit, not the search over it.
+        /// <para>
+        /// Swept: 4 m gives 99,6 s a route, 10 gives 99,2, <b>20 gives 92,6</b>,
+        /// 30 gives 94,0, 45 gives 93,8 and 60 gives 98,7. Keeping a tight ring
+        /// as well as a wide one was tried and is worse than the wide one alone
+        /// (97,9), for more places and more time.
+        /// </para>
+        /// </remarks>
+
+
+        /// <summary>
         /// How many candidate places the search will consider at most.
         /// </summary>
         /// <remarks>
@@ -249,14 +269,37 @@ namespace BattleChess.Rules
 
             Route found = Smooth(battle, unit, route.Value, arriveOn);
 
-            float walked = 0f;
-            for (int i = 1; i < found.Places.Count; i++)
-                walked += Vec2.Distance(found.Places[i - 1], found.Places[i]);
-
-            if (walked <= Vec2.Distance(unit.Position, destination) * WanderingEnough)
-                return Assemble(found, pressed: false, effort);
-
             float foundPrice = PriceOf(battle, unit, found.Places, arriveOn);
+
+            // Both sides of this in seconds, which is the only currency the rest
+            // of the model uses.
+            //
+            // It was metres: "did the route wander more than a quarter past the
+            // straight line". A route that wanders is dear, but so is one that
+            // does not — turning costs seconds and no ground at all, so a bend
+            // taken on the spot is free by the old test and can double the time.
+            // Measured in play: a march of 160 m straight came back as 169 m and
+            // 93 s, sailed through the metres gate at 1,06, and was walked
+            // without ever being compared — while the ladder held a 176 m route
+            // at 46 s. Across 240 orders on the bench fields the ladder held a
+            // cheaper answer than the one walked in a third of them.
+            //
+            // The reference is the same function on the straight line rather
+            // than a distance over a pace, so the two sides are priced by one
+            // routine and cannot drift apart (W5) — and so the wheel a route
+            // needs is charged on both sides instead of only one.
+            Vec2[] asTheCrowFlies = _straightLine ??= new Vec2[2];
+            asTheCrowFlies[0] = unit.Position;
+            asTheCrowFlies[1] = destination;
+
+            float straightPrice = PriceOf(battle, unit, asTheCrowFlies, arriveOn);
+
+            // A straight line nothing can price — it starts inside somebody, so
+            // the pace is nil — is no reference at all, and the safe reading of
+            // "no reference" is to ask for the second opinion.
+            if (foundPrice >= 0f && straightPrice >= 0f &&
+                foundPrice <= straightPrice * DearEnoughToAskAgain)
+                return Assemble(found, pressed: false, effort);
 
             RouteEffort alsoAsked = effort.WithLadder();
             Plan ladder = FromLadder(battle, unit, pathfinder, destination, arriveOn, alsoAsked);
@@ -566,10 +609,20 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// How far past the straight line a route may wander before a second
-        /// opinion is worth the millisecond it costs.
+        /// How much dearer than walking straight there a route may be before a
+        /// second opinion is worth the millisecond it costs.
         /// </summary>
-        private const float WanderingEnough = 1.25f;
+        /// <remarks>
+        /// Carried over from the metres version it replaced, and it should not
+        /// be assumed to be the right number: a quarter more ground and a
+        /// quarter more time are not the same tolerance, and this one now fires
+        /// on wheels the old one could not see. A designer's number
+        /// (<b>W4</b>), left where it was until it is chosen deliberately.
+        /// </remarks>
+        private const float DearEnoughToAskAgain = 1.25f;
+
+        /// <summary>Two points, reused, so pricing the straight line litters nothing.</summary>
+        [ThreadStatic] private static Vec2[]? _straightLine;
 
         /// <summary>
         /// The ladder's answer, if it has a clean one, as a plan.

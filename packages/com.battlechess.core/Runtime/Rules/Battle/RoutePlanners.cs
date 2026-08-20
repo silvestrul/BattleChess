@@ -91,7 +91,31 @@ namespace BattleChess.Rules
         /// or not the rest of the pass lands.
         /// </para>
         /// </remarks>
-        public static IRoutePlanner Default { get; } = TheTangents;
+        /// <summary>
+        /// <b>TEMPORARY — the hybrid is on trial as the default.</b> Put back to
+        /// <see cref="TheTangents"/> when the trial ends.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Changed here rather than behind a debug toggle on purpose. Both
+        /// re-plan sites in <c>OrderSystem</c> call <c>Marching.PlanTo</c>
+        /// without naming a planner, so a toggle on the *order* would give a
+        /// regiment a hybrid route and then re-plan it with the tangents search
+        /// the moment it was held up — which is not a trial of anything.
+        /// </para>
+        /// <para>
+        /// What to expect, measured: <b>1 000 to 2 400 ms an order</b> against
+        /// the tangents search's 1,4 to 1,9 in a Release build, so a wing order
+        /// will stop the game for tens of seconds. And it is the only planner
+        /// that fails to route at all — 62, 72 and 48 of 80 on the three bench
+        /// fields, where every other planner returns 80 of 80. A regiment that
+        /// simply does not move is the expected failure, not a new bug.
+        /// </para>
+        /// </remarks>
+        public static IRoutePlanner Default { get; } = TheTangents;   // TRIAL: TheHybridAStar
+
+        /// <summary>What <see cref="Default"/> is when the trial above is over.</summary>
+        public static IRoutePlanner SettledDefault { get; } = TheTangents;
 
         private sealed class Search : IRoutePlanner
         {
