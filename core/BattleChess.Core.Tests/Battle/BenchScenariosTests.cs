@@ -52,7 +52,7 @@ namespace BattleChess.Tests.Battle
             new object[] { "brokencountry", "the ground" },
         };
 
-        private static BattleState Load(string key)
+        internal static BattleState Load(string key)
         {
             string root = TestContent.Root;
             ITerrainCatalogue terrain = TestContent.Terrain;
@@ -71,7 +71,7 @@ namespace BattleChess.Tests.Battle
         /// Where each regiment is sent: diagonally across to the far flank, so
         /// that the eighty marches cross rather than run parallel.
         /// </summary>
-        private static Vec2 OrderFor(BattleState battle, UnitInstance unit)
+        internal static Vec2 OrderFor(BattleState battle, UnitInstance unit)
         {
             MapBounds bounds = battle.Terrain.Bounds;
 
