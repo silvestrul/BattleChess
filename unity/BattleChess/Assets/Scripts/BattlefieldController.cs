@@ -1704,7 +1704,7 @@ namespace BattleChess.Unity
         /// </para>
         /// <para>
         /// Draws the ladder's answer and the search's answer as two separate
-        /// lines when <see cref="DebugOptions.PreviewBothPlanners"/> is on,
+        /// lines when <see cref="DebugOptions.PreviewEveryPlanner"/> is on,
         /// because the disagreement between them is usually the thing worth
         /// looking at, and marks every place <see cref="RouteSearch"/> considered
         /// bending at — not only the ones its winning route used — since a
@@ -1747,27 +1747,129 @@ namespace BattleChess.Unity
             // ground.
             Facing arriveOn = Marching.AlongTheLine(unit.Position, destination, unit.Facing);
 
-            Plan search = Marching.PlanTo(
-                _battle, unit, pathfinder, destination,
-                planner: RoutePlanners.TheSearch, arriveOn: arriveOn);
+            string key = DrawEveryPlanner(unit, destination, pathfinder, arriveOn, report: true);
 
-            _overlay.SetSearchPreview(search.Path.Waypoints);
-            ReportPreview("search", unit, search);
+            _status = $"Previewing {unit.Def.DisplayName}'s route — nothing moved. " + key +
+                       (_options.ShowRouteCandidates ? "  Cyan crosses: candidate places." : string.Empty);
+        }
 
-            if (_options.PreviewBothPlanners)
+        /// <summary>
+        /// Plans the same march with every planner asked for and draws each in
+        /// its own colour. Returns the colour key, for the status line.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Called for a previewed click <i>and</i> for a real order, because the
+        /// question "why did it go that way" is asked about marches that
+        /// happened far more often than about ones being rehearsed. The route
+        /// actually walked is drawn by the ordinary route overlay; these are
+        /// what the other planners would have answered.
+        /// </para>
+        /// <para>
+        /// Not for group orders. Four extra plans is nothing for one regiment
+        /// and is forty times that for a wing, which is the stutter the whole
+        /// planning budget exists to avoid — and it would be a stutter this
+        /// debug view invented.
+        /// </para>
+        /// </remarks>
+        /// <param name="already">
+        /// The default planner's answer, when the caller has already worked it
+        /// out. Without this a real order plans the default twice — which was
+        /// merely wasteful at a millisecond and is unusable while the default is
+        /// the hybrid at a second and more.
+        /// </param>
+        private string DrawEveryPlanner(
+            UnitInstance unit, Vec2 destination, IPathfinder pathfinder, Facing arriveOn, bool report,
+            Plan? already = null)
+        {
+            // Which planners to ask. The default is always asked and always
+            // drawn, because it is the only one a real order will use — a
+            // preview that leaves it out is a preview of something the game
+            // does not do, which is what this used to be: it drew TheSearch
+            // while orders went through TheTangents.
+            var asking = new List<int>();
+
+            for (int i = 0; i < RoutePlanners.All.Count; i++)
             {
-                Plan ladder = Marching.PlanTo(
-                    _battle, unit, pathfinder, destination,
-                    planner: RoutePlanners.TheLadder, arriveOn: arriveOn);
+                IRoutePlanner planner = RoutePlanners.All[i];
 
-                _overlay.SetLadderPreview(ladder.Path.Waypoints);
-                ReportPreview("ladder", unit, ladder);
+                if (ReferenceEquals(planner, RoutePlanners.Default))
+                {
+                    asking.Add(i);
+                    continue;
+                }
+
+                if (!_options.PreviewEveryPlanner) continue;
+
+                // The hybrid is a second and more for a single order, and a
+                // preview pays that inside one frame. Asked only by name.
+                if (ReferenceEquals(planner, RoutePlanners.TheHybridAStar) && !_options.PreviewTheHybrid)
+                    continue;
+
+                asking.Add(i);
             }
 
-            _status = $"Previewing {unit.Def.DisplayName}'s route — nothing moved. " +
-                       (_options.PreviewBothPlanners ? "Orange: ladder. Green: search." : "Green: search.") +
-                       (_options.ShowRouteCandidates ? " Cyan crosses: candidate places." : string.Empty);
+            var key = new System.Text.StringBuilder();
+
+            foreach (int i in asking)
+            {
+                IRoutePlanner planner = RoutePlanners.All[i];
+                bool isDefault = ReferenceEquals(planner, RoutePlanners.Default);
+
+                bool reused = isDefault && already.HasValue;
+
+                var spent = System.Diagnostics.Stopwatch.StartNew();
+
+                Plan plan = reused
+                    ? already!.Value
+                    : Marching.PlanTo(
+                        _battle, unit, pathfinder, destination, planner: planner, arriveOn: arriveOn);
+
+                spent.Stop();
+
+                _overlay.AddRoutePreview(i, plan.Path.Waypoints);
+
+                if (report)
+                {
+                    _console.Info("Preview",
+                        $"{planner.Name} — {ColourName(i)} — " +
+                        (plan.Path.Found
+                            ? $"{plan.Path.Waypoints.Count} waypoints, {plan.Path.Distance:0} m, " +
+                              $"{Marching.SecondsToWalk(_battle, unit, plan.Path.Waypoints, plan.Hold):0} s" +
+                              (plan.PressedThrough ? ", pressing through its own" : string.Empty)
+                            : $"no route — {plan.Path.FailureDetail}") +
+                        (reused
+                            ? "  <- this is the one it will walk."
+                            : $" — worked out in {spent.Elapsed.TotalMilliseconds:0.0} ms" +
+                              (isDefault ? "  <- this is the one it will walk." : ".")),
+                        unit.Id);
+                }
+
+                if (key.Length > 0) key.Append("  ");
+                key.Append(ColourName(i)).Append(": ").Append(planner.Name);
+
+                if (isDefault) key.Append(" (walked)");
+            }
+
+            return key.ToString();
         }
+
+        /// <summary>
+        /// What to call each planner's colour in the console and the status
+        /// line, in the order <c>RoutePlanners.All</c> gives them.
+        /// </summary>
+        /// <remarks>
+        /// Named rather than swatched because the console is text, and a line
+        /// saying "green" is findable in a log file six days later while a
+        /// coloured pixel is not. Kept in step with
+        /// <see cref="DebugOverlay.PlannerColours"/> by hand — there are five of
+        /// them and they change about once a year.
+        /// </remarks>
+        private static readonly string[] PlannerColourNames =
+            { "orange", "green", "cyan", "yellow", "violet" };
+
+        private static string ColourName(int which) =>
+            PlannerColourNames[which % PlannerColourNames.Length];
 
         /// <summary>
         /// Everything about the arrangement a preview was asked against: the
@@ -1936,6 +2038,18 @@ namespace BattleChess.Unity
 
             PlanMarker.End();
             spent.Stop();
+
+            // The same comparison the preview draws, on a march that is actually
+            // happening. Single orders only — see DrawEveryPlanner.
+            if (!quiet && _options.ComparePlannersOnOrders)
+            {
+                _overlay.ClearRoutePreview();
+
+                if (_options.ShowRouteCandidates)
+                    _overlay.SetRouteCandidates(RouteSearch.DebugCandidatePlaces(_battle, unit, destination));
+
+                DrawEveryPlanner(unit, destination, pathfinder, willArriveOn, report: true, already: plan);
+            }
 
             PathResult path = plan.Path;
 

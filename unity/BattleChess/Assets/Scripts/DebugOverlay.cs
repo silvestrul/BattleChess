@@ -52,11 +52,24 @@ namespace BattleChess.Unity
         /// <summary>Every place <see cref="BattleChess.Rules.RouteSearch"/> considered bending at.</summary>
         private static readonly Color CandidateColour = new Color(0.55f, 0.85f, 1f, 0.9f);
 
-        /// <summary>The route <see cref="BattleChess.Rules.RoutePlanners.TheLadder"/> would take.</summary>
-        private static readonly Color LadderPreviewColour = new Color(1f, 0.7f, 0.25f, 0.95f);
-
-        /// <summary>The route <see cref="BattleChess.Rules.RoutePlanners.TheSearch"/> would take.</summary>
-        private static readonly Color SearchPreviewColour = new Color(0.4f, 1f, 0.55f, 0.95f);
+        /// <summary>
+        /// One colour per planner, in the order <c>RoutePlanners.All</c> gives
+        /// them, so a preview showing five routes can be read without a legend
+        /// once you have seen it twice.
+        /// </summary>
+        /// <remarks>
+        /// The first two keep the colours the two-planner preview always used —
+        /// orange is the ladder and green is the search — because those are the
+        /// ones already in everybody's head and in every screenshot taken so far.
+        /// </remarks>
+        public static readonly Color[] PlannerColours =
+        {
+            new Color(1f,    0.70f, 0.25f, 0.95f),   // the ladder
+            new Color(0.40f, 1f,    0.55f, 0.95f),   // over places and fronts
+            new Color(0.30f, 0.85f, 0.95f, 0.95f),   // over corners
+            new Color(1f,    0.90f, 0.30f, 0.95f),   // over tangents — the default
+            new Color(0.72f, 0.60f, 1f,    0.95f),   // hybrid A*
+        };
 
         private Material _material;
 
@@ -68,8 +81,28 @@ namespace BattleChess.Unity
         private float _searchCellSize = 5f;
 
         private readonly List<Vector3> _routeCandidates = new List<Vector3>();
-        private readonly List<Vector3> _ladderPreview = new List<Vector3>();
-        private readonly List<Vector3> _searchPreview = new List<Vector3>();
+
+        /// <summary>
+        /// One drawn route per planner asked. Kept as a list rather than a field
+        /// each because the number of planners is <c>RoutePlanners.All.Count</c>
+        /// and not a number this file should know.
+        /// </summary>
+        private readonly List<RoutePreview> _previews = new List<RoutePreview>();
+
+        private struct RoutePreview
+        {
+            public List<Vector3> Points;
+            public Color Colour;
+
+            /// <summary>
+            /// How far off the true line to draw it. Planners agree far more
+            /// often than they differ, and five identical lines drawn on top of
+            /// one another read as one — so each is nudged sideways and the
+            /// places they genuinely part company are the places the lines
+            /// visibly diverge by more than their spacing.
+            /// </summary>
+            public float Lift;
+        }
 
         public DebugOptions Options;
 
@@ -126,8 +159,7 @@ namespace BattleChess.Unity
         public void ClearRoutePreview()
         {
             _routeCandidates.Clear();
-            _ladderPreview.Clear();
-            _searchPreview.Clear();
+            _previews.Clear();
         }
 
         /// <summary>
@@ -143,9 +175,31 @@ namespace BattleChess.Unity
                 _routeCandidates.Add(new Vector3(place.X, place.Y, 0f));
         }
 
-        public void SetLadderPreview(IReadOnlyList<Vec2> waypoints) => Fill(_ladderPreview, waypoints);
+        /// <summary>
+        /// Adds one planner's answer to the drawing. Call
+        /// <see cref="ClearRoutePreview"/> first; these accumulate.
+        /// </summary>
+        /// <param name="which">
+        /// Index into <c>RoutePlanners.All</c>, which picks both the colour and
+        /// how far the line is nudged off the others.
+        /// </param>
+        public void AddRoutePreview(int which, IReadOnlyList<Vec2> waypoints)
+        {
+            if (waypoints == null || waypoints.Count < 2) return;
 
-        public void SetSearchPreview(IReadOnlyList<Vec2> waypoints) => Fill(_searchPreview, waypoints);
+            var points = new List<Vector3>();
+            Fill(points, waypoints);
+
+            _previews.Add(new RoutePreview
+            {
+                Points = points,
+                Colour = PlannerColours[which % PlannerColours.Length],
+
+                // Spread either side of the true line rather than all one way,
+                // so no planner's route is systematically the outer one.
+                Lift = (which - (PlannerColours.Length - 1) * 0.5f) * 1.6f,
+            });
+        }
 
         private static void Fill(List<Vector3> into, IReadOnlyList<Vec2> waypoints)
         {
@@ -235,8 +289,10 @@ namespace BattleChess.Unity
             // Two planners' answers to the same ground, drawn as separate lines
             // so the disagreement itself is the picture — a route only one of
             // them would take is exactly the case worth clicking again to see.
-            DrawPolyline(_ladderPreview, LadderPreviewColour, lift: 1.2f);
-            DrawPolyline(_searchPreview, SearchPreviewColour, lift: -1.2f);
+            // Drawn last-first, so the default planner and the ladder sit over
+            // the ones that are only there for comparison.
+            for (int i = _previews.Count - 1; i >= 0; i--)
+                DrawPolyline(_previews[i].Points, _previews[i].Colour, _previews[i].Lift);
 
             GL.End();
 

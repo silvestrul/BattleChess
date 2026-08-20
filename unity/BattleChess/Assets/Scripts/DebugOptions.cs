@@ -83,14 +83,30 @@ namespace BattleChess.Unity
         /// </remarks>
         public bool PreviewRouteMode;
 
+
         /// <summary>
-        /// In preview mode, plan with both
-        /// <see cref="BattleChess.Rules.RoutePlanners.TheLadder"/> and
-        /// <see cref="BattleChess.Rules.RoutePlanners.TheSearch"/> and draw
-        /// both, rather than only whichever is
-        /// <see cref="BattleChess.Rules.RoutePlanners.Default"/>.
+        /// Draw every planner in <c>RoutePlanners.All</c>, each in its own
+        /// colour, rather than only the ladder and the search.
         /// </summary>
-        public bool PreviewBothPlanners = true;
+        public bool PreviewEveryPlanner = true;
+
+        /// <summary>
+        /// Include the hybrid A* prototype in that. Off by default and worth
+        /// leaving off: it is measured at a second and more for a single order,
+        /// which a preview pays in one frame — the editor visibly stops.
+        /// </summary>
+        public bool PreviewTheHybrid;
+
+        /// <summary>
+        /// Draw the same comparison on a real order, not only on a previewed
+        /// one — because "why did it go that way" is asked about marches that
+        /// happened far more often than about ones being rehearsed.
+        /// </summary>
+        /// <remarks>
+        /// Single orders only. Four extra plans is nothing for one regiment and
+        /// forty times that for a wing.
+        /// </remarks>
+        public bool ComparePlannersOnOrders = true;
 
         /// <summary>
         /// In preview mode, mark every place
@@ -198,7 +214,11 @@ namespace BattleChess.Unity
             GUILayout.Space(6);
             GUILayout.Label($"Route preview   {(PreviewRouteMode ? "ON — right-click plans, does not move" : "off")}");
             PreviewRouteMode = GUILayout.Toggle(PreviewRouteMode, " Preview route (no move)");
-            PreviewBothPlanners = GUILayout.Toggle(PreviewBothPlanners, " Show the ladder and the search both");
+            PreviewEveryPlanner = GUILayout.Toggle(PreviewEveryPlanner, " Show every planner, one colour each");
+            ComparePlannersOnOrders = GUILayout.Toggle(ComparePlannersOnOrders, " ...on real orders too, not just previews");
+
+            if (PreviewEveryPlanner)
+                PreviewTheHybrid = GUILayout.Toggle(PreviewTheHybrid, " ...including hybrid A* (slow — freezes a frame)");
             ShowRouteCandidates = GUILayout.Toggle(ShowRouteCandidates, " Mark the search's candidate places");
 
             GUILayout.Space(6);
@@ -259,7 +279,9 @@ namespace BattleChess.Unity
             | (NoRouting ? 1 << 15 : 0)
             | (InstantReload ? 1 << 16 : 0)
             | (PreviewRouteMode ? 1 << 24 : 0)
-            | (PreviewBothPlanners ? 1 << 25 : 0)
+            | (PreviewEveryPlanner ? 1 << 27 : 0)
+            | (PreviewTheHybrid ? 1 << 28 : 0)
+            | (ComparePlannersOnOrders ? 1 << 29 : 0)
             | (ShowRouteCandidates ? 1 << 26 : 0)
             | ((ViewingArmy + 2) << 17);
     }
