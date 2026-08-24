@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace BattleChess.Unity
 {
@@ -103,10 +103,20 @@ namespace BattleChess.Unity
         /// happened far more often than about ones being rehearsed.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Single orders only. Four extra plans is nothing for one regiment and
         /// forty times that for a wing.
+        /// </para>
+        /// <para>
+        /// <b>Off by default, because it was not nothing.</b> Recorded in play,
+        /// every frame over 90 ms that the game itself caused was a frame that
+        /// planned five routes for one regiment - 547 ms at tick 651, of which
+        /// 520 was planning. The comparison is a tool for reading a route, not
+        /// a thing to leave switched on while playing, and leaving it on made
+        /// the planner look like it cost four times what it costs.
+        /// </para>
         /// </remarks>
-        public bool ComparePlannersOnOrders = true;
+        public bool ComparePlannersOnOrders;
 
         /// <summary>
         /// Work out a wing's routes all at once rather than one after another.

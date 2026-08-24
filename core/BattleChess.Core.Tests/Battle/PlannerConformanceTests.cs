@@ -63,6 +63,7 @@ namespace BattleChess.Tests.Battle
                         $"    stages: staged {StagedRoutePlanner.Staged}, ladder clean " +
                         $"{StagedRoutePlanner.LadderClean}, tangent clean {StagedRoutePlanner.TangentClean}, " +
                         $"pose asked {StagedRoutePlanner.PoseAsked} widened {StagedRoutePlanner.PoseWidened} won {StagedRoutePlanner.PoseWon}, " +
+                        $"too dear {StagedRoutePlanner.PoseTooDear}, " +
                         $"pressed {StagedRoutePlanner.Pressed}");
                 _out.WriteLine(
                     $"{planner.Name,-34} {r.MsPerOrder,8:0.00} {r.Worst,8:0.0} {r.Routed,8}/{r.Orders} " +

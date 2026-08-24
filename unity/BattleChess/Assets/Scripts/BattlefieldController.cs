@@ -400,6 +400,10 @@ namespace BattleChess.Unity
             HandleClockKeys();
             HandleFogKeys();
 
+            // Taken before the clock is asked to move, because taking it is
+            // what lets the clock move again.
+            CollectFinishedRoutes();
+
             _simClock.Restart();
             SimMarker.Begin();
             int before = _clock?.Tick ?? 0;
@@ -408,6 +412,11 @@ namespace BattleChess.Unity
             SimMarker.End();
             _simClock.Stop();
 
+            // Both of these can change a regiment's shape or stance, which is a
+            // write to the field a worker may be reading, so both settle first
+            // — but each settles inside itself, once a key has actually been
+            // pressed. Settling here instead waited on the worker every single
+            // frame, which is the whole of the off-thread pass undone.
             HandleFormationKeys();
             HandleStanceKeys();
 
@@ -573,6 +582,12 @@ namespace BattleChess.Unity
         {
             if (Input.GetMouseButtonDown(1) && !PointerOverPanels())
             {
+                // Every branch below either gives an order or asks for a plan,
+                // and both write to the field a worker may still be reading.
+                // Settling here covers the attack, the preview and the march in
+                // one place rather than three.
+                if (WorkingOutARoute) SettleRoutes();
+
                 if (_selection.Count == 0)
                 {
                     _console.Blocked("Order", "Nothing selected — left-click a regiment first.");
@@ -918,60 +933,13 @@ namespace BattleChess.Unity
             for (int i = 0; i < wing.Count; i++)
                 wanted[i] = destination + (wing[i].Position - origin);
 
-            // Every body's rectangle worked out before the routes rather than
-            // during them. It is cached behind a flag that a move clears, and
-            // nothing moves while a wing is being planned - but a lazy write to
-            // a struct being read on another thread is a torn read, so the
-            // write is made to happen first and then never again.
-            foreach (UnitInstance unit in _battle.UnitsOnField()) _ = unit.Shape;
-
-            var worked = new Worked[wing.Count];
-
-            // Instant movement teleports each regiment as its order is applied,
-            // so a later plan in the same wing is made against a field the
-            // earlier ones have already moved on. That is a real dependency
-            // between the orders and it is left alone: the debug option keeps
-            // the behaviour it always had.
-            bool together = _options.PlanTheWingTogether && !_options.MoveInstantly && wing.Count > 1;
-
-            var spent = System.Diagnostics.Stopwatch.StartNew();
-            PlanMarker.Begin();
-
-            if (together)
-            {
-                // One regiment per chunk. What an order costs is wildly uneven -
-                // most are a fraction of a millisecond and a few are sixty - so
-                // handing a worker a contiguous block of the wing lets one
-                // worker draw several of the dear ones while the rest finish
-                // early with nothing left to take.
-                System.Threading.Tasks.Parallel.ForEach(
-                    System.Collections.Concurrent.Partitioner.Create(0, wing.Count, 1),
-                    range =>
-                    {
-                        for (int i = range.Item1; i < range.Item2; i++)
-                            worked[i] = WorkOutRoute(wing[i], wanted[i], bearing);
-                    });
-            }
-            else
-            {
-                for (int i = 0; i < wing.Count; i++)
-                    worked[i] = WorkOutRoute(wing[i], wanted[i], bearing);
-            }
-
-            PlanMarker.End();
-            spent.Stop();
-
-            // Applied here, on the one thread that is allowed to: giving the
-            // order, writing the route and saying so are all changes to shared
-            // state, and only the working out was ever independent.
-            for (int i = 0; i < worked.Length; i++) ApplyRoute(worked[i], quiet: true);
-
-            _console.Info("Group",
-                $"{wing.Count} routes worked out in {spent.Elapsed.TotalMilliseconds:0.0} ms " +
-                $"({(together ? $"all at once on {System.Environment.ProcessorCount} cores" : "one after another")}), " +
-                $"all inside the one frame that ordered them.");
-
-            _status = $"{_selection.Count} regiments marching, keeping their formation.";
+            // Handed to a worker and applied when it lands. The clock is held
+            // meanwhile, so the field the wing is planned against is the field
+            // the player clicked on and not one a tick has moved underneath it.
+            WorkOutRoutes(
+                wing, wanted, bearing,
+                quiet: true, asAWing: true,
+                status: $"{wing.Count} regiments marching, keeping their formation.");
         }
 
         /// <summary>
@@ -1413,6 +1381,19 @@ namespace BattleChess.Unity
         {
             if (!_options.Running) return;
 
+            // A plan is out with a worker reading positions, shapes and the
+            // spatial index. A tick writes to all three, so the battle waits -
+            // which is the trade this whole arrangement makes: the clock loses
+            // a fraction of a tick, the frame loses nothing.
+            if (WorkingOutARoute)
+            {
+                // Not accumulated while held, or the moment the plan lands the
+                // battle would fast-forward through every tick it owed and
+                // undo the point of waiting.
+                _tickAccumulator = 0f;
+                return;
+            }
+
             _tickAccumulator += Time.deltaTime * _options.TimeScale;
 
             // Cap the catch-up so a stall cannot fast-forward the battle.
@@ -1478,6 +1459,10 @@ namespace BattleChess.Unity
             {
                 if (!Input.GetKeyDown(KeyCode.Alpha1 + i)) continue;
 
+                // A change of formation rewrites the footprint a worker may be
+                // reading, so the plan lands before the shape moves under it.
+                if (WorkingOutARoute) SettleRoutes();
+
                 FormationDef target = _formations.All[i];
 
                 foreach (UnitInstance unit in _selection)
@@ -1534,6 +1519,10 @@ namespace BattleChess.Unity
             else if (Input.GetKeyDown(KeyCode.T)) chosen = Stance.Evade;
 
             if (chosen == null) return;
+
+            // Same reason as the formation keys: the plan lands before the
+            // stance it was planned under changes.
+            if (WorkingOutARoute) SettleRoutes();
 
             foreach (UnitInstance unit in _selection)
             {
@@ -2045,11 +2034,207 @@ namespace BattleChess.Unity
             }
         }
 
+        /// <summary>An order being worked out while the game carries on drawing.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Why the simulation stops while this runs.</b> Working a route out
+        /// reads the whole battle - every position, every shape, the spatial
+        /// index - and a tick would be writing to all three underneath it. The
+        /// wing order got away without a rule because it began and finished
+        /// inside one frame, with nothing in between to move anybody. Across
+        /// frames that is no longer true, so the clock is held until the plan
+        /// lands.
+        /// </para>
+        /// <para>
+        /// What that buys is the whole point: the frame does not stop. Drawing,
+        /// the camera, the panel and the selection all keep their sixty a
+        /// second while a dear order is worked out, where before the game hung
+        /// for a second on the frame that ordered it. The battle stands still
+        /// for a tenth of a second instead.
+        /// </para>
+        /// </remarks>
+        private sealed class RouteWork
+        {
+            public System.Threading.Tasks.Task Task = null!;
+            public Worked[] Results = null!;
+            public bool Quiet;
+            public bool AsAWing;
+            public bool Together;
+            public string? Status;
+            public System.Diagnostics.Stopwatch Spent = null!;
+            public int Frames;
+        }
+
+        private RouteWork? _working;
+
+        /// <summary>Whether a plan is out with a worker and the clock is held.</summary>
+        private bool WorkingOutARoute => _working != null;
+
+        /// <summary>
+        /// Takes delivery of a finished plan, if one has finished.
+        /// </summary>
+        /// <remarks>
+        /// Applying is main-thread work by construction - it gives the order,
+        /// writes the overlay and replays what the planner said into the
+        /// console - so it happens here rather than on the worker, in the
+        /// order the regiments were given, which is what keeps a recording
+        /// readable.
+        /// </remarks>
+        private void CollectFinishedRoutes()
+        {
+            if (_working == null) return;
+
+            _working.Frames++;
+
+            if (!_working.Task.IsCompleted) return;
+
+            RouteWork work = _working;
+
+            // Cleared before applying rather than after. ApplyRoute gives an
+            // order, and an order is a thing that could ask for another plan.
+            _working = null;
+
+            work.Spent.Stop();
+
+            // A faulted worker must not be swallowed: a plan that threw is a
+            // regiment that will never move, and the recording is the only
+            // place anybody would find out.
+            if (work.Task.IsFaulted)
+            {
+                _console.Blocked("Path",
+                    $"Working out {work.Results.Length} route(s) threw: " +
+                    $"{work.Task.Exception?.GetBaseException().Message}");
+                return;
+            }
+
+            for (int i = 0; i < work.Results.Length; i++)
+                ApplyRoute(work.Results[i], work.Quiet);
+
+            if (work.AsAWing)
+            {
+                _console.Info("Group",
+                    $"{work.Results.Length} routes worked out in " +
+                    $"{work.Spent.Elapsed.TotalMilliseconds:0.0} ms " +
+                    $"({(work.Together ? $"all at once on {System.Environment.ProcessorCount} cores" : "one after another")}), " +
+                    $"off the drawing thread over {work.Frames} frame(s) - the clock waited, the picture did not.");
+            }
+
+            if (work.Status != null) _status = work.Status;
+        }
+
+        /// <summary>
+        /// Waits for an outstanding plan, because what comes next would write
+        /// to the battle the worker is reading.
+        /// </summary>
+        /// <remarks>
+        /// This is the one place the old freeze can still happen, and it is the
+        /// right place for it: a second order given while the first is still
+        /// being worked out. Rare by hand, and the alternative - planning
+        /// against a field another order is changing - is the class of bug that
+        /// took four attempts to find last time.
+        /// </remarks>
+        private void SettleRoutes()
+        {
+            if (_working == null) return;
+
+            try { _working.Task.Wait(); }
+            catch (System.AggregateException) { /* said by CollectFinishedRoutes */ }
+
+            CollectFinishedRoutes();
+        }
+
+        /// <summary>
+        /// Hands a set of orders to a worker and returns without waiting.
+        /// </summary>
+        private void WorkOutRoutes(
+            IReadOnlyList<UnitInstance> wing, Vec2[] wanted, Facing? bearing,
+            bool quiet, bool asAWing, string? status)
+        {
+            // A plan already out is finished first. Two of them reading while
+            // one may finish and give an order is the same hazard the clock is
+            // held for.
+            SettleRoutes();
+
+            // Every body's rectangle worked out before the routes rather than
+            // during them. It is cached behind a flag that a move clears, and
+            // nothing moves while a plan is out - but a lazy write to a struct
+            // being read on another thread is a torn read, so the write is made
+            // to happen first and then never again.
+            foreach (UnitInstance unit in _battle.UnitsOnField()) _ = unit.Shape;
+
+            var units = new UnitInstance[wing.Count];
+            for (int i = 0; i < wing.Count; i++) units[i] = wing[i];
+
+            var results = new Worked[units.Length];
+
+            // Instant movement teleports each regiment as its order is applied,
+            // so a later plan in the same wing is made against a field the
+            // earlier ones have already moved on. That is a real dependency
+            // between the orders and it is left alone.
+            bool together = _options.PlanTheWingTogether && !_options.MoveInstantly && units.Length > 1;
+
+            var work = new RouteWork
+            {
+                Results = results,
+                Quiet = quiet,
+                AsAWing = asAWing,
+                Together = together,
+                Status = status,
+                Spent = System.Diagnostics.Stopwatch.StartNew(),
+            };
+
+            work.Task = System.Threading.Tasks.Task.Run(() =>
+            {
+                PlanMarker.Begin();
+
+                if (together)
+                {
+                    // One regiment per chunk. What an order costs is wildly
+                    // uneven - most are a fraction of a millisecond and a few
+                    // are sixty - so handing a worker a contiguous block of the
+                    // wing lets one worker draw several of the dear ones while
+                    // the rest finish early with nothing left to take.
+                    System.Threading.Tasks.Parallel.ForEach(
+                        System.Collections.Concurrent.Partitioner.Create(0, units.Length, 1),
+                        range =>
+                        {
+                            for (int i = range.Item1; i < range.Item2; i++)
+                                results[i] = WorkOutRoute(units[i], wanted[i], bearing);
+                        });
+                }
+                else
+                {
+                    for (int i = 0; i < units.Length; i++)
+                        results[i] = WorkOutRoute(units[i], wanted[i], bearing);
+                }
+
+                PlanMarker.End();
+            });
+
+            _working = work;
+
+            // A plan that is already done - most of them are - is taken now
+            // rather than a frame later, so an ordinary order still lands on
+            // the frame that gave it and the common case is unchanged.
+            if (work.Task.IsCompleted) CollectFinishedRoutes();
+        }
+
         private void PlanRoute(UnitInstance unit, Vec2 destination, Facing? bearing = null, bool quiet = false)
         {
             if (unit == null) return;
 
-            ApplyRoute(WorkOutRoute(unit, destination, bearing), quiet);
+            if (_options.MoveInstantly)
+            {
+                // Teleporting is a change to the field, so it cannot be worked
+                // out beside anything. Left exactly as it was.
+                SettleRoutes();
+                ApplyRoute(WorkOutRoute(unit, destination, bearing), quiet);
+                return;
+            }
+
+            WorkOutRoutes(
+                new[] { unit }, new[] { destination }, bearing,
+                quiet, asAWing: false, status: null);
         }
 
         /// <summary>

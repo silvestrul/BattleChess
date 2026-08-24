@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using BattleChess.Contracts;
@@ -82,6 +82,22 @@ namespace BattleChess.Rules
         /// </remarks>
         public const float DefaultMillisecondsPerFrame = 8f;
 
+        /// <summary>
+        /// One lock over the whole of this, because a plan may now be worked
+        /// out on a worker while the frame carries on.
+        /// </summary>
+        /// <remarks>
+        /// The host works a player's order out off the drawing thread, and
+        /// <see cref="Spent"/> is called from there while <see cref="OpenFrame"/>
+        /// runs on the main thread - four collections written by one and
+        /// cleared by the other. A read during another thread's resize does not
+        /// reliably throw; it returns nonsense, which is how the last bug of
+        /// this shape took four attempts to find. Contention is a handful of
+        /// calls a frame, so one lock over the lot is the cheap answer and not
+        /// a fine-grained one.
+        /// </remarks>
+        private readonly object _counting = new object();
+
         private readonly HashSet<UnitId> _plannedThisFrame = new HashSet<UnitId>();
 
         /// <summary>Who is waiting, oldest deferral first.</summary>
@@ -102,13 +118,16 @@ namespace BattleChess.Rules
         public bool IsRationing => _rationing;
 
         /// <summary>Routes planned since the current frame opened.</summary>
-        public int RoutesThisFrame => _routes;
+        public int RoutesThisFrame { get { lock (_counting) return _routes; } }
 
         /// <summary>Milliseconds spent planning since the current frame opened.</summary>
-        public float MillisecondsThisFrame => (float)(_spentTicks * 1000.0 / Stopwatch.Frequency);
+        public float MillisecondsThisFrame
+        {
+            get { lock (_counting) return (float)(_spentTicks * 1000.0 / Stopwatch.Frequency); }
+        }
 
         /// <summary>Regiments put off to a later frame and still waiting.</summary>
-        public int Waiting => _queue.Count;
+        public int Waiting { get { lock (_counting) return _queue.Count; } }
 
         /// <summary>Regiments put off in this run of the battle, ever.</summary>
         public int DeferralsEver { get; private set; }
@@ -121,39 +140,45 @@ namespace BattleChess.Rules
             int routesPerFrame = DefaultRoutesPerFrame,
             float millisecondsPerFrame = DefaultMillisecondsPerFrame)
         {
-            if (routesPerFrame < 1)
-                throw new ArgumentOutOfRangeException(nameof(routesPerFrame), "A frame must be allowed at least one route.");
+            lock (_counting)
+            {
+                if (routesPerFrame < 1)
+                    throw new ArgumentOutOfRangeException(nameof(routesPerFrame), "A frame must be allowed at least one route.");
 
-            if (millisecondsPerFrame <= 0f)
-                throw new ArgumentOutOfRangeException(nameof(millisecondsPerFrame), "A frame must be allowed some time to plan in.");
+                if (millisecondsPerFrame <= 0f)
+                    throw new ArgumentOutOfRangeException(nameof(millisecondsPerFrame), "A frame must be allowed some time to plan in.");
 
-            _rationing = true;
-            _maxRoutes = routesPerFrame;
-            _maxMilliseconds = millisecondsPerFrame;
+                _rationing = true;
+                _maxRoutes = routesPerFrame;
+                _maxMilliseconds = millisecondsPerFrame;
 
-            _routes = 0;
-            _spentTicks = 0;
+                _routes = 0;
+                _spentTicks = 0;
 
-            _plannedThisFrame.Clear();
+                _plannedThisFrame.Clear();
 
-            // This frame's allowance is promised to the front of the queue.
-            // Not the whole queue — only as many as the frame could serve —
-            // so that a long queue does not lock out every regiment that has
-            // not yet been deferred at all.
-            _promised.Clear();
+                // This frame's allowance is promised to the front of the queue.
+                // Not the whole queue — only as many as the frame could serve —
+                // so that a long queue does not lock out every regiment that has
+                // not yet been deferred at all.
+                _promised.Clear();
 
-            for (int i = 0; i < _queue.Count && i < _maxRoutes; i++)
-                _promised.Add(_queue[i]);
+                for (int i = 0; i < _queue.Count && i < _maxRoutes; i++)
+                    _promised.Add(_queue[i]);
+                    }
         }
 
         /// <summary>Gives up rationing, so every request is granted again.</summary>
         public void Stop()
         {
-            _rationing = false;
-            _plannedThisFrame.Clear();
-            _queue.Clear();
-            _inQueue.Clear();
-            _promised.Clear();
+            lock (_counting)
+            {
+                _rationing = false;
+                _plannedThisFrame.Clear();
+                _queue.Clear();
+                _inQueue.Clear();
+                _promised.Clear();
+                    }
         }
 
         /// <summary>
@@ -162,27 +187,30 @@ namespace BattleChess.Rules
         /// </summary>
         public bool MayPlan(UnitId unit)
         {
-            if (!_rationing) return true;
+            lock (_counting)
+            {
+                if (!_rationing) return true;
 
-            // Already answered this frame. Nothing has been drawn since, so a
-            // second answer could not be seen even if it differed.
-            if (_plannedThisFrame.Contains(unit)) return false;
+                // Already answered this frame. Nothing has been drawn since, so a
+                // second answer could not be seen even if it differed.
+                if (_plannedThisFrame.Contains(unit)) return false;
 
-            if (_routes >= _maxRoutes || MillisecondsThisFrame >= _maxMilliseconds)
-                return TurnAway(unit);
+                if (_routes >= _maxRoutes || MillisecondsThisFrame >= _maxMilliseconds)
+                    return TurnAway(unit);
 
-            // Promised regiments always get through. Anyone else may only have
-            // what is left over once every promise this frame could still be
-            // kept — otherwise a regiment that has never waited takes the place
-            // of one that has been waiting for frames.
-            if (_promised.Contains(unit)) return true;
+                // Promised regiments always get through. Anyone else may only have
+                // what is left over once every promise this frame could still be
+                // kept — otherwise a regiment that has never waited takes the place
+                // of one that has been waiting for frames.
+                if (_promised.Contains(unit)) return true;
 
-            int left = _maxRoutes - _routes;
+                int left = _maxRoutes - _routes;
 
-            if (_promised.Count > 0 && left <= _promised.Count)
-                return TurnAway(unit);
+                if (_promised.Count > 0 && left <= _promised.Count)
+                    return TurnAway(unit);
 
-            return true;
+                return true;
+                    }
         }
 
         private bool TurnAway(UnitId unit)
@@ -203,15 +231,18 @@ namespace BattleChess.Rules
         /// </summary>
         public void Spent(UnitId unit, long stopwatchTicks)
         {
-            if (!_rationing) return;
+            lock (_counting)
+            {
+                if (!_rationing) return;
 
-            _plannedThisFrame.Add(unit);
+                _plannedThisFrame.Add(unit);
 
-            if (_inQueue.Remove(unit)) _queue.Remove(unit);
-            _promised.Remove(unit);
+                if (_inQueue.Remove(unit)) _queue.Remove(unit);
+                _promised.Remove(unit);
 
-            _routes++;
-            _spentTicks += stopwatchTicks;
+                _routes++;
+                _spentTicks += stopwatchTicks;
+                    }
         }
     }
 }

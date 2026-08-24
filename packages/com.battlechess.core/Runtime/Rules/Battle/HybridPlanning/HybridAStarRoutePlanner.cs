@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules;
@@ -45,7 +45,7 @@ namespace BattleChess.Rules.HybridPlanning
         public static Plan PlanAlong(
             BattleState battle, UnitInstance unit, Vec2 destination, Facing? arriveOn,
             IReadOnlyList<Vec2>? corridor, float corridorHalfWidthMetres, IBattleLog? log = null,
-            int? expansionBudget = null)
+            int? expansionBudget = null, float secondsLimit = 0f)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
@@ -88,7 +88,8 @@ namespace BattleChess.Rules.HybridPlanning
                 unit.Position, unit.Facing, destination, goalHeading,
                 unit.Footprint, obstacles, topSpeed, turnRateDegreesPerSecond,
                 expansionBudget: expansionBudget, heuristicWeight: null,
-                corridor: corridor, corridorHalfWidthMetres: corridorHalfWidthMetres);
+                corridor: corridor, corridorHalfWidthMetres: corridorHalfWidthMetres,
+                secondsLimit: secondsLimit);
 
             // Places is left at zero rather than repeating Expansions: this
             // planner has no candidate places, and printing the same number
@@ -111,7 +112,13 @@ namespace BattleChess.Rules.HybridPlanning
                 return new Plan(failed, hold: null, pressedThrough: false, effort: effort);
             }
 
+            // Not smoothed here. The cast-ahead pass belongs to whoever hands
+            // a route to the executor - which is StagedRoutePlanner, and which
+            // has to do it for every planner's route rather than only this
+            // one. See RouteSmoothing.
             IReadOnlyList<Vec2> waypoints = outcome.Waypoints;
+            Facing?[] fronts = outcome.Fronts;
+
             float distance = 0f;
             for (int i = 1; i < waypoints.Count; i++)
                 distance += Vec2.Distance(waypoints[i - 1], waypoints[i]);
@@ -133,7 +140,8 @@ namespace BattleChess.Rules.HybridPlanning
             // the heading, and a Plan that dropped it left the walker to
             // infer one from the shape of the line — a different facing than
             // the one the search swept and cleared.
-            return new Plan(path, hold: outcome.Fronts, pressedThrough: false, effort: effort);
+            return new Plan(path, hold: fronts, pressedThrough: false, effort: effort);
         }
+
     }
 }

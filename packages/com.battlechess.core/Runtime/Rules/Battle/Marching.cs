@@ -300,7 +300,11 @@ namespace BattleChess.Rules
             // reason, so an order given by hand and a re-plan the tick
             // decided on land on the same clock without either caller
             // needing to know it is being timed.
-            battle.RoutesPlanned++;
+            // Interlocked because a plan may be worked out on a worker while
+            // the host reads these for its frame line. A plain ++ is a read, an
+            // add and a write, so two workers finishing together lose a count -
+            // and a diagnostic that quietly undercounts is worse than none.
+            System.Threading.Interlocked.Increment(ref battle.RoutesPlanned);
 
             using var _profile = PlanningProfile.Measure(PlanningProfile.Step.Plan);
 
@@ -315,7 +319,7 @@ namespace BattleChess.Rules
             {
                 long spent = System.Diagnostics.Stopwatch.GetTimestamp() - began;
 
-                battle.RoutePlanningTicks += spent;
+                System.Threading.Interlocked.Add(ref battle.RoutePlanningTicks, spent);
 
                 // Charged against this frame's allowance whoever asked, so a
                 // person's own order still shortens what the tick may spend

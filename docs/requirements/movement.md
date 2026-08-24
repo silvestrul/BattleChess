@@ -11,7 +11,7 @@ Priority: *Mandatory* · *Preferred* · `Priority N` — the order rungs are tri
 | **Mx2** | **Pathfinding.** A regiment that cannot reach its destination as a straight line must try the following, in order. | Priority 0 | ✅ |
 | Mx2a | Try to find a way around the obstacle. If that fails, try another way around it. | Priority 1 | ✅ |
 | Mx2b | If there is no way around the obstacle or the cost is too big, and a friendly regiment blocks the path, that regiment moves sideways to make space before the marcher arrives. | Priority 2 | ❌ not built — no regiment moves aside |
-| Mx2c | If clean movement of the blocking regiment is not possible, a press-through is initiated. | Priority 3 | ✅ last resort since M55 |
+| Mx2c | If clean movement of the blocking regiment is not possible, a press-through is initiated. | Priority 3 | ✅ last resort since M55, and priced against the way round since M65 — `Mx2b` already said "or the cost is too big" |
 | Mx2d | If an enemy regiment blocks the path on the first or second leg, try to find a way around. | Priority 4 | ❌ enemies are not planning obstacles at any stance |
 | Mx2e | If an enemy regiment cannot be safely avoided during the current turn, the regiment cancels its order and stops in place. | Priority 5 | ❌ not built |
 | **Mx6** | **Cost.** One click on a selected wing plans every regiment's route without a noticeable pause — a hundred routes on any of the three fields. | Mandatory | ✅ 109 / 176 / 121 ms for a hundred, twelve cores |

@@ -39,13 +39,33 @@ namespace BattleChess.Rules.HybridPlanning
 
         /// <summary>How many equal slices the heading circle is split into for the closed set.</summary>
         /// <remarks>
+        /// <para>
         /// Kept finer than <see cref="GoalHeadingToleranceRadians"/>. At 24
         /// bins a bin spans 15° against an 11,5° tolerance, so a state that
         /// would have satisfied the goal could be discarded in favour of a
         /// cheaper bin-mate that would not — the goal test being finer than
         /// the grid that decides which states survive to be tested.
+        /// </para>
+        /// <para>
+        /// <b>Twelve since M71, and the size of the effect is not understood.</b>
+        /// Sixteen bins to twelve takes the orders recorded as dear in play
+        /// from <b>66 ms to 4,2</b>, with the Crucible's unwalkable count
+        /// unmoved at 17 and Broken Country's improving from 11 to 10. A
+        /// sixteen-fold cut for four bins is not what a state-space argument
+        /// predicts; the likely cause is that sixteen aliases badly against the
+        /// primitive set, so nearly every state lands in a bin of its own and
+        /// the dominance check never fires. Twelve still spans 30° against the
+        /// 11,5° goal tolerance, so the paragraph above still holds.
+        /// </para>
+        /// <para>
+        /// <b>Do not interpolate.</b> Broken Country's unwalkable count runs
+        /// 13, 10, <b>20</b>, 12, 16 as bins fall from 14 to 6. Any other value
+        /// wants measuring, not reasoning about — see
+        /// <c>docs/pathfinding-levers.md</c> and the <see cref="Headings"/>
+        /// lever.
+        /// </para>
         /// </remarks>
-        private const int HeadingBins = 16;
+        private const int HeadingBins = 12;
 
         /// <summary>Nodes popped and expanded before the search gives up.</summary>
         /// <remarks>
@@ -99,6 +119,98 @@ namespace BattleChess.Rules.HybridPlanning
         /// wrong on either.
         /// </remarks>
         internal static float Weight;
+
+        /// <summary>
+        /// Where the search actually went, for one search. Diagnosis only.
+        /// </summary>
+        /// <remarks>
+        /// <c>OverlapTests / Expansions</c> already separates "explores too
+        /// much" from "each expansion is too dear". These say <i>where</i> the
+        /// exploring went, which is the question neither of those answers: a
+        /// search that stays in the corridor between start and goal and still
+        /// spends twenty thousand expansions wants a different fix from one
+        /// that wanders half the map.
+        /// </remarks>
+        /// <summary>
+        /// How far the search may leave the stretch of ground the order is
+        /// about, as a multiple of the straight-line distance. 0 is unbounded,
+        /// which is what it was before M71.
+        /// </summary>
+        /// <remarks>
+        /// Measured on the Great Field: an order of <b>282 m</b> explored
+        /// <b>841 m sideways and 666 m past its own ends</b> - a box some 1700 m
+        /// across - for 31 640 expansions. Nothing held it near the order at
+        /// all, and the route it came back with was the five-fold detour the
+        /// cost ceiling then threw away. The wandering and the silly route are
+        /// the same fault seen twice.
+        /// </remarks>
+        /// <remarks>
+        /// <b>Free down to 1,25; at 1,00 quality starts going</b> — the
+        /// Crucible's unwalkable count goes 17 to 20, and falls apart below
+        /// that. At 1,50 the recorded orders drop from 66 to 52 ms and the
+        /// Crucible's total from 1114 to 1030 with nothing else moved. Note it
+        /// barely touches the <i>worst</i> order on its own: bounding where the
+        /// search may go does not bound how long it may take, because the worst
+        /// order runs to exhaustion inside the bound. What it does is make
+        /// <see cref="StagedRoutePlanner.PoseExpansionBudget"/> cheap.
+        /// See <c>docs/pathfinding-levers.md</c> for the full table.
+        /// </remarks>
+        internal static float StrayMultiple = 1.5f;
+
+        /// <summary>A floor under the stray bound, so short orders keep room.</summary>
+        internal static float StrayFloorMetres = 60f;
+
+        /// <summary>Overrides <see cref="PositionBinMetres"/>. A measurement lever.</summary>
+        /// <remarks>
+        /// <b>The cliff is between 30 and 35 metres.</b> At 30 the Crucible is
+        /// 16 unwalkable against 17 and its total falls 1114 to 856; at 35 it
+        /// is 24, and Broken Country 11 to 22. Two things worth knowing before
+        /// trusting a finer sweep here: 25 m is <i>slower</i> than the 20 it
+        /// replaces (1164 against 1114), so the curve is not monotonic; and 60
+        /// and 80 give byte-identical answers, so the bin has stopped meaning
+        /// anything by then. See <c>docs/pathfinding-levers.md</c>.
+        /// </remarks>
+        internal static float PositionBin;
+
+        /// <summary>Overrides <see cref="HeadingBins"/>. A measurement lever.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The largest single effect measured, and the least understood.</b>
+        /// Sixteen bins to fourteen takes the orders recorded as dear in play
+        /// from <b>66 ms to 4,1</b>. A sixteen-fold cut for one bin is not what
+        /// a state-space argument predicts, and the likely cause is that
+        /// sixteen aliases badly against the primitive set — nearly every state
+        /// landing in a bin of its own, so the dominance check never fires.
+        /// </para>
+        /// <para>
+        /// <b>Do not interpolate from the table.</b> Broken Country's
+        /// unwalkable count runs 13, 10, <b>20</b>, 12, 16 as bins fall from 14
+        /// to 6. Twelve is the best value measured; the spike at ten says the
+        /// mechanism is not understood, so any other value wants measuring
+        /// rather than reasoning about. See <c>docs/pathfinding-levers.md</c>.
+        /// </para>
+        /// </remarks>
+        internal static int Headings;
+
+        [ThreadStatic] internal static float StrayedSideways;
+
+        /// <summary>How far past the goal, or behind the start, the search reached.</summary>
+        [ThreadStatic] internal static float StrayedAlong;
+
+        /// <summary>The straight-line distance the order asked for.</summary>
+        [ThreadStatic] internal static float AskedFor;
+
+        /// <summary>States popped on the last search, however it ended.</summary>
+        /// <remarks>
+        /// Instrumentation only. <see cref="Outcome.Expansions"/> is the same
+        /// number, but a harness that calls <c>Marching.PlanTo</c> sees a
+        /// <c>Plan</c> and never the outcome that produced it, and the orders
+        /// worth measuring are the ones the staged cascade throws away.
+        /// </remarks>
+        [ThreadStatic] internal static int LastExpansions;
+
+        /// <summary>The ceiling the caller put on the last search, in seconds.</summary>
+        [ThreadStatic] internal static float LastLimit;
 
         private const float GoalPositionToleranceMetres = 20f;
         private const float GoalHeadingToleranceRadians = 0.2f; // ~11 degrees
@@ -294,7 +406,8 @@ namespace BattleChess.Rules.HybridPlanning
             Footprint moverFootprint, IReadOnlyList<HybridBox> obstacles,
             float topSpeedMetresPerSecond, float turnRateDegreesPerSecond,
             int? expansionBudget = null, float? heuristicWeight = null,
-            IReadOnlyList<Vec2>? corridor = null, float corridorHalfWidthMetres = 0f)
+            IReadOnlyList<Vec2>? corridor = null, float corridorHalfWidthMetres = 0f,
+            float secondsLimit = 0f)
         {
             using var _profile = PlanningProfile.Measure(PlanningProfile.Step.HybridSearch);
 
@@ -357,12 +470,37 @@ namespace BattleChess.Rules.HybridPlanning
                 : Heuristic(
                     start, startHeading, goal, goalHeading,
                     topSpeedMetresPerSecond, turnRateDegreesPerSecond, field!);
+            // The caller may already know what it is willing to pay - see M65,
+            // where a way round dearer than three times the press is going to
+            // be thrown away whatever it is. The turn field is an admissible
+            // estimate, so a start whose *lower bound* is past the limit has
+            // no answer under it, and the search is refused rather than run to
+            // an answer nobody will take. Measured on the recorded orders: the
+            // dear ones cost 888 to 1080 ms and were all discarded.
+            float limit = secondsLimit > 0f ? secondsLimit : float.PositiveInfinity;
+
+            LastLimit = limit;
+
+            if (startHeuristic > limit)
+            {
+                LastExpansions = 0;
+                return Outcome.Failed(PathFailure.NoRouteExists, 0, 0, obstacles.Count, new Tally());
+            }
+
             open.Push(0, weight * startHeuristic, startHeuristic);
             bestAtBin[BinOf(start, startHeading)] = 0f;
 
             var tally = new Tally();
             int expansions = 0;
             int primitivesTried = 0;
+
+            StrayedSideways = 0f;
+            StrayedAlong = 0f;
+            AskedFor = Vec2.Distance(start, goal);
+
+            Vec2 alongTheOrder = goal - start;
+            float orderLength = alongTheOrder.Length;
+            Vec2 orderUnit = orderLength > Vec2.Epsilon ? alongTheOrder / orderLength : Vec2.Zero;
 
             while (open.Count > 0 && expansions < budget)
             {
@@ -376,7 +514,36 @@ namespace BattleChess.Rules.HybridPlanning
                 if (bestAtBin.TryGetValue(bin, out float recorded) && recorded < node.G - 1e-4f)
                     continue;
 
+                // Costs never fall, so a path already past the limit cannot
+                // come back under it. Pruned rather than expanded.
+                if (node.G > limit) continue;
+
                 expansions++;
+
+                if (orderLength > Vec2.Epsilon)
+                {
+                    Vec2 fromStart = node.Position - start;
+                    float along = Vec2.Dot(fromStart, orderUnit);
+                    float sideways = MathF.Abs(fromStart.X * orderUnit.Y - fromStart.Y * orderUnit.X);
+
+                    // Past the goal, or behind the start: both are the search
+                    // leaving the stretch of ground the order is about.
+                    float beyond = along < 0f ? -along : along - orderLength;
+
+                    // Held to a box round the order rather than turned loose on
+                    // the map. Pruned at the pop rather than at the push so the
+                    // bound is asked once a state, not once an edge.
+                    if (StrayMultiple > 0f)
+                    {
+                        float room = orderLength * StrayMultiple;
+                        if (room < StrayFloorMetres) room = StrayFloorMetres;
+
+                        if (sideways > room || beyond > room) continue;
+                    }
+
+                    if (sideways > StrayedSideways) StrayedSideways = sideways;
+                    if (beyond > StrayedAlong) StrayedAlong = beyond;
+                }
 
                 if (AtGoal(node.Position, node.Heading, goal, goalHeading))
                 {
@@ -399,6 +566,7 @@ namespace BattleChess.Rules.HybridPlanning
                     // orders leave through here, so releasing it only when the
                     // search gave up meant the pool was almost never warm.
                     turnField?.Release();
+                    LastExpansions = expansions;
                     return Outcome.Success(route, expansions, primitivesTried, obstacles.Count, node.G, tally);
                 }
 
@@ -426,6 +594,7 @@ namespace BattleChess.Rules.HybridPlanning
                             primitives, moverFootprint.BoundingRadius + ClearanceMarginMetres);
 
                         turnField?.Release();
+                        LastExpansions = expansions;
                         return Outcome.Success(
                             straight, expansions, primitivesTried, obstacles.Count, node.G + shot, tally);
                     }
@@ -479,6 +648,8 @@ namespace BattleChess.Rules.HybridPlanning
             }
 
             turnField?.Release();
+
+            LastExpansions = expansions;
 
             PathFailure why = expansions >= budget ? PathFailure.SearchBudgetExhausted : PathFailure.NoRouteExists;
             return Outcome.Failed(why, expansions, primitivesTried, obstacles.Count, tally);
@@ -1052,12 +1223,16 @@ namespace BattleChess.Rules.HybridPlanning
         /// </remarks>
         private static long BinOf(Vec2 position, Facing heading)
         {
-            long ix = (long)MathF.Floor(position.X / PositionBinMetres);
-            long iy = (long)MathF.Floor(position.Y / PositionBinMetres);
+            float bin = PositionBin > 0f ? PositionBin : PositionBinMetres;
 
-            float turn = 2f * MathF.PI / HeadingBins;
-            int ith = (int)MathF.Round(heading.Radians / turn) % HeadingBins;
-            if (ith < 0) ith += HeadingBins;
+            long ix = (long)MathF.Floor(position.X / bin);
+            long iy = (long)MathF.Floor(position.Y / bin);
+
+            int bins = Headings > 0 ? Headings : HeadingBins;
+
+            float turn = 2f * MathF.PI / bins;
+            int ith = (int)MathF.Round(heading.Radians / turn) % bins;
+            if (ith < 0) ith += bins;
 
             return (((ix & 0x1FFFFF) << 42) | ((iy & 0x1FFFFF) << 21) | (uint)ith);
         }

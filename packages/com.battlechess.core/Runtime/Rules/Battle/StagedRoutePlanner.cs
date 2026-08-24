@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules.HybridPlanning;
@@ -43,7 +43,77 @@ namespace BattleChess.Rules
         /// <summary>What a corridor-bounded pose search may spend before widening.</summary>
         internal static int BoundedBudget = 4000;
 
+        /// <summary>
+        /// What the pose search may spend before it gives up and the press is
+        /// taken. 0 leaves the lattice's own hundred thousand.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The lattice's own cap is a safety valve set where nothing was
+        /// expected to reach it. Recorded in play, orders were reaching 31 640
+        /// expansions and costing <b>888 to 1080 ms</b> - and then having the
+        /// answer refused by [M65] for being five times dearer than the press.
+        /// A search whose answer is going to be thrown away should be allowed
+        /// to give up.
+        /// </para>
+        /// <para>
+        /// <b>Swept on both fixtures, three fields, and the value is where
+        /// quality stops being free.</b> At twenty thousand the Crucible's
+        /// one-click order is byte-identical in outcome - 17 unwalkable, 16
+        /// pressed, 416,8 s, worst detour 2,7x - at <b>15,93 ms an order
+        /// against 55,08</b>; Broken Country likewise at 12,91 against 36,28.
+        /// At ten thousand the Long March starts pressing routes it used to
+        /// walk (1 unwalkable to 5) and the scattered Crucible goes 0 to 2. So
+        /// twenty thousand, which is three and a half times cheaper for one
+        /// extra pressed route in eighty.
+        /// </para>
+        /// <para>
+        /// <b>Ten thousand is quality-identical to twenty and half the cost</b>
+        /// — same unwalkable, same detour, same 33 294 route-seconds, the
+        /// Crucible's worst order 38,2 ms against 67,5. Left at twenty
+        /// thousand until the levers it pairs with are chosen, because this is
+        /// the only lever that bounds <i>worst-case</i> time and the value
+        /// should be picked once, with the rest. Below five thousand it is the
+        /// crudest lever there is: a thousand buys 14,5 ms for <b>31
+        /// unwalkable against 17</b>. See <c>docs/pathfinding-levers.md</c>.
+        /// </para>
+        /// <para>
+        /// <b>This does not remove the freeze on its own.</b> On the Great
+        /// Field the same cap takes the recorded worst order from 140,5 ms to
+        /// 101,5, not to nothing. A single order that costs a tenth of a
+        /// second is a hitch whatever the cap, and the answer to that is to
+        /// stop planning it on the frame that asked - see M64, which already
+        /// proved a plan can be worked out off the main thread.
+        /// </para>
+        /// </remarks>
+        internal static int PoseExpansionBudget = 20000;
+
         internal static float CorridorHalfWidthMetres;   // 0 = straight to the unbounded search
+
+        /// <summary>
+        /// How many times a press-through's cost a clean way round may cost
+        /// and still be preferred to it. 0 turns the ceiling off, which
+        /// restores the absolute priority M55 gave the way round.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// M55 read Mx2c - &quot;if clean movement is not possible, a press-through
+        /// is initiated&quot; - as an ordering with no price attached: any clean
+        /// route beats any press. That killed the seizure bug and produced a
+        /// worse one. Recorded in play, tick 651: a regiment ordered 239 m
+        /// across open ground with <b>one</b> of its own on the line walked
+        /// <b>1325 m in 847 s</b> to avoid a press the ladder priced at
+        /// <b>151 s</b>. Nobody watching a battle reads a five-fold detour as
+        /// good order; they read it as the regiment refusing the order.
+        /// </para>
+        /// <para>
+        /// So the priority holds, but not past a multiple. Below the ceiling
+        /// the way round wins however much dearer it is, which is Mx2c intact
+        /// for every ordinary order; above it the press is taken and declared,
+        /// which is what a press being <i>visible</i> was always for.
+        /// </para>
+        /// </remarks>
+        internal static float WayRoundCostCeiling = 3f;
 
         /// <summary>
         /// Whether every cheap graph is asked before the lattice is, rather
@@ -117,11 +187,11 @@ namespace BattleChess.Rules
 
         /// <summary>Measurement counters: how many orders reach each stage.</summary>
         internal static int Staged, LadderClean, LadderBent, TangentClean, CornersClean, RingsClean,
-            PoseAsked, PoseWon, PoseWidened, Pressed;
+            PoseAsked, PoseWon, PoseWidened, PoseTooDear, Pressed;
 
         internal static void ResetCounters() =>
             Staged = LadderClean = LadderBent = TangentClean = CornersClean = RingsClean =
-                PoseAsked = PoseWon = PoseWidened = Pressed =
+                PoseAsked = PoseWon = PoseWidened = PoseTooDear = Pressed =
                     BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
         public string Name => "staged ladder with tangent recovery";
@@ -133,6 +203,27 @@ namespace BattleChess.Rules
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
+
+            // Every route this planner hands out is cast ahead and straightened,
+            // whichever search produced it. A ladder route that walks left, up
+            // and left again to a destination one diagonal away is the same
+            // defect as a lattice route with 154 sample points in it, and the
+            // fix cannot belong to one of them.
+            Plan chosen = Choose(battle, unit, pathfinder, destination, log, wayRound, arriveOn);
+            Plan straightened = RouteSmoothing.Applied(battle, unit, chosen);
+
+            // Straightening must never turn a route the executor would walk
+            // into one it refuses. It is proved against the same gate the
+            // route itself had to pass, and the wound route stands if it fails.
+            if (ReferenceEquals(chosen.Path.Waypoints, straightened.Path.Waypoints)) return chosen;
+
+            return WalksCleanly(battle, unit, straightened) ? straightened : chosen;
+        }
+
+        private static Plan Choose(
+            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+            IBattleLog? log, IWayRound? wayRound, Facing? arriveOn)
+        {
 
             // Attacks have an approach planner and a moving target.  Their
             // repeated short plans are deliberately governed by OrderSystem's
@@ -259,24 +350,42 @@ namespace BattleChess.Rules
                         ? tangent.Path.Waypoints
                         : null;
 
+                // What the way round is allowed to cost, told to the search
+                // rather than applied to its answer. M65 was throwing away
+                // routes that took 888 to 1080 ms to find; a limit the search
+                // knows about turns that into a refusal it can reach in a
+                // fraction of the time, because the turn field's estimate is
+                // admissible and can rule the whole thing out at the start.
+                float limit = 0f;
+
+                if (WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough)
+                {
+                    float pressed = Marching.SecondsToWalk(
+                        battle, unit, ladder.Path.Waypoints, ladder.Hold);
+
+                    if (pressed > 1f) limit = pressed * WayRoundCostCeiling;
+                }
+
                 Plan posed;
 
                 if (tube != null)
                 {
                     posed = HybridAStarRoutePlanner.PlanAlong(
                         battle, unit, destination, arriveOn,
-                        tube, CheapCorridorHalfWidthMetres, log, BoundedBudget);
+                        tube, CheapCorridorHalfWidthMetres, log, BoundedBudget, limit);
                 }
                 else if (CorridorHalfWidthMetres > 0f)
                 {
                     posed = HybridAStarRoutePlanner.PlanAlong(
                         battle, unit, destination, arriveOn,
-                        corridor: null, CorridorHalfWidthMetres, log, BoundedBudget);
+                        corridor: null, CorridorHalfWidthMetres, log, BoundedBudget, limit);
                 }
                 else
                 {
                     posed = HybridAStarRoutePlanner.PlanAlong(
-                        battle, unit, destination, arriveOn, corridor: null, 0f, log);
+                        battle, unit, destination, arriveOn, corridor: null, 0f, log,
+                        expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
+                        secondsLimit: limit);
                 }
 
                 bool bounded = tube != null || CorridorHalfWidthMetres > 0f;
@@ -286,14 +395,30 @@ namespace BattleChess.Rules
                 {
                     PoseWidened++;
                     posed = HybridAStarRoutePlanner.PlanAlong(
-                        battle, unit, destination, arriveOn, corridor: null, 0f, log);
+                        battle, unit, destination, arriveOn, corridor: null, 0f, log,
+                        expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
+                        secondsLimit: limit);
                 }
 
                 if (posed.Path.Found && !posed.PressedThrough &&
                     WalksCleanly(battle, unit, posed))
                 {
-                    PoseWon++;
-                    return posed;
+                    // Priced against the press it exists to avoid, in the
+                    // executor's own currency rather than in metres - the
+                    // seconds a route takes are what a player waits through,
+                    // and a heading change costs seconds while covering no
+                    // ground at all.
+                    if (WayRoundCostCeiling > 0f &&
+                        ladder.Path.Found && ladder.PressedThrough &&
+                        CostsMoreThan(battle, unit, posed, ladder, WayRoundCostCeiling))
+                    {
+                        PoseTooDear++;
+                    }
+                    else
+                    {
+                        PoseWon++;
+                        return posed;
+                    }
                 }
             }
 
@@ -307,6 +432,36 @@ namespace BattleChess.Rules
             }
 
             return tangent.Path.Found ? tangent : ladder;
+        }
+
+        /// <summary>
+        /// Whether one route costs more than <paramref name="multiple"/> times
+        /// another, in the seconds the walker will actually spend.
+        /// </summary>
+        /// <remarks>
+        /// Both sides go through <see cref="Marching.SecondsToWalk"/> with
+        /// their own held fronts, because that is the executor's model and the
+        /// only currency every planner here shares. A planner's own idea of
+        /// what its route cost is not comparable with another's - the lattice
+        /// minimises seconds over a heading lattice, the ladder measures
+        /// metres - and comparing those directly is how a route that is
+        /// cheaper on paper turns out to be five times longer to walk.
+        /// </remarks>
+        private static bool CostsMoreThan(
+            BattleState battle, UnitInstance unit, Plan round, Plan press, float multiple)
+        {
+            float pressed = Marching.SecondsToWalk(
+                battle, unit, press.Path.Waypoints, press.Hold);
+
+            // A press that costs nothing measurable cannot be exceeded by a
+            // multiple of itself, so the ceiling stands aside rather than
+            // refusing every way round on a division by almost zero.
+            if (pressed <= 1f) return false;
+
+            float around = Marching.SecondsToWalk(
+                battle, unit, round.Path.Waypoints, round.Hold);
+
+            return around > pressed * multiple;
         }
 
         /// <summary>
