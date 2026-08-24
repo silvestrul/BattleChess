@@ -61,9 +61,16 @@ namespace BattleChess.Rules
         /// </summary>
         public static readonly IRoutePlanner TheHybridAStar = new HybridAStarRoutePlanner();
 
+        /// <summary>
+        /// Ladder-first planner that proves a route can be walked, stages a
+        /// regiment out of an opening overlap, and only then asks tangents to
+        /// recover a route the ladder cannot make safe.
+        /// </summary>
+        public static readonly IRoutePlanner TheStaged = new StagedRoutePlanner();
+
         /// <summary>Every way of planning, for the harness that compares them.</summary>
         public static IReadOnlyList<IRoutePlanner> All { get; } =
-            new[] { TheLadder, TheSearch, TheCorners, TheTangents, TheHybridAStar };
+            new[] { TheLadder, TheSearch, TheCorners, TheTangents, TheHybridAStar, TheStaged };
 
         /// <summary>
         /// What a march uses when nobody says otherwise.
@@ -92,30 +99,40 @@ namespace BattleChess.Rules
         /// </para>
         /// </remarks>
         /// <summary>
-        /// <b>TEMPORARY — the hybrid is on trial as the default.</b> Put back to
-        /// <see cref="TheTangents"/> when the trial ends.
+        /// <b><see cref="TheStaged"/>, and the trial is over.</b>
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Changed here rather than behind a debug toggle on purpose. Both
-        /// re-plan sites in <c>OrderSystem</c> call <c>Marching.PlanTo</c>
-        /// without naming a planner, so a toggle on the *order* would give a
-        /// regiment a hybrid route and then re-plan it with the tangents search
-        /// the moment it was held up — which is not a trial of anything.
+        /// Named here rather than behind a debug toggle on purpose. Both re-plan
+        /// sites in <c>OrderSystem</c> call <c>Marching.PlanTo</c> without
+        /// naming a planner, so a toggle on the <i>order</i> would give a
+        /// regiment one planner's route and then re-plan it with another's the
+        /// moment it was held up — which is not a trial of anything.
         /// </para>
         /// <para>
-        /// What to expect, measured: <b>1 000 to 2 400 ms an order</b> against
-        /// the tangents search's 1,4 to 1,9 in a Release build, so a wing order
-        /// will stop the game for tens of seconds. And it is the only planner
-        /// that fails to route at all — 62, 72 and 48 of 80 on the three bench
-        /// fields, where every other planner returns 80 of 80. A regiment that
-        /// simply does not move is the expected failure, not a new bug.
+        /// <b>What to expect, measured least of three in Release, eighty
+        /// regiments an order.</b> One at a time: <b>3,1 ms</b> an order on the
+        /// Long March, <b>4,5</b> on the Crucible, <b>2,4</b> on Broken
+        /// Country. Planned as a wing on twelve cores: <b>1,1 / 1,8 / 1,2</b>
+        /// including the placement search a real click also pays for. It routes
+        /// <b>80 of 80</b> on all three fields, and — the number that decides
+        /// whether the route is worth anything — <b>0 unwalkable and 0
+        /// press-throughs</b>, where the ladder and the tangent search each
+        /// leave 28 to 34 routes the executor will refuse. See
+        /// <see cref="StagedRoutePlanner"/> for how it gets there and
+        /// <c>docs/DECISIONS.md</c> M55 to M64 for what it cost to.
+        /// </para>
+        /// <para>
+        /// <b>An attack is still planned over tangents</b>, from inside
+        /// <see cref="StagedRoutePlanner"/> itself, because the chase cadence
+        /// re-plans against a target that moves and wants a stable route shape.
+        /// So a march is a test of this and an attack is not.
         /// </para>
         /// </remarks>
-        public static IRoutePlanner Default { get; } = TheTangents;   // TRIAL: TheHybridAStar
+        public static IRoutePlanner Default { get; } = TheStaged;
 
-        /// <summary>What <see cref="Default"/> is when the trial above is over.</summary>
-        public static IRoutePlanner SettledDefault { get; } = TheTangents;
+        /// <summary>The same thing. Kept while callers that name it are tidied up.</summary>
+        public static IRoutePlanner SettledDefault { get; } = TheStaged;
 
         private sealed class Search : IRoutePlanner
         {

@@ -129,6 +129,9 @@ namespace BattleChess.Contracts
             /// <summary>Estimating what is left to travel, from one state.</summary>
             HybridHeuristic,
 
+            /// <summary>Driving straight at the destination from one state, to see if it lands.</summary>
+            HybridShot,
+
             /// <summary>Swept-rectangle first contact. Counted only.</summary>
             SweepTest,
 

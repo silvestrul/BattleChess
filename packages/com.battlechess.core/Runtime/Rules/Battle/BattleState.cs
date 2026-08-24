@@ -255,8 +255,8 @@ namespace BattleChess.Rules
         /// </remarks>
         public readonly PlanningBudget Planning = new PlanningBudget();
 
-        private readonly Dictionary<MovementType, PassableGround> _passable =
-            new Dictionary<MovementType, PassableGround>();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<MovementType, PassableGround> _passable =
+            new System.Collections.Concurrent.ConcurrentDictionary<MovementType, PassableGround>();
 
         /// <summary>
         /// Where <paramref name="moving"/> cannot go on this field, for asking
@@ -270,22 +270,41 @@ namespace BattleChess.Rules
         /// </remarks>
         public PassableGround PassableFor(MovementType moving)
         {
-            if (_passable.TryGetValue(moving, out PassableGround known)) return known;
-
-            PassableGround built = PassableGround.Build(Terrain, Movement, moving);
-            _passable[moving] = built;
-
-            return built;
+            // Worked out on the first ask and kept, and the table it builds is
+            // read by every clearance check on every leg - so when a wing is
+            // ordered at once, the first ask comes from several threads
+            // together. A plain dictionary read while another thread is
+            // resizing it does not throw reliably; it returns nonsense, which
+            // is the kind of fault that reappears as "a regiment walked through
+            // a wood" a week later. Two threads may both build the table; only
+            // one is kept, and they build the same thing.
+            return _passable.GetOrAdd(moving, m => PassableGround.Build(Terrain, Movement, m));
         }
 
         /// <summary>
-        /// The one scratchpad every march in this battle plans on (<b>M40</b>).
+        /// The scratchpad a march in this battle plans on (<b>M40</b>) - one per
+        /// thread that ever plans one.
         /// </summary>
         /// <remarks>
-        /// Per battle, not static: two battles in one process share nothing, and
-        /// a battle only ever plans one march at a time.
+        /// <para>
+        /// Per battle, not static: two battles in one process share nothing.
+        /// </para>
+        /// <para>
+        /// It was also one per battle, on the reasoning that a battle only ever
+        /// plans one march at a time. That is true of the tick and false of the
+        /// order: a player box-selects a wing and clicks, and eighty routes are
+        /// wanted at once from eighty independent questions. Every other
+        /// scratchpad in planning is already <c>[ThreadStatic]</c>; this one
+        /// was the single thing making a plan un-shareable, and sharing it
+        /// across threads did not merely slow the search down - it indexed a
+        /// list built for one march with an offset belonging to another and
+        /// threw.
+        /// </para>
         /// </remarks>
-        internal RouteSearch.Ledger PlanningScratch { get; } = new RouteSearch.Ledger();
+        internal RouteSearch.Ledger PlanningScratch => _scratch.Value!;
+
+        private readonly System.Threading.ThreadLocal<RouteSearch.Ledger> _scratch =
+            new System.Threading.ThreadLocal<RouteSearch.Ledger>(() => new RouteSearch.Ledger());
 
         public OnField UnitsOnField() => new OnField(_units);
 

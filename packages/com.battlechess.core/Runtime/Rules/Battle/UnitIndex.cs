@@ -50,14 +50,37 @@ namespace BattleChess.Rules
         private const float BucketMetres = 128f;
 
         private readonly List<UnitInstance>[] _buckets;
-        private readonly int[] _visited;
         private readonly int _columns;
         private readonly int _rows;
         private readonly Vec2 _origin;
 
-        private int _sweep;
         private float _widestReach;
-        private bool _built;
+        private volatile bool _built;
+
+        private readonly object _filing = new object();
+
+        /// <summary>
+        /// One thread's marks, so that two queries at once cannot cross out
+        /// each other's buckets.
+        /// </summary>
+        /// <remarks>
+        /// The dedup below is a stamp per bucket and a counter per query, which
+        /// is the cheapest way to say "already emptied into this answer" and
+        /// costs nothing to reset. Shared between threads it is worse than
+        /// useless: one query's counter moving marks another query's buckets as
+        /// already seen, and a bucket skipped is a body the caller is never told
+        /// about. Measured on eighty orders given at once - the routes came back
+        /// different from the same eighty given one at a time, and one of them
+        /// walked through a regiment.
+        /// </remarks>
+        private sealed class Marks
+        {
+            public int[] Visited = System.Array.Empty<int>();
+            public int Sweep;
+        }
+
+        private readonly System.Threading.ThreadLocal<Marks> _marks =
+            new System.Threading.ThreadLocal<Marks>(() => new Marks());
 
         public UnitIndex(MapBounds bounds)
         {
@@ -72,7 +95,6 @@ namespace BattleChess.Rules
             for (int i = 0; i < _buckets.Length; i++)
                 _buckets[i] = new List<UnitInstance>();
 
-            _visited = new int[_buckets.Length];
         }
 
         /// <summary>Throws away what was filed, so the next query refiles it.</summary>
@@ -94,6 +116,8 @@ namespace BattleChess.Rules
             into.Clear();
             Build(units);
 
+            Marks marks = MarksForThisThread();
+
             // Everything within this of some sample point along the line is
             // caught, and the samples are close enough together that no point on
             // the line is further than half a bucket from one of them.
@@ -106,12 +130,12 @@ namespace BattleChess.Rules
                 ? 1
                 : 1 + (int)MathF.Ceiling(length / (BucketMetres * 0.5f));
 
-            _sweep++;
+            marks.Sweep++;
 
             for (int s = 0; s < samples; s++)
             {
                 Vec2 at = samples == 1 ? from : Vec2.Lerp(from, to, s / (float)(samples - 1));
-                Gather(at, halo, into);
+                Gather(at, halo, into, marks);
             }
         }
 
@@ -121,11 +145,23 @@ namespace BattleChess.Rules
             into.Clear();
             Build(units);
 
-            _sweep++;
-            Gather(at, reach + _widestReach, into);
+            Marks marks = MarksForThisThread();
+
+            marks.Sweep++;
+            Gather(at, reach + _widestReach, into, marks);
         }
 
-        private void Gather(Vec2 at, float halo, List<UnitInstance> into)
+        private Marks MarksForThisThread()
+        {
+            Marks marks = _marks.Value!;
+
+            if (marks.Visited.Length < _buckets.Length)
+                marks.Visited = new int[_buckets.Length];
+
+            return marks;
+        }
+
+        private void Gather(Vec2 at, float halo, List<UnitInstance> into, Marks marks)
         {
             int lowColumn = Column(at.X - halo);
             int highColumn = Column(at.X + halo);
@@ -139,8 +175,8 @@ namespace BattleChess.Rules
 
                 // Buckets are disjoint, so a bucket already emptied into this
                 // answer has nothing new to say.
-                if (_visited[bucket] == _sweep) continue;
-                _visited[bucket] = _sweep;
+                if (marks.Visited[bucket] == marks.Sweep) continue;
+                marks.Visited[bucket] = marks.Sweep;
 
                 List<UnitInstance> held = _buckets[bucket];
                 for (int i = 0; i < held.Count; i++)
@@ -148,10 +184,27 @@ namespace BattleChess.Rules
             }
         }
 
+        /// <summary>
+        /// Files every body, once, however many threads ask at the same moment.
+        /// </summary>
+        /// <remarks>
+        /// The gate is taken only on the first query after a move, so the cost
+        /// falls on one query a tick rather than on all of them; everything
+        /// after it reads a volatile flag and goes straight through.
+        /// </remarks>
         private void Build(IReadOnlyList<UnitInstance> units)
         {
             if (_built) return;
 
+            lock (_filing)
+            {
+                if (_built) return;
+                Refile(units);
+            }
+        }
+
+        private void Refile(IReadOnlyList<UnitInstance> units)
+        {
             for (int i = 0; i < _buckets.Length; i++)
                 _buckets[i].Clear();
 

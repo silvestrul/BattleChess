@@ -267,6 +267,36 @@ namespace BattleChess.Rules.HybridPlanning
         /// Read straight off the hop counts, downhill, so it costs eight
         /// array lookups and stores nothing.
         /// </remarks>
+        /// <summary>
+        /// The grid's own way round, start to goal, as a polyline of cell
+        /// centres. Follows <see cref="DirectionAt"/> downhill.
+        /// </summary>
+        /// <remarks>
+        /// This is a point robot's route, so it is not walkable by a rectangle
+        /// and is never returned as one. What it is good for is saying
+        /// <i>which way round</i> — the topology the lattice would otherwise
+        /// spend tens of thousands of expansions rediscovering.
+        /// </remarks>
+        public List<Vec2> TraceTo(Vec2 from, Vec2 goal)
+        {
+            var line = new List<Vec2> { from };
+
+            Vec2 at = from;
+            int steps = (_columns + _rows) * 2;
+
+            for (int i = 0; i < steps; i++)
+            {
+                if (Vec2.DistanceSquared(at, goal) <= _cellMetres * _cellMetres * 4f) break;
+                if (!DirectionAt(at, out Vec2 towards)) break;
+
+                at += towards * _cellMetres;
+                line.Add(at);
+            }
+
+            line.Add(goal);
+            return line;
+        }
+
         public bool DirectionAt(Vec2 from, out Vec2 towards)
         {
             towards = default;

@@ -918,8 +918,16 @@ namespace BattleChess.Rules
 
             foreach ((float _, Vec2 mouth, Vec2 far, Facing front) in mouths)
             {
-                if (!IsClearLeg(battle, unit, unit.Position, mouth, unit.Facing)) continue;
+                // The corridor first, though it is the middle leg of the three.
+                // It is the squeeze — the thing most likely to refuse — and it
+                // is also much the shortest line of the three, so its scan is
+                // the cheapest of them. Asked last, as it was, every mouth the
+                // gap itself would have rejected was paid for twice over in
+                // full-length scans up to it and away from it. The three are a
+                // conjunction of pure tests, so the order cannot change which
+                // mouths are taken, only what is spent finding out.
                 if (!IsClearLine(battle, unit, mouth, far, front, leaving: true)) continue;
+                if (!IsClearLeg(battle, unit, unit.Position, mouth, unit.Facing)) continue;
                 if (!IsClearLeg(battle, unit, far, destination, front)) continue;
 
                 // Named on the leg it belongs to, as the drawn-line crab does:

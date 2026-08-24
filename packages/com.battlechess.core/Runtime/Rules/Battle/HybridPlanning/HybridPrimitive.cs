@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -179,8 +179,21 @@ namespace BattleChess.Rules.HybridPlanning
     /// </remarks>
     internal static class HybridPrimitives
     {
-        private const float LongStepMetres = 10f;
-        private const float ShortStepMetres = 4f;
+        /// <summary>A march longer than <see cref="LongStepMetres"/>, or nought for none.</summary>
+        /// <remarks>
+        /// <b>Nought, on the measurement.</b> At 60 m it buys the Long March
+        /// 4,4 to 4,3 ms an order and Broken Country 3,4 to 3,1, and costs the
+        /// Crucible 6,5 to 8,4; at 90 m every field is worse. And it is paid
+        /// for in route quality at both lengths - the Crucible 633,3 s to
+        /// 643,2, Broken Country 786,4 to 794,1 - because a stride that only
+        /// fits where the ground is empty makes the lattice prefer the empty
+        /// ground to the short way round. One more primitive is one more full
+        /// sweep at every expansion, and this one does not earn it.
+        /// </remarks>
+        internal static float RunStepMetres;
+
+        private const float LongStepMetres = 30f;
+        private const float ShortStepMetres = 22f;
 
         /// <summary>How far a step back reaches, in metres — deliberately short: a hop clear, not a retreat.</summary>
         private const float BackStepMetres = 4f;
@@ -239,6 +252,9 @@ namespace BattleChess.Rules.HybridPlanning
             return radians / PivotRateRadiansFor(turnRateDegreesPerSecond) + steps * PivotPenaltySeconds;
         }
 
+        /// <summary>Whether the shorter step contributes a march only, and no wheels.</summary>
+        internal static bool LeanPrimitives = true;
+
         public static IReadOnlyList<HybridPrimitive> For(float topSpeedMetresPerSecond, float turnRateDegreesPerSecond)
         {
             float turnRateRadians = turnRateDegreesPerSecond * (MathF.PI / 180f);
@@ -246,10 +262,24 @@ namespace BattleChess.Rules.HybridPlanning
 
             var set = new List<HybridPrimitive>(10);
 
-            foreach (float step in new[] { LongStepMetres, ShortStepMetres })
+            // Every primitive is a sweep of poses against every nearby body,
+            // and the lattice tries all of them at every one of its expansions
+            // — measured at 72% of all planning time. So the set is worth
+            // exactly what it buys: two step lengths 30 m and 22 m apart give
+            // the search two ways to say almost the same thing, and the shorter
+            // one earns its place for reaching a goal tolerance, not for
+            // wheeling.
+            var steps = new[] { LongStepMetres, ShortStepMetres };
+
+            for (int i = 0; i < steps.Length; i++)
             {
+                float step = steps[i];
+                bool longest = i == 0;
+
                 float marchSeconds = step / topSpeedMetresPerSecond;
                 set.Add(new HybridPrimitive(step, 0f, marchSeconds, "march"));
+
+                if (LeanPrimitives && !longest) continue;
 
                 float wheelSeconds = step / (topSpeedMetresPerSecond * WheelPaceFraction);
 
@@ -267,6 +297,20 @@ namespace BattleChess.Rules.HybridPlanning
 
                 set.Add(new HybridPrimitive(step, wheelTurn, wheelSeconds, "wheel left"));
                 set.Add(new HybridPrimitive(step, -wheelTurn, wheelSeconds, "wheel right"));
+            }
+
+            // A stride for open ground. The lattice crosses a battlefield
+            // thirty metres at a time and pays a full sweep for each, so a
+            // march with nothing in the way costs as many expansions as it is
+            // long - and the shot at the goal only answers a run that is clear
+            // the whole way to the destination, which a long order rarely is.
+            // A longer march is one sweep for several steps' worth of ground,
+            // and it is refused by exactly the same sweep when the ground is
+            // not clear, so it can only be taken where it is free to take.
+            if (RunStepMetres > 0f)
+            {
+                set.Add(new HybridPrimitive(
+                    RunStepMetres, 0f, RunStepMetres / topSpeedMetresPerSecond, "run"));
             }
 
             // Pivoting turns through a fixed slice of arc rather than a fixed

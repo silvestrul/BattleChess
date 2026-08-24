@@ -1444,6 +1444,17 @@ namespace BattleChess.Rules
         private const float WalkingIsCheap = 0.1f;
 
         /// <summary>Whether a regiment could legally stand at a placement at all.</summary>
+        /// <remarks>
+        /// <b>Narrowing this by the spatial index was tried and does not pay.</b>
+        /// It looked like the biggest single item in a real one-click order -
+        /// 6,9 ms a regiment against the bench's 2,2 - and the difference turned
+        /// out to be nothing to do with standing: a wing sent to one block asks
+        /// the lattice forty-six times where a wing sent across the field asks
+        /// it thirty-two, and that is the whole of it. Measured with the index:
+        /// Broken Country 536,6 ms against 555,4 for eighty, which is noise
+        /// either way. In the profile this is <c>FormationFits</c> at 11,5 ms of
+        /// 630. Left as the plain walk it always was.
+        /// </remarks>
         private static bool CanStandThere(BattleState battle, UnitInstance unit, Vec2 where, Facing front)
         {
             if (!battle.FormationFits(unit, where, front)) return false;

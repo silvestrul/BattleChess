@@ -27,7 +27,25 @@ namespace BattleChess.Rules.HybridPlanning
 
         public Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
-            IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null)
+            IBattleLog? log = null, IWayRound? wayRound = null, Facing? arriveOn = null) =>
+            PlanAlong(battle, unit, destination, arriveOn, corridor: null, 0f, log);
+
+        /// <summary>
+        /// The same pose search, but allowed to look only within
+        /// <paramref name="corridorHalfWidthMetres"/> of a route some cheaper
+        /// planner already drew.
+        /// </summary>
+        /// <remarks>
+        /// The lattice's cost is its expansion count, and its expansions go on
+        /// ground no sensible route would touch. A cheap planner that has
+        /// already answered — even with a route the executor refuses — has said
+        /// something true about <i>where</i> the answer lies, and that is worth
+        /// more to this search than to the planner that produced it.
+        /// </remarks>
+        public static Plan PlanAlong(
+            BattleState battle, UnitInstance unit, Vec2 destination, Facing? arriveOn,
+            IReadOnlyList<Vec2>? corridor, float corridorHalfWidthMetres, IBattleLog? log = null,
+            int? expansionBudget = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
@@ -41,13 +59,26 @@ namespace BattleChess.Rules.HybridPlanning
             // of distances and approach angles.
             Facing? goalHeading = arriveOn;
 
+            // Two lists, and the difference between them is the point.
+            //
+            // Clearance must not count the mover against itself, so `obstacles`
+            // leaves it out — and that is exactly why no two regiments of one
+            // army ever had the same obstacle set, and why the heuristic field
+            // was rebuilt eighty times for eighty orders that share a field.
+            // `everybody` is the same set for every mover of one owner, so the
+            // estimate can be built once and shared. It costs the mover's own
+            // cell, which the field answers for by reading a neighbour.
             var obstacles = new List<HybridBox>();
+            var everybody = new List<HybridBox>();
+
             foreach (UnitInstance other in battle.UnitsOnField())
             {
-                if (other.Id == unit.Id) continue;
                 if (other.Owner != unit.Owner) continue; // M15a: enemies are not obstacles to a plan.
 
-                obstacles.Add(HybridBox.For(other.Position, other.Facing, other.Footprint));
+                HybridBox body = HybridBox.For(other.Position, other.Facing, other.Footprint);
+
+                everybody.Add(body);
+                if (other.Id != unit.Id) obstacles.Add(body);
             }
 
             float turnRateDegreesPerSecond = unit.Def.Get(UnitAttributes.TurnRate);
@@ -55,7 +86,9 @@ namespace BattleChess.Rules.HybridPlanning
 
             HybridAStarPlanner.Outcome outcome = HybridAStarPlanner.Search(
                 unit.Position, unit.Facing, destination, goalHeading,
-                unit.Footprint, obstacles, topSpeed, turnRateDegreesPerSecond);
+                unit.Footprint, obstacles, topSpeed, turnRateDegreesPerSecond,
+                expansionBudget: expansionBudget, heuristicWeight: null,
+                corridor: corridor, corridorHalfWidthMetres: corridorHalfWidthMetres);
 
             // Places is left at zero rather than repeating Expansions: this
             // planner has no candidate places, and printing the same number

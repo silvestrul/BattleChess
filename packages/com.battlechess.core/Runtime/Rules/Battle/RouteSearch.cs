@@ -93,7 +93,7 @@ namespace BattleChess.Rules
         /// contributed nothing and the search planned as though they were not
         /// there.
         /// </remarks>
-        private const int MostPlaces = 48;
+        internal static int MostPlaces = 48;
 
         /// <summary>
         /// How many other places each place is joined to.
@@ -138,7 +138,7 @@ namespace BattleChess.Rules
         /// means the idea is wrong rather than the number.
         /// </para>
         /// </remarks>
-        private const int MostJoins = MostPlaces;
+        internal static int MostJoins => MostPlaces;
 
         /// <summary>
         /// How many times the search may stop, grow the ground it is allowed to
@@ -151,7 +151,7 @@ namespace BattleChess.Rules
         /// six layers of regiment between a mover and its destination is a
         /// battle line, not a march.
         /// </remarks>
-        private const int MostRounds = 1;
+        internal static int MostRounds = 1;
 
         /// <summary>
         /// Every candidate place the search considered for this march, for a

@@ -35,6 +35,9 @@ namespace BattleChess.Rules
         public UnitDef Def { get; }
 
         private Vec2 _position;
+        private Facing _facing;
+        private OrientedRect _shape;
+        private bool _shapeKnown;
 
         /// <summary>Centre of the formation, in world metres.</summary>
         /// <remarks>
@@ -52,6 +55,7 @@ namespace BattleChess.Rules
             set
             {
                 _position = value;
+                _shapeKnown = false;
                 Home?.NoteUnitsMoved();
             }
         }
@@ -63,7 +67,15 @@ namespace BattleChess.Rules
         /// a body points can never move it into a bucket the query did not
         /// already look in.
         /// </remarks>
-        public Facing Facing { get; set; }
+        public Facing Facing
+        {
+            get => _facing;
+            set
+            {
+                _facing = value;
+                _shapeKnown = false;
+            }
+        }
 
         /// <summary>
         /// The battle this regiment was raised into, so that moving it can
@@ -739,13 +751,36 @@ namespace BattleChess.Rules
             float before = Organization;
 
             FormationOrder = formation;
+            _shapeKnown = false;
             Organization -= formation.OrganizationCost;
 
             return before - Organization;
         }
 
         /// <summary>This unit's footprint placed where it actually stands.</summary>
-        public OrientedRect Shape => new OrientedRect(Position, Facing, Footprint);
+        /// <remarks>
+        /// <b>Kept, not rebuilt.</b> This was a fresh <see cref="OrientedRect"/>
+        /// on every read, and since that type began caching its own axes the
+        /// constructor costs a sine and a cosine — so every read of a standing
+        /// body's shape paid for trigonometry that had not changed since the
+        /// body last moved. One clearance check reads it once per nearby body
+        /// and the bench counts thirty-six thousand of them in eighty orders.
+        /// A regiment's shape changes when it moves, when it turns, and when it
+        /// re-forms, and those are the three places that clear the flag.
+        /// </remarks>
+        public OrientedRect Shape
+        {
+            get
+            {
+                if (!_shapeKnown)
+                {
+                    _shape = new OrientedRect(_position, _facing, Footprint);
+                    _shapeKnown = true;
+                }
+
+                return _shape;
+            }
+        }
 
         /// <summary>Open-ground speed in metres per second, ignoring terrain.</summary>
         public float BaseSpeed => Def.Speed;

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace BattleChess.Contracts
 {
@@ -87,6 +88,43 @@ namespace BattleChess.Contracts
         private NullBattleLog() { }
 
         public void Record(in BattleLogEntry entry) { }
+    }
+
+    /// <summary>
+    /// Keeps everything said, to be said again somewhere else later.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For work done off the main thread. A console is a list and a scroll
+    /// position and is written to from wherever the interface lives; handing it
+    /// to eighty plans running at once would have them append to the same list
+    /// together, which is a corrupt list rather than an interleaved one. So each
+    /// plan is given one of these, and whoever started the work replays them in
+    /// its own order when the work is done.
+    /// </para>
+    /// <para>
+    /// Not thread-safe itself, deliberately - one belongs to one piece of work,
+    /// and a shared one would be the very thing it exists to avoid.
+    /// </para>
+    /// </remarks>
+    public sealed class HeldBattleLog : IBattleLog
+    {
+        private readonly List<BattleLogEntry> _held = new List<BattleLogEntry>();
+
+        /// <summary>How many lines are waiting.</summary>
+        public int Count => _held.Count;
+
+        public void Record(in BattleLogEntry entry) => _held.Add(entry);
+
+        /// <summary>Says everything held, in the order it was said, and forgets it.</summary>
+        public void ReplayInto(IBattleLog log)
+        {
+            if (log == null) throw new ArgumentNullException(nameof(log));
+
+            for (int i = 0; i < _held.Count; i++) log.Record(_held[i]);
+
+            _held.Clear();
+        }
     }
 
     /// <summary>Shorthand for the common cases.</summary>
