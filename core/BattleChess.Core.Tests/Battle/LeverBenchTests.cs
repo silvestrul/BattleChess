@@ -31,6 +31,7 @@ namespace BattleChess.Tests.Battle
     /// interference and the smallest number is the one carrying least of it.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class LeverBenchTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

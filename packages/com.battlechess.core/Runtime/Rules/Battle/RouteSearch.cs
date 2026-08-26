@@ -92,8 +92,48 @@ namespace BattleChess.Rules
         /// which is the worst way to spend it — bodies further down the list
         /// contributed nothing and the search planned as though they were not
         /// there.
+        /// </para>
+        /// <para>
+        /// <b>Halved to 24 on the profile of 26 Aug 2026</b> (<b>M83</b>), and
+        /// the saving is larger than it looks: <c>Ledger.Reset</c> clears
+        /// <c>places * places * 3</c> entries across five arrays before every
+        /// search, so the cap is a quadratic tax paid whether or not the places
+        /// exist. At 48 that is 6 912 slots an array; at 24 it is 1 728.
+        /// Measured on the planner a battle actually uses, least of three in
+        /// Release: <b>25 to 29% off three fields and 10% off the fourth</b>,
+        /// with the worst single order falling further than the mean — 17,5 to
+        /// 14,2 ms on the Crucible, 11,4 to 7,5 on Broken Country.
+        /// </para>
+        /// <para>
+        /// <b>What makes it safe is a route-by-route comparison</b>, not the
+        /// totals: <c>RouteFingerprintTests.HalvingTheGraphChangesNoRoute</c>
+        /// plans all 280 orders on all four fields at both caps and compares
+        /// waypoint by waypoint. It carries a non-vacuity guard for a reason —
+        /// without one it passes at a cap of six, because the tangent stage's
+        /// answer is refused on every bench field and the cascade answers under
+        /// it. The guard asserts the search really did pass 24 places, which it
+        /// does on 51 of 280 orders, 26 of them reaching 48 exactly.
+        /// </para>
+        /// <para>
+        /// <b>So this is a real saving resting on a fact about the bench.</b>
+        /// If the tangent stage ever starts winning orders, this cap is the
+        /// first thing to re-measure — and the fingerprint test is what will
+        /// say so, because it fails the moment a route changes.
         /// </remarks>
-        internal static int MostPlaces = 48;
+        internal static int MostPlaces = 24;
+
+        /// <summary>
+        /// The most places any one search has reached since this was last
+        /// cleared, per thread.
+        /// </summary>
+        /// <remarks>
+        /// Here because <c>RouteEffort.Places</c> cannot answer it: the staged
+        /// planner returns a plan of its own and does not carry the search's
+        /// effort onto it, so every order reports zero places whatever the
+        /// search did. A measurement taken off that counter measures nothing —
+        /// which is exactly what it did before this was added.
+        /// </remarks>
+        [ThreadStatic] internal static int PlacesHighWater;
 
         /// <summary>
         /// How many other places each place is joined to.
@@ -233,6 +273,8 @@ namespace BattleChess.Rules
             // (M36), because filtering them cost real routes. Bodies is the
             // number worth arguing about; the filtered fraction is the reason
             // the graph stays this size regardless.
+            if (places.Count > PlacesHighWater) PlacesHighWater = places.Count;
+
             var effort = new RouteEffort(
                 places.Count, ledger.LegsPriced, ledger.Expanded, ledger.Rounds,
                 ledger.States, ledger.FrontierScans, ledger.CacheHits, ledger.Pruned,

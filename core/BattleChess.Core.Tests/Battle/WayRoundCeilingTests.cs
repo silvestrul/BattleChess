@@ -27,6 +27,7 @@ namespace BattleChess.Tests.Battle
     /// not a check on one, and it costs minutes.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class WayRoundCeilingTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

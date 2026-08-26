@@ -44,6 +44,7 @@ namespace BattleChess.Tests.Battle
     /// returned was the five-fold detour the ceiling then threw away.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class FewerExpansionsTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

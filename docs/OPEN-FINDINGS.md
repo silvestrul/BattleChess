@@ -1108,7 +1108,7 @@ for existing would be undone.
 
 ---
 
-## 21. Half the visibility graph is 25% of the planning bill, apparently for nothing
+## ~~21. Half the visibility graph is 25% of the planning bill~~ — SWITCHED ([M83](DECISIONS.md#m83))
 
 Raised by the full profile of 26 Aug 2026 ([M83](DECISIONS.md#m83)), not by a
 failure — nothing is broken, and that is why it needs writing down rather than
@@ -1138,9 +1138,64 @@ so its bill is call count rather than per-call speed. Fewer candidate places mea
 fewer legs means fewer clearance questions. If the graph at 48 is answering with
 places no route ever uses, halving it is free by construction.
 
-**What would close this entry.** Either a fingerprint comparison showing the
-routes are the same and the default moved to 24, or one showing they are not,
-with the field and regiment that differ named here instead.
+**Closed 26 Aug 2026.** `RouteFingerprintTests.HalvingTheGraphChangesNoRoute`
+plans all 280 orders on all four fields at both caps and compares them waypoint
+by waypoint. Identical. `MostPlaces` is now 24.
+
+**The comparison needed a non-vacuity guard, and finding out why raised
+finding 22.** Without one it passes at a cap of six, and at two — because the
+stage the cap governs never wins an order. The guard now asserts the search
+really did reach past 24 places, which it does on 51 of 280 orders.
+
+**The saving is not what it looked like.** It is not a graph half the size doing
+half the work: `Ledger.Reset` clears `places * places * 3` entries across five
+arrays before every search, so the cap is a quadratic tax paid whether or not
+the places exist — 6 912 slots an array at 48, 1 728 at 24.
+
+## 22. The tangent search wins nothing and is asked first
+
+Raised by the profile of 26 Aug 2026 ([M83](DECISIONS.md#m83)) while working out
+why finding 21's comparison could not fail.
+
+`StagedRoutePlanner` asks `RouteSearch.Find` with `Shape.Tangents` before it asks
+the regiment grid or the lattice. Across all four bench fields, 280 orders:
+
+| field | tangent asked | tangent **won** | grid won | lattice won |
+|---|---|---|---|---|
+| crucible | 32 | **0** | 23 | 9 |
+| longmarch | 4 | **0** | 4 | 0 |
+| brokencountry | 32 | **0** | 22 | 10 |
+| sidewaysmile | 15 | **0** | 7 | 3 (5 pressed) |
+
+Why every one was refused:
+
+| refused because | count |
+|---|---|
+| the search pressed through, which the staged planner will not accept | **66** |
+| a later leg will not walk | 14 |
+| the first leg will not walk | 3 |
+| no route at all | 0 |
+
+**What it costs.** About **2,5 ms a search** — `Hunt` inclusive, 81,2 ms over 32
+calls on the Crucible — against the regiment grid's **0,16 to 0,39 ms**. So the
+cascade spends roughly sixteen times the grid's cost on a stage that has not
+answered a single bench order, immediately before asking the grid, which answers
+56 of them.
+
+**Why it cannot simply be deleted.** The same `tangent` plan is the last-resort
+fallback at the bottom of the cascade (`StagedRoutePlanner.cs`, the
+`if (tangent.Path.Found)` return). Something has to answer when the grid and the
+lattice both fail.
+
+**The obvious move is reordering, not removal** — ask the grid first, and compute
+the tangent search only where it is still needed. That is a change to the shape of
+the cascade rather than a lever, so it wants deciding rather than doing:
+[W4](DECISIONS.md#w4).
+
+**What would close this entry.** Either the stages reordered, with the fingerprint
+tests showing the routes unchanged and the bench showing what it saved; or a field
+recorded here on which the tangent stage does win, which would say the bench is
+what is unrepresentative rather than the ordering.
 
 ## Older debts, not from this sweep
 

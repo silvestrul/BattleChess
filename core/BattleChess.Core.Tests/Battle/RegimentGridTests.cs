@@ -14,6 +14,7 @@ namespace BattleChess.Tests.Battle
     /// <summary>
     /// What A* over regiment-sized cells costs, and how often it answers.
     /// </summary>
+    [Collection(PlannerLevers.Name)]
     public sealed class RegimentGridTests
     {
         private readonly ITestOutputHelper _out;

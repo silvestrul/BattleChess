@@ -49,6 +49,7 @@ namespace BattleChess.Tests.Battle
     /// changes the ranking, not just the totals.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class FullProfileTests
     {
         private readonly ITestOutputHelper _out;
@@ -122,6 +123,61 @@ namespace BattleChess.Tests.Battle
             finally
             {
                 saved.Restore();
+            }
+        }
+
+
+        /// <summary>
+        /// How many candidate places a march actually reaches, against the cap
+        /// that sizes the scratchpad for it.
+        /// </summary>
+        [Fact(Skip = "A record of a measurement rather than a check on one. It is what " +
+                     "found that the tangent stage wins nothing on any bench field — see " +
+                     "open finding 22 — and it resets global counters while it runs.")]
+        public void HowManyPlacesAMarchActuallyReaches()
+        {
+            foreach (string field in Fields)
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+                IPathfinder pathfinder = new DirectPathfinder(
+                    battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+                var counts = new List<long>();
+
+                StagedRoutePlanner.ResetCounters();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Plan plan = Marching.PlanTo(
+                        battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    counts.Add(RouteSearch.PlacesHighWater);
+                    RouteSearch.PlacesHighWater = 0;
+                }
+
+                _out.WriteLine(
+                    $"{field,-16} rungs: ladder {StagedRoutePlanner.LadderClean} clean + " +
+                    $"{StagedRoutePlanner.LadderBent} bent   grid {StagedRoutePlanner.GridClean}   " +
+                    $"tangent {StagedRoutePlanner.TangentClean} " +
+                    $"(too dear {StagedRoutePlanner.TangentTooDear})   " +
+                    $"lattice asked {StagedRoutePlanner.PoseAsked} won {StagedRoutePlanner.PoseWon}   " +
+                    $"pressed {StagedRoutePlanner.Pressed}");
+
+                _out.WriteLine(
+                    $"{field,-16} why the tangent answer was refused: " +
+                    $"first leg {StagedRoutePlanner.BadFirstLeg}   " +
+                    $"later leg {StagedRoutePlanner.BadLaterLeg}   " +
+                    $"pressed {StagedRoutePlanner.BadPressed}   " +
+                    $"no route at all {StagedRoutePlanner.BadNoRoute}");
+
+                counts.Sort();
+
+                _out.WriteLine(
+                    $"{field,-16} cap {RouteSearch.MostPlaces,3}   " +
+                    $"most {counts[^1],4}   median {counts[counts.Count / 2],4}   " +
+                    $"searched {counts.FindAll(c => c > 0).Count,3} of {counts.Count}   " +
+                    $"over 24: {counts.FindAll(c => c > 24).Count,3}   " +
+                    $"at the cap: {counts.FindAll(c => c >= RouteSearch.MostPlaces).Count,3}");
             }
         }
 
