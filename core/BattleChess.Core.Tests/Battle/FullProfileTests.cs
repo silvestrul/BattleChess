@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 
@@ -175,6 +176,114 @@ namespace BattleChess.Tests.Battle
                     $"over 24: {counts.FindAll(c => c > 24).Count,3}   " +
                     $"at the cap: {counts.FindAll(c => c >= RouteSearch.MostPlaces).Count,3}");
             }
+        }
+
+
+        /// <summary>
+        /// What an order costs broken down by the stage that answered it,
+        /// rather than averaged over all of them.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The designer, on M84's tables: <i>"shouldnt worst single order be
+        /// some microseconds which is ladder's straight-line -&gt; if it works it
+        /// works?"</i> Two different things were tangled in the numbers being
+        /// read, and only one of them was reported. The <b>worst</b> order is by
+        /// construction never the straight-line case — it is the order where the
+        /// straight line failed and the whole cascade ran. But the question
+        /// underneath it is fair and had no answer anywhere: <b>what does an
+        /// order cost when the cheap rung answers it?</b> Mean and worst cannot
+        /// say, because the mean is smeared across populations that differ by
+        /// three orders of magnitude.
+        /// </para>
+        /// <para>
+        /// Attributed by which stage counter moved, not by
+        /// <c>UnitInstance.LastRung</c>: that records the ladder's own rung, and
+        /// the staged planner has stages the ladder knows nothing about.
+        /// </para>
+        /// <para>
+        /// Timed with a plain stopwatch and the profiler off. Every probe is two
+        /// timestamp reads, and at the scale of a straight-line answer the
+        /// instrumentation would be a visible share of what it claims to
+        /// measure.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one. It is the one that says the straight line answers half the orders for a tenth of a per cent of the time — M85.")]
+        public void WhatAnOrderCostsByTheStageThatAnsweredIt()
+        {
+            foreach (string field in Fields)
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+                IPathfinder pathfinder = new DirectPathfinder(
+                    battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+                // Warm, unmeasured. An unwarmed first order carries the whole
+                // cost of compiling the planner.
+                foreach (UnitInstance warm in battle.UnitsOnField())
+                    Marching.PlanTo(
+                        battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                var byStage = new Dictionary<string, List<double>>();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    StagedRoutePlanner.ResetCounters();
+
+                    long began = Stopwatch.GetTimestamp();
+
+                    Marching.PlanTo(
+                        battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    double spent =
+                        (Stopwatch.GetTimestamp() - began) * 1_000_000d / Stopwatch.Frequency;
+
+                    if (!byStage.TryGetValue(WhoAnswered(), out List<double>? kept))
+                        byStage[WhoAnswered()] = kept = new List<double>();
+
+                    kept.Add(spent);
+                }
+
+                _out.WriteLine($"=== {field} ===");
+                _out.WriteLine(
+                    $"{"answered by",-22}{"orders",8}{"median us",12}{"p90 us",10}" +
+                    $"{"worst us",10}{"share of total",16}");
+
+                double whole = 0d;
+                foreach (List<double> kept in byStage.Values)
+                    foreach (double one in kept) whole += one;
+
+                foreach (KeyValuePair<string, List<double>> pair in
+                         byStage.OrderByDescending(p => p.Value.Sum()))
+                {
+                    List<double> kept = pair.Value;
+                    kept.Sort();
+
+                    double sum = kept.Sum();
+
+                    _out.WriteLine(
+                        $"{pair.Key,-22}{kept.Count,8}{kept[kept.Count / 2],12:0.0}" +
+                        $"{kept[(int)(kept.Count * 0.9)],10:0.0}{kept[^1],10:0.0}" +
+                        $"{sum / whole,15:0.0%}");
+                }
+
+                _out.WriteLine(string.Empty);
+            }
+        }
+
+        /// <summary>Which stage of the cascade returned the route just planned.</summary>
+        private static string WhoAnswered()
+        {
+            if (StagedRoutePlanner.LadderClean > 0) return "straight line";
+            if (StagedRoutePlanner.LadderBent > 0) return "bent ladder";
+            if (StagedRoutePlanner.Staged > 0) return "staged egress";
+            if (StagedRoutePlanner.TangentClean > 0) return "tangents";
+            if (StagedRoutePlanner.CornersClean > 0) return "corners";
+            if (StagedRoutePlanner.RingsClean > 0) return "rings";
+            if (StagedRoutePlanner.GridClean > 0) return "regiment grid";
+            if (StagedRoutePlanner.PoseWon > 0) return "pose lattice";
+            if (StagedRoutePlanner.Pressed > 0) return "pressed through";
+
+            return "fell through";
         }
 
         // ------------------------------------------------------------------ the work
