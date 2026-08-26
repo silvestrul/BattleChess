@@ -1108,6 +1108,40 @@ for existing would be undone.
 
 ---
 
+## 21. Half the visibility graph is 25% of the planning bill, apparently for nothing
+
+Raised by the full profile of 26 Aug 2026 ([M83](DECISIONS.md#m83)), not by a
+failure — nothing is broken, and that is why it needs writing down rather than
+fixing on the spot.
+
+`RouteSearch.MostPlaces` is 48. At **24**, measured in Release, least of three,
+on the planner a played battle actually uses:
+
+| field | ms/order | worst order | route seconds | unwalkable |
+|---|---|---|---|---|
+| crucible | 2,396 → **1,792** (−25%) | 17,5 → **14,2** | 57 527 → 57 527 | 0 → 0 |
+| longmarch | 0,337 → **0,302** (−10%) | 3,9 → **3,0** | 92 609 → 92 609 | 0 → 0 |
+| brokencountry | 1,947 → **1,391** (−29%) | 11,4 → **7,5** | 69 495 → 69 495 | 0 → 0 |
+| sidewaysmile | 1,128 → **0,842** (−25%) | 5,0 → **4,1** | 35 186 → 35 186 | 6 → 6 |
+
+Every quality figure identical on all four fields, and the tail — the number that
+decides whether a click drops a frame — falls further than the mean does.
+
+**Why it is not simply switched.** Identical *totals* are strong evidence and not
+proof: two routes changing in opposite directions would sum the same. The thing
+that settles it is `RouteFingerprintTests`, which compares routes one by one
+rather than in aggregate. Run that at 24 before moving the default.
+
+**Why it is plausible rather than surprising.** `BodyScan` — which bodies are near
+this line — is 33% to 72% of every planner's self time, and it is already indexed,
+so its bill is call count rather than per-call speed. Fewer candidate places means
+fewer legs means fewer clearance questions. If the graph at 48 is answering with
+places no route ever uses, halving it is free by construction.
+
+**What would close this entry.** Either a fingerprint comparison showing the
+routes are the same and the default moved to 24, or one showing they are not,
+with the field and regiment that differ named here instead.
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

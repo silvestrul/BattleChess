@@ -213,6 +213,8 @@ namespace BattleChess.Rules.GridPlanning
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (mover == null) throw new ArgumentNullException(nameof(mover));
 
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GridField);
+
             Footprint print = mover.Shape.Footprint;
             float fraction = Math.Clamp(ClearanceFraction, 0f, 1f);
             float reach =
@@ -475,6 +477,8 @@ namespace BattleChess.Rules.GridPlanning
         /// </remarks>
         public bool TryRoute(Vec2 from, Vec2 to, out List<Vec2> waypoints)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GridSearch);
+
             waypoints = null!;
             LastCellsExplored = 0;
             LastRawWaypoints = 0;

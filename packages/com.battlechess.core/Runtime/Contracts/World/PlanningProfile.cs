@@ -114,6 +114,21 @@ namespace BattleChess.Contracts
             /// <summary>String-pulling the hex route back into a few waypoints.</summary>
             PathSmooth,
 
+            /// <summary>
+            /// Raising the regiment-sized hex field — sizing the cells and
+            /// marking which of them a body holds.
+            /// </summary>
+            /// <remarks>
+            /// Separate from <see cref="HexSearch"/>, which is the terrain
+            /// pathfinder over 25 m cells. This is the grid sized to the mover's
+            /// own bounding circle, and the two answer different questions on
+            /// different cells; sharing a line would have made both unreadable.
+            /// </remarks>
+            GridField,
+
+            /// <summary>A* over that field, and the string-pull after it.</summary>
+            GridSearch,
+
             /// <summary>The whole hybrid lattice search — the top of its own tree.</summary>
             HybridSearch,
 
