@@ -1,5 +1,6 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using BattleChess.Contracts;
+using BattleChess.Rules.GridPlanning;
 using UnityEngine;
 
 namespace BattleChess.Unity
@@ -80,6 +81,50 @@ namespace BattleChess.Unity
         private readonly List<Vector3> _rawPath = new List<Vector3>();
         private float _searchCellSize = 5f;
 
+        /// <summary>
+        /// The regiment grid: one entry per cell, already turned into the six
+        /// corners it is drawn as.
+        /// </summary>
+        /// <remarks>
+        /// Corners rather than centres, unlike the search cells above, because
+        /// the whole question this overlay exists to answer is whether the
+        /// blocked cells line up with the bodies that blocked them - and a
+        /// square drawn at a hex centre cannot answer that. Built once when the
+        /// selection changes rather than every frame; at 2 700 cells this is a
+        /// few thousand vertices, which is nothing to draw and quite a lot to
+        /// recompute sixty times a second.
+        /// </remarks>
+        private readonly List<GridCell> _gridCells = new List<GridCell>();
+
+        private readonly List<Vector3> _gridRoute = new List<Vector3>();
+
+        /// <summary>What each body reserves against the selected mover.</summary>
+        private readonly List<OrientedRect> _reserved = new List<OrientedRect>();
+
+        private struct GridCell
+        {
+            public Vector3[] Corners;
+            public Color Fill;
+        }
+
+        /// <summary>Clear ground, faint enough to read the field through.</summary>
+        private static readonly Color GridClearColour = new Color(0.35f, 0.75f, 0.95f, 0.10f);
+
+        /// <summary>A cell a body is standing in, or close enough to block.</summary>
+        private static readonly Color GridBodyColour = new Color(1f, 0.30f, 0.35f, 0.34f);
+
+        /// <summary>Ground this mover cannot cross at all.</summary>
+        private static readonly Color GridGroundColour = new Color(0.55f, 0.40f, 0.20f, 0.30f);
+
+        /// <summary>
+        /// Clipped by a body but still passable - the cells the sampling exists
+        /// to find, and the ones a route is entered at off-centre.
+        /// </summary>
+        private static readonly Color GridPartialColour = new Color(1f, 0.80f, 0.25f, 0.26f);
+
+        /// <summary>The line A* found over the cells.</summary>
+        private static readonly Color GridRouteColour = new Color(0.30f, 1f, 0.85f, 1f);
+
         private readonly List<Vector3> _routeCandidates = new List<Vector3>();
 
         /// <summary>
@@ -104,7 +149,15 @@ namespace BattleChess.Unity
             public float Lift;
         }
 
-        public DebugOptions Options;
+        /// <summary>
+        /// Wired up by <see cref="BattlefieldController"/> at startup, never by
+        /// the inspector — the controller owns the one instance and the overlay
+        /// reads it. Marked so explicitly because Unity would otherwise try to
+        /// serialize a public field on a component, find no [Serializable] on
+        /// the type, and skip it (UAC1001): a warning about a contract this
+        /// field was never trying to keep.
+        /// </summary>
+        [System.NonSerialized] public DebugOptions Options;
 
         private void Awake()
         {
@@ -141,6 +194,59 @@ namespace BattleChess.Unity
                 Vec2 world = layout.ToWorld(cells[i]);
                 _searchCells.Add(new Vector3(world.X, world.Y, 0f));
             }
+        }
+
+        /// <summary>
+        /// Hands over a whole grid to draw: the cells, what each one is, and
+        /// the layout that turns them into ground.
+        /// </summary>
+        public void SetRegimentGrid(
+            IReadOnlyList<Coord> cells, IReadOnlyList<CellState> states, HexLayout layout)
+        {
+            _gridCells.Clear();
+
+            if (cells == null || states == null) return;
+
+            var corners = new Vec2[6];
+
+            for (int i = 0; i < cells.Count && i < states.Count; i++)
+            {
+                layout.GetCorners(cells[i], corners);
+
+                var drawn = new Vector3[6];
+                for (int c = 0; c < 6; c++) drawn[c] = new Vector3(corners[c].X, corners[c].Y, 0f);
+
+                Color fill;
+                switch (states[i])
+                {
+                    case CellState.Body:    fill = GridBodyColour;    break;
+                    case CellState.Ground:  fill = GridGroundColour;  break;
+                    case CellState.Partial: fill = GridPartialColour; break;
+                    default:                fill = GridClearColour;   break;
+                }
+
+                _gridCells.Add(new GridCell { Corners = drawn, Fill = fill });
+            }
+        }
+
+        /// <summary>
+        /// The rectangles the grid really marks against: each body grown by the
+        /// mover's halo.
+        /// </summary>
+        public void SetReservedAreas(IReadOnlyList<OrientedRect> areas)
+        {
+            _reserved.Clear();
+            if (areas != null) _reserved.AddRange(areas);
+        }
+
+        /// <summary>The route the grid search found, or nothing if it found none.</summary>
+        public void SetGridRoute(IReadOnlyList<Vec2> points)
+        {
+            _gridRoute.Clear();
+
+            if (points == null) return;
+
+            foreach (Vec2 point in points) _gridRoute.Add(new Vector3(point.X, point.Y, 0f));
         }
 
         public void SetRawPath(IReadOnlyList<Coord> cells, HexLayout layout)
@@ -217,6 +323,12 @@ namespace BattleChess.Unity
             _material.SetPass(0);
             GL.PushMatrix();
             GL.MultMatrix(Matrix4x4.identity);
+
+            // Under everything else, because it is a ground covering and not
+            // a marking: the bodies and their routes have to stay readable on
+            // top of it.
+            if (Options.ShowRegimentGrid && _gridCells.Count > 0)
+                DrawRegimentGrid();
 
             if (Options.ShowSearchCells && _searchCells.Count > 0)
                 DrawSearchCells();
@@ -333,6 +445,82 @@ namespace BattleChess.Unity
             }
 
             GL.End();
+        }
+
+        /// <summary>
+        /// Fills every cell as a hexagonal fan and then outlines the blocked
+        /// ones, so the shape of what is in the way reads at a glance.
+        /// </summary>
+        private void DrawRegimentGrid()
+        {
+            GL.Begin(GL.TRIANGLES);
+
+            foreach (GridCell cell in _gridCells)
+            {
+                GL.Color(cell.Fill);
+
+                // A hexagon as four triangles round corner 0. Cheaper than a
+                // fan through a centre vertex and there is no centre to hand.
+                for (int i = 1; i < 5; i++)
+                {
+                    GL.Vertex(cell.Corners[0]);
+                    GL.Vertex(cell.Corners[i]);
+                    GL.Vertex(cell.Corners[i + 1]);
+                }
+            }
+
+            GL.End();
+
+            GL.Begin(GL.LINES);
+
+            foreach (GridCell cell in _gridCells)
+            {
+                GL.Color(new Color(cell.Fill.r, cell.Fill.g, cell.Fill.b, cell.Fill.a * 1.6f));
+
+                for (int i = 0; i < 6; i++)
+                {
+                    GL.Vertex(cell.Corners[i]);
+                    GL.Vertex(cell.Corners[(i + 1) % 6]);
+                }
+            }
+
+            if (Options.ShowReservedAreas)
+            {
+                GL.Color(new Color(1f, 0.45f, 0.30f, 0.75f));
+
+                foreach (OrientedRect area in _reserved) DrawRectNow(area);
+            }
+
+            if (_gridRoute.Count > 1)
+            {
+                GL.Color(GridRouteColour);
+
+                for (int i = 1; i < _gridRoute.Count; i++)
+                {
+                    GL.Vertex(_gridRoute[i - 1]);
+                    GL.Vertex(_gridRoute[i]);
+                }
+            }
+
+            GL.End();
+        }
+
+        /// <summary>
+        /// A rectangle drawn into a GL.LINES block already open, with the
+        /// colour already set.
+        /// </summary>
+        private static void DrawRectNow(in OrientedRect rect)
+        {
+            Vec2[] corners = rect.GetCorners();
+
+            for (int i = 0; i < corners.Length; i++)
+            {
+                Vec2 a = corners[i];
+                Vec2 b = corners[(i + 1) % corners.Length];
+
+                GL.Vertex(new Vector3(a.X, a.Y, 0f));
+                GL.Vertex(new Vector3(b.X, b.Y, 0f));
+            }
         }
 
         private void DrawSearchCells()

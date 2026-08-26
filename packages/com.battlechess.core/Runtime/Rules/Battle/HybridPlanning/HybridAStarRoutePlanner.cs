@@ -102,10 +102,19 @@ namespace BattleChess.Rules.HybridPlanning
 
             if (!outcome.Found)
             {
+                // Naming the reason, because the two that matter want opposite
+                // fixes: no route at all is the arrangement's answer and is
+                // final, while giving up on the clock is this planner's answer
+                // and says the ceiling in M76 is biting.
+                string gaveUp = outcome.Failure == PathFailure.SearchBudgetExhausted
+                    ? $" It gave up rather than finished \u2014 the budget is " +
+                      $"{HybridAStarPlanner.MillisecondsPerSearch:0} ms a search."
+                    : string.Empty;
+
                 log?.Record(new BattleLogEntry(
                     LogLevel.Blocked, "Path",
                     $"{unit.Def.DisplayName} found no lattice route to {destination} " +
-                    $"({outcome.Expansions} states expanded, {outcome.Obstacles} bodies avoided).",
+                    $"({outcome.Expansions} states expanded, {outcome.Obstacles} bodies avoided).{gaveUp}",
                     unit.Id));
 
                 PathResult failed = PathResult.Failed(outcome.Failure, outcome.Failure.ToString(), outcome.Expansions);

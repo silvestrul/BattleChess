@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using BattleChess.Rules.GridPlanning;
+using UnityEngine;
 
 namespace BattleChess.Unity
 {
@@ -72,6 +73,25 @@ namespace BattleChess.Unity
 
         /// <summary>Draw the raw search cells of the route rather than the smoothed line.</summary>
         public bool ShowRawPath;
+
+        /// <summary>
+        /// Draws the regiment-sized hex grid the selected unit would be routed
+        /// over, with the cells bodies are standing in picked out.
+        /// </summary>
+        public bool ShowRegimentGrid;
+
+        /// <summary>
+        /// Draws the rectangle each body actually reserves - itself grown by
+        /// the mover's halo - which is the thing the grid marks cells against
+        /// and is very much larger than the body drawn on screen.
+        /// </summary>
+        public bool ShowReservedAreas = true;
+
+        /// <summary>
+        /// Cell spacing as a multiple of the regiment's own bounding diameter.
+        /// One means a cell holds exactly one regiment at any facing.
+        /// </summary>
+        public float RegimentGridSpacingMultiple = 1f;
 
         /// <summary>
         /// Right-click computes and draws a route instead of giving the order.
@@ -258,6 +278,44 @@ namespace BattleChess.Unity
             ShowSearchCells = GUILayout.Toggle(ShowSearchCells, " Raw route cells");
 
             GUILayout.Space(6);
+            GUILayout.Label("Regiment grid (M77)");
+            ShowRegimentGrid = GUILayout.Toggle(ShowRegimentGrid, " Draw it for the selected regiment");
+            GUILayout.Label($"   cell {RegimentGridSpacingMultiple:0.##} x the regiment");
+            RegimentGridSpacingMultiple = GUILayout.HorizontalSlider(RegimentGridSpacingMultiple, 0.10f, 3f);
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("0.1x")) RegimentGridSpacingMultiple = 0.10f;
+            if (GUILayout.Button("0.25x")) RegimentGridSpacingMultiple = 0.25f;
+            if (GUILayout.Button("0.5x")) RegimentGridSpacingMultiple = 0.5f;
+            if (GUILayout.Button("1x")) RegimentGridSpacingMultiple = 1f;
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label($"   halo {RegimentGrid.ClearanceFraction:0.00} x the regiment's radius");
+            RegimentGrid.ClearanceFraction =
+                GUILayout.HorizontalSlider(RegimentGrid.ClearanceFraction, 0f, 1f);
+
+            GUILayout.Label($"   {RegimentGrid.SubSamples} sample(s) a cell, blocked once " +
+                            $"{RegimentGrid.FillToBlock * 100f:0}% of them are inside a RESERVED");
+            GUILayout.Label("   area (a body plus the mover's halo), not inside a body");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("1")) RegimentGrid.SubSamples = 1;
+            if (GUILayout.Button("7")) RegimentGrid.SubSamples = 7;
+            if (GUILayout.Button("19")) RegimentGrid.SubSamples = 19;
+            GUILayout.EndHorizontal();
+            RegimentGrid.FillToBlock = GUILayout.HorizontalSlider(RegimentGrid.FillToBlock, 0.1f, 1f);
+
+            RegimentGrid.Reuse = GUILayout.Toggle(RegimentGrid.Reuse, " Keep the field between orders");
+            ShowReservedAreas = GUILayout.Toggle(ShowReservedAreas, " Outline what each body reserves");
+
+            GUILayout.Label($"   in the cascade: {GridRoutePlanner.Use}");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Off")) GridRoutePlanner.Use = GridUse.Off;
+            if (GUILayout.Button("Stage")) GridRoutePlanner.Use = GridUse.Stage;
+            if (GUILayout.Button("Tube")) GridRoutePlanner.Use = GridUse.Corridor;
+            if (GUILayout.Button("Only")) GridRoutePlanner.Use = GridUse.Replace;
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(6);
             GUILayout.Label($"Fog   {(ViewingArmy < 0 ? "off — you see everything" : $"through army {ViewingArmy}'s eyes")}");
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Both")) ViewingArmy = -1;
@@ -298,6 +356,8 @@ namespace BattleChess.Unity
             | (ShowZoneOfControl ? 1 << 5 : 0)
             | (ShowFootprintOutline ? 1 << 6 : 0)
             | (ShowRawPath ? 1 << 7 : 0)
+            | (ShowRegimentGrid ? 1 << 20 : 0)
+            | ((int)GridRoutePlanner.Use << 21)
             | (WheelBeforeMarching ? 1 << 8 : 0)
             | (GhostHiddenUnits ? 1 << 9 : 0)
             | (ShowSightRange ? 1 << 10 : 0)

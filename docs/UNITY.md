@@ -42,6 +42,45 @@ The same files drive the command-line harness, so the two can never disagree:
 dotnet run --project core/BattleChess.Cli -- battle ford
 ```
 
+## Checking the client without opening the editor
+
+```bash
+./tools/unity-check.sh
+```
+
+Run it from Git Bash (`bash tools/unity-check.sh` from PowerShell). Compiles everything under `Assets/` against the rules the way the editor would, in
+seconds. Its job is the boundary: Unity is deliberately outside the rules' internals
+(`InternalsVisibleTo` names the tests and nothing else), so a script that reaches for
+an internal member has to fail here rather than three minutes into an import.
+
+Everything it uses is discovered, never named — the editor from `ProjectVersion.txt`,
+the compiler from that editor's own `DotNetSdk`, the reference assemblies **built by
+the check** rather than found, and the sources globbed from `Assets/`. That is W9, and
+it is not decoration: this check has twice passed for the wrong reason, once on a
+compiler too old to parse the code and once on a rules assembly that had not been
+rebuilt. It also self-tests on every run, compiling a probe that must be rejected for
+reaching an internal, and reports *inconclusive* rather than passing if the main
+compile already failed.
+
+Warnings count as failures. They are at zero, and the reason the bar is worth
+keeping is that the response file this check grew from muted four warning codes,
+of which exactly one ever fired — so three real warnings sat in the editor
+console with the only thing that could have surfaced them holding its tongue.
+
+What it cannot see is Unity's own analyzers — the `UAC*` diagnostics, such as a
+public field on a component whose type the editor cannot serialize. They live in
+`Unity.Analyzers.Common.dll`, load fine under `-analyzer:`, and never fire
+outside the editor's compilation pipeline. **Read the editor console after any
+change that touches components or serialized fields**; nothing here covers it.
+
+It is still an approximation. The editor compiles `Assets/Scripts` and `Assets/Editor`
+as two assemblies and the rules from source via the asmdef; this compiles all of them
+as one library against a netstandard build. The honest check is
+`Unity.exe -batchmode -quit -projectPath unity/BattleChess`, which costs minutes and a
+licence — worth running before committing anything that crosses the Unity/rules
+boundary, and overkill for everything else.
+
+
 ## Placeholder art
 
 Terrain is a generated texture, one pixel per cell; units are flat rectangles. This is deliberately the cheapest thing that shows the simulation honestly. Replacing it means changing `TerrainView` and `UnitView` and nothing else — no other code knows how anything is drawn.

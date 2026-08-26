@@ -86,7 +86,33 @@ namespace BattleChess.Rules
         /// proved a plan can be worked out off the main thread.
         /// </para>
         /// </remarks>
-        internal static int PoseExpansionBudget = 20000;
+        /// <remarks>
+        /// <para>
+        /// <b>4096, and it is the cut rather than a backstop.</b> This used to
+        /// be a ceiling nothing reached, with
+        /// <see cref="HybridAStarPlanner.MillisecondsPerSearch"/> doing the
+        /// real cutting at 15 ms - which stopped the lattice at 128 expansions,
+        /// two readings of its clock, and a recording shows it winning
+        /// <b>none of eleven searches</b> under that.
+        /// </para>
+        /// <para>
+        /// Swept with the clock off: routes the lattice wins go 1, 3, <b>9</b>,
+        /// 9, 9 on the Crucible at 128, 2048, <b>4096</b>, 8192, 16384
+        /// expansions, and 6, 13, <b>14</b>, 14, 14 on Broken Country. Four
+        /// thousand is where it meets what an unlimited search wins, so beyond
+        /// it there is nothing left to buy - 16384 costs 47 ms an order against
+        /// 32 and wins not one more route.
+        /// </para>
+        /// <para>
+        /// <b>The price is the worst order</b>, which goes from about 103 ms to
+        /// 179 on the Crucible. That is a frame, and a single order cannot be
+        /// split across frames while the lattice runs on the one asking - the
+        /// mitigation belongs in <c>MayPlan</c>, which charges its ration
+        /// before a plan runs instead of after. Halving this to 2048 buys the
+        /// worst order back down to 92 ms and costs six of the nine.
+        /// </para>
+        /// </remarks>
+        internal static int PoseExpansionBudget = 4096;
 
         internal static float CorridorHalfWidthMetres;   // 0 = straight to the unbounded search
 
@@ -114,6 +140,89 @@ namespace BattleChess.Rules
         /// </para>
         /// </remarks>
         internal static float WayRoundCostCeiling = 3f;
+
+        /// <summary>
+        /// What a way round may cost against simply walking there on an empty
+        /// field, when there is no press-through to price it against.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="WayRoundCostCeiling"/> only ever fires when the ladder
+        /// found a press to compare with. An order given from a pose the last
+        /// order left behind - tangled in a friendly, facing the wrong way -
+        /// has no press to find, so every ceiling stood aside and the terminal
+        /// fallback returned whatever the tangent graph drew. A recording has
+        /// one at 686 m for a 188 m hop, 3,6x, ten waypoints and a 177 degree
+        /// opening wheel, which nothing priced on the way out.
+        /// </para>
+        /// <para>
+        /// <b>Four, not three.</b> A way round is legitimately dearer against
+        /// an empty field than against a press, and the bench says how much:
+        /// over 240 orders the worst honest route costs 2,8x, 2,7x and 2,9x
+        /// its own straight line. Three would refuse those; four clears them
+        /// and still catches the recording.
+        /// </para>
+        /// </remarks>
+        internal static float StraightLineCostCeiling = 4f;
+
+        /// <summary>
+        /// How much of a route a regiment may walk side-on, as a share of its
+        /// length. Above it the crab is not offered at all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M81.</b> Crabbing exists to make a body its own depth wide instead
+        /// of its own frontage, so that it fits a gap a march does not. That is
+        /// a manoeuvre performed <i>at</i> a gap, and
+        /// <see cref="Marching.CrabThrough"/> says so itself: it walks up to the
+        /// squeeze front-on, threads it side-on, and comes back onto the march
+        /// afterwards, because - its words - crabbing the whole way "would
+        /// arrive at the far end still side-on and at two fifths pace for a
+        /// journey that never needed it".
+        /// </para>
+        /// <para>
+        /// It then offered exactly that as its fallback whenever it could not
+        /// find where the squeeze began and ended, and the recording of 25
+        /// August has one: a spearman regiment 404 m across the field holding
+        /// 81 degrees against a march on -9, the whole way. <b>645 s against 285
+        /// s</b> for the same line walked front-on - the planner's own numbers,
+        /// in its own log line - and it arrived 90 degrees off its ordered front
+        /// having averaged 0,6 m/s of the 1,0 the ground allowed.
+        /// </para>
+        /// <para>
+        /// Nothing priced badly. <b>M22</b> charged the wheel correctly and
+        /// <see cref="StraightLineCostCeiling"/> is 4, so 2,26x passed a gate
+        /// meant to catch detours of a different order. The fault is the shape:
+        /// a crab that runs the whole way is not threading anything, so the
+        /// premise of the rung is false and the rung should decline rather than
+        /// return. Declined and not returned for the same reason as M79 - a
+        /// return short-circuits everything below it, and below it here the
+        /// search had a 359 s answer that was never asked for.
+        /// </para>
+        /// <para>
+        /// <b>The share, not the branch.</b> A crab covering 95% of a route is
+        /// the same fault as one covering all of it, and one number covers both
+        /// shapes <c>CrabThrough</c> can draw.
+        /// </para>
+        /// <para>
+        /// <b>Three quarters, and it costs nothing.</b> The whole-way crab is
+        /// rare and ruinous, which is the profile worth refusing: over 160 bench
+        /// orders on two fields it fires <i>not once</i>, so 0,90 and 0,75
+        /// decline nothing and leave all 29 and 26 genuine crabs standing -
+        /// worst 2,8x and 3,0x, mean 1,31x and 1,28x, 63 and 70 held, every
+        /// figure unmoved. Only at 0,50 does a real crab start being refused,
+        /// and it costs: broken country's worst goes 3,0x to 3,1x and its mean
+        /// 1,28x to 1,30x. So the two safe values are indistinguishable by
+        /// measurement and the rule picks between them - three quarters of a
+        /// journey walked side-on is not a manoeuvre at a gap by any reading,
+        /// and the lower of the two catches more of the same fault.
+        /// </para>
+        /// <para>
+        /// On the recorded order: 645 s becomes 348 s, 2,3x becomes 1,2x, the
+        /// rung falls from 3 to 5, and no leg is walked side-on at all.
+        /// </para>
+        /// </remarks>
+        internal static float CrabbedShareCeiling = 0.75f;
 
         /// <summary>
         /// Whether every cheap graph is asked before the lattice is, rather
@@ -187,12 +296,19 @@ namespace BattleChess.Rules
 
         /// <summary>Measurement counters: how many orders reach each stage.</summary>
         internal static int Staged, LadderClean, LadderBent, TangentClean, CornersClean, RingsClean,
-            PoseAsked, PoseWon, PoseWidened, PoseTooDear, Pressed;
+            PoseAsked, PoseWon, PoseWidened, PoseTooDear, Pressed, GridClean, TangentTooDear,
+            WayRoundTooDear, CrabTooLong;
 
-        internal static void ResetCounters() =>
+        internal static void ResetCounters()
+        {
             Staged = LadderClean = LadderBent = TangentClean = CornersClean = RingsClean =
-                PoseAsked = PoseWon = PoseWidened = PoseTooDear = Pressed =
+                PoseAsked = PoseWon = PoseWidened = PoseTooDear = Pressed = GridClean =
+                    TangentTooDear = WayRoundTooDear = CrabTooLong =
                     BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
+
+            HybridPlanning.HybridAStarPlanner.RanOutOfTime = 0;
+            GridPlanning.GridRoutePlanner.ResetCounters();
+        }
 
         public string Name => "staged ladder with tangent recovery";
 
@@ -327,13 +443,89 @@ namespace BattleChess.Rules
                 }
             }
 
+            // ---- the regiment grid, M77 -------------------------------------
+            //
+            // Asked here because this is exactly where the cheap planners have
+            // run out and the dear one is about to be asked. A cell holds a
+            // whole regiment, so the search is over ground rather than over
+            // poses and costs a hex A* across a field of about 2 700 cells -
+            // three orders of magnitude under the lattice, whose worst case is
+            // set by the arrangement rather than by the map.
+            IReadOnlyList<Vec2>? gridRoute = null;
+
+            if (GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Off)
+            {
+                GridPlanning.GridRoutePlanner.Asked++;
+                gridRoute = GridPlanning.GridRoutePlanner.RouteFor(battle, unit, destination);
+
+                if (gridRoute != null) GridPlanning.GridRoutePlanner.Found++;
+            }
+
+            // In Corridor the route is guidance and is deliberately not taken,
+            // which is what keeps that arrangement a clean test of the tube
+            // rather than a test of the tube and the route together.
+            if (gridRoute != null && GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Corridor)
+            {
+                float gridLength = GridPlanning.GridRoutePlanner.Length(gridRoute);
+
+                var gridded = new Plan(
+                    PathResult.Success(
+                        gridRoute, Array.Empty<Coord>(), gridLength, gridLength,
+                        GridPlanning.RegimentGrid.LastCellsExplored),
+                    null, false);
+
+                // Straightened before it is judged, unlike every other stage
+                // here. A hex route is a chain of cell centres and zigzags by
+                // construction, so gating the raw line asks the swept
+                // rectangle to walk a staircase - and it refuses one, which is
+                // a verdict on the shape of the grid rather than on whether
+                // the regiment can get there. Measured: on the Crucible this
+                // is 42 routes held against 33, and on Broken Country 52
+                // against 49. PlanTo smooths again afterwards and that pass is
+                // then a no-op, which is the right kind of waste.
+                gridded = RouteSmoothing.Applied(battle, unit, gridded);
+
+                // The same gate every other route in this project has to pass.
+                // A grid cell is coarser than the swept rectangle, so a grid
+                // route is a claim about roughly where to go and not a promise
+                // that the regiment fits; this is where that claim is tested.
+                // Priced against the press it exists to avoid, exactly as the
+                // lattice's answer is. Without this the grid is the one stage
+                // that may hand back any detour at all provided it walks - and
+                // it promptly did: U19 on the frozen-orders fixture took a
+                // grid route costing 1 316 s against a 177 s straight line,
+                // 7,4x, which is the regiment-refuses-the-order failure M65
+                // exists to stop. A cheap search is not a licence to skip the
+                // ceiling; it is only a licence to reach it sooner.
+                bool tooDear =
+                    WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough &&
+                    CostsMoreThan(battle, unit, gridded, ladder, WayRoundCostCeiling);
+
+                if (!tooDear && WalksCleanly(battle, unit, gridded))
+                {
+                    GridClean++;
+                    GridPlanning.GridRoutePlanner.Held++;
+
+                    log?.Record(new BattleLogEntry(
+                        LogLevel.Decision, "Path",
+                        $"{unit.Def.DisplayName} took a grid route to {destination} " +
+                        $"({gridded.Path.Waypoints.Count} waypoints over " +
+                        $"{GridPlanning.RegimentGrid.LastCellsExplored} cells settled, " +
+                        $"{GridPlanning.RegimentGrid.LastBlockedCells} cells held by bodies) " +
+                        $"- the lattice was not asked.",
+                        unit.Id));
+
+                    return gridded;
+                }
+            }
+
             // Nothing cheap could route this cleanly, so before shouldering
             // through anybody, ask the one planner that searches poses rather
             // than points.  It is dear — tens of milliseconds — but it is asked
             // only for the orders that would otherwise press, and Mx2c says a
             // press is Priority 3: what a way round costs is not a reason to
             // prefer walking through your own men.
-            if (PoseSearchBeforePressing)
+            if (PoseSearchBeforePressing && GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Replace)
             {
                 PoseAsked++;
 
@@ -345,10 +537,22 @@ namespace BattleChess.Rules
                 // budget answers most of these, and the ones it cannot answer
                 // must be found out about quickly rather than by exhausting a
                 // hundred thousand expansions inside a tube.
+                // The grid route first, where there is one. The tube was
+                // turned off because the cheap route it was drawn round was a
+                // press-through on 74 of 94 orders, so it enclosed a line
+                // through the middle of a regiment and there was no answer
+                // near it to find. A grid route cannot be a press-through:
+                // cells holding a body are not enterable, so going round them
+                // is the only thing it can express. That is the one defect
+                // this fixes, and the reason the tube is worth asking about
+                // again at all.
                 IReadOnlyList<Vec2>? tube =
-                    CorridorFromCheapRoute && tangent.Path.Found && tangent.Path.Waypoints.Count >= 2
-                        ? tangent.Path.Waypoints
-                        : null;
+                    GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor && gridRoute != null && gridRoute.Count >= 2
+                        ? gridRoute
+                        : CorridorFromCheapRoute && tangent.Path.Found &&
+                          tangent.Path.Waypoints.Count >= 2
+                            ? tangent.Path.Waypoints
+                            : null;
 
                 // What the way round is allowed to cost, told to the search
                 // rather than applied to its answer. M65 was throwing away
@@ -364,6 +568,16 @@ namespace BattleChess.Rules
                         battle, unit, ladder.Path.Waypoints, ladder.Hold);
 
                     if (pressed > 1f) limit = pressed * WayRoundCostCeiling;
+                }
+
+                // With no press to price against, the empty field is the
+                // yardstick. Told to the search rather than applied to its
+                // answer, for the same reason as above: an admissible estimate
+                // can rule the whole thing out before the first expansion.
+                if (limit <= 0f && StraightLineCostCeiling > 0f)
+                {
+                    float straight = StraightSeconds(battle, unit, destination);
+                    if (straight > 1f) limit = straight * StraightLineCostCeiling;
                 }
 
                 Plan posed;
@@ -431,7 +645,27 @@ namespace BattleChess.Rules
                 return ladder;
             }
 
-            return tangent.Path.Found ? tangent : ladder;
+            // The terminal fallback, which until now handed back whatever the
+            // tangent graph drew without any stage having priced it. It is
+            // still handed back - a regiment with no route at all is worse than
+            // one with a long one - but it is counted, so a detour of this kind
+            // shows up in a recording instead of only in a screenshot.
+            if (tangent.Path.Found)
+            {
+                if (StraightLineCostCeiling > 0f)
+                {
+                    float straight = StraightSeconds(battle, unit, destination);
+                    float around = Marching.SecondsToWalk(
+                        battle, unit, tangent.Path.Waypoints, tangent.Hold);
+
+                    if (straight > 1f && around > straight * StraightLineCostCeiling)
+                        TangentTooDear++;
+                }
+
+                return tangent;
+            }
+
+            return ladder;
         }
 
         /// <summary>
@@ -447,6 +681,14 @@ namespace BattleChess.Rules
         /// metres - and comparing those directly is how a route that is
         /// cheaper on paper turns out to be five times longer to walk.
         /// </remarks>
+        /// <summary>
+        /// What this order would take on an empty field, which is the only
+        /// yardstick available when nothing else found a route to compare with.
+        /// </summary>
+        private static float StraightSeconds(
+            BattleState battle, UnitInstance unit, Vec2 destination) =>
+            Marching.SecondsToWalk(battle, unit, new[] { unit.Position, destination }, null);
+
         private static bool CostsMoreThan(
             BattleState battle, UnitInstance unit, Plan round, Plan press, float multiple)
         {

@@ -88,6 +88,126 @@ namespace BattleChess.Rules.HybridPlanning
         /// </remarks>
         private const int MaxExpansions = 100000;
 
+        /// <summary>
+        /// How long one lattice search may run before it gives up, in
+        /// milliseconds. 0 is no limit.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The freeze is here and nowhere else — M76.</b> Splitting one
+        /// plan by stage on the seven orders a recording caught: on the two
+        /// that froze the lattice is <b>96% and 97%</b> of the whole plan, at
+        /// 442,6 ms of 461,0 and 386,1 of 399,4; on the five that did not it is
+        /// 13% to 45%, with the tangent graph and the ladder the same size or
+        /// bigger. Nothing else in the cascade moves between a 12 ms order and
+        /// a 461 ms one.
+        /// </para>
+        /// <para>
+        /// <b>Why time and not expansions.</b> <see cref="MaxExpansions"/> and
+        /// <see cref="StagedRoutePlanner.PoseExpansionBudget"/> bound a count
+        /// that is not proportional to the thing anyone feels: the same 11 947
+        /// expansions cost 387 ms in play and about 20 ms on a bench, because
+        /// each one sweeps against however many bodies happen to be near.
+        /// Capping a number that swings a hundredfold against the clock will
+        /// keep missing, which is what M70's whole menu of levers did.
+        /// </para>
+        /// <para>
+        /// <b>Why it is safe to give up.</b> A refused search is not a
+        /// regiment standing still. The staged planner falls back on the
+        /// press-through the ladder already holds, and <c>M65</c> says a press
+        /// is a legitimate answer rather than a failure. What is lost is the
+        /// nicer way round on an order that was going to take a fifth of a
+        /// second to find one — and on the recording, the lattice won none of
+        /// the seven anyway.
+        /// </para>
+        /// <para>
+        /// Checked every <see cref="ClockEvery"/> expansions rather than every
+        /// one: a timestamp read is cheap but not free, and the granularity it
+        /// costs is a fraction of a millisecond against a limit measured in
+        /// tens.
+        /// </para>
+        /// <para>
+        /// <b>Off, and replaced by a count.</b> Every number below was measured
+        /// and still holds; what changed is the instrument. A clock cannot be
+        /// the cut, because two runs of the same eighty orders do not agree on
+        /// it - the Crucible's win count wobbled 7, 7, 7, 6, 7 across five - and
+        /// a measurement that moves under its own feet cannot be swept. A cut
+        /// made on expansions is the same cut made somewhere reproducible. See
+        /// <see cref="StagedRoutePlanner.PoseExpansionBudget"/>, which now
+        /// carries it at 4096.
+        /// </para>
+        /// <para>
+        /// <b>It does not fix <c>WingOrderTests</c>, and the guess that it
+        /// would was wrong.</b> With this at zero and the cut made purely on a
+        /// count, all four of those still report routes changing between
+        /// planning a wing at once and planning it one order at a time. So
+        /// whatever is shared between threads on the planning path is something
+        /// else, and is still unfound. Recorded here rather than left implied,
+        /// because "the wall clock broke determinism" was believed for long
+        /// enough to be worth contradicting in writing.
+        /// </para>
+        /// <para>
+        /// <b>Sixty, corrected from fifteen.</b> The clause above - "the
+        /// lattice won none of the seven anyway" - was measured on a recording
+        /// where fifteen milliseconds was already in force, which made it an
+        /// observation about the clock rather than about the lattice. A later
+        /// recording says so plainly: eleven lattice searches, <b>none of them
+        /// successful</b>, seven of the eleven giving up on the clock, and the
+        /// give-up counts piled on 128 expansions - two readings of it - where
+        /// a search that finishes takes some thousands.
+        /// </para>
+        /// <para>
+        /// Swept over 80 orders a field, three runs, identical route counts
+        /// every run. On the Crucible the lattice wins <b>1 at fifteen and 7 at
+        /// sixty</b>, and press-throughs fall <b>14 to 9</b>; on Broken Country
+        /// it wins <b>11 and then 14</b>, pressing <b>8 then 5</b>. A hundred
+        /// and twenty buys two more on the Crucible and nothing anywhere else,
+        /// which is where the curve flattens: an unlimited clock also wins 9
+        /// and 14.
+        /// </para>
+        /// <para>
+        /// <b>What it costs</b> is a mean order of 23 ms becoming 30 on the
+        /// Crucible and 16 becoming 21 on Broken Country, and a worst order of
+        /// roughly 110 becoming 99 there but 57 becoming 98 on Broken Country
+        /// and 47 becoming 90 on the Long March. That last is the real price
+        /// and it is a frame, because a single order cannot be split across
+        /// them - see the note on <c>MayPlan</c>, which charges the ration
+        /// before a plan runs rather than after.
+        /// </para>
+        /// <para>
+        /// <b>Why it is worth a frame.</b> The five press-throughs this turns
+        /// into clean routes are the same event that leaves a regiment tangled
+        /// and facing the wrong way at the end of an order - one recording has
+        /// a regiment spending 261 of 411 seconds shouldering through its own
+        /// and finishing 90 degrees off its given front - and the next order
+        /// given from that pose is the one that comes back 3,6 times its
+        /// straight line. A hitch is paid once; a wrecked pose is paid by every
+        /// order after it.
+        /// </para>
+        /// </remarks>
+        internal static float MillisecondsPerSearch = 0f;
+
+        /// <summary>How many expansions pass between readings of the clock.</summary>
+        private const int ClockEvery = 64;
+
+
+        /// <summary>Searches that ran out of time rather than out of budget.</summary>
+        /// <remarks>Measurement only. See <see cref="MillisecondsPerSearch"/>.</remarks>
+        internal static int RanOutOfTime;
+
+        /// <summary>
+        /// Why the last search stopped, which a count of expansions cannot say.
+        /// </summary>
+        /// <remarks>
+        /// A recording showed the lattice failing after one and two expansions
+        /// and the count alone was read as a start in collision - wrongly, as
+        /// the escape for that already exists at <see cref="Contact.Inside"/>.
+        /// Two expansions can mean a clock, a budget, a limit refused before
+        /// the first move, a corridor that culled everything, or a genuinely
+        /// wedged pose, and those want opposite fixes.
+        /// </remarks>
+        [ThreadStatic] internal static string? LastStop;
+
         /// <summary>Widest gap, in metres, allowed between checked points along one primitive's sweep.</summary>
         private const float MaxSweepSpacingMetres = 2f;
 
@@ -199,6 +319,44 @@ namespace BattleChess.Rules.HybridPlanning
 
         /// <summary>The straight-line distance the order asked for.</summary>
         [ThreadStatic] internal static float AskedFor;
+
+        /// <summary>
+        /// Ground the search is allowed on at all, as a test on a point.
+        /// <c>null</c> — the default — means anywhere.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A measurement lever for the designer's proposal: the candidate
+        /// points a two-leg cast already works out name the only ground a way
+        /// round could plausibly use, so the lattice has no business searching
+        /// the rest of the field. This is a stricter bound than
+        /// <see cref="StrayMultiple"/> and a different one — the stray box is
+        /// a rectangle scaled off the order's length and knows nothing about
+        /// what is on the ground, while this is derived from where the bodies
+        /// actually are.
+        /// </para>
+        /// <para>
+        /// A delegate per successor, which is not how this would ship. It is
+        /// written this way so the shape of the bound can be measured before
+        /// anything commits to representing it — see
+        /// <c>docs/pathfinding-levers.md</c>.
+        /// </para>
+        /// <para>
+        /// <b>Measured and rejected — M74. Leave it null.</b> Swept at 40, 60,
+        /// 90, 140 and 220 m, both alongside <see cref="StrayMultiple"/> and
+        /// instead of it, on 240 orders across three fields. It never won on
+        /// any field at any width: at its most generous it keeps <b>56, 60 and
+        /// 58</b> clean ways round against <b>61, 69 and 79</b> unfenced, and
+        /// costs <i>more</i> total time than the stray box it was meant to
+        /// replace. The cause is the same one that makes the cast a poor
+        /// refusal: the candidates come from bodies near the <i>drawn line</i>,
+        /// and the routes worth having swing wide round bodies that are not.
+        /// Both halves of what this was for are already covered anyway — the
+        /// map edge by <see cref="StrayMultiple"/>, and ground inside a body by
+        /// the collision test that rejects the pose.
+        /// </para>
+        /// </remarks>
+        [ThreadStatic] internal static Func<Vec2, bool>? MustStayNear;
 
         /// <summary>States popped on the last search, however it ended.</summary>
         /// <remarks>
@@ -483,6 +641,7 @@ namespace BattleChess.Rules.HybridPlanning
 
             if (startHeuristic > limit)
             {
+                LastStop = "refused at the start: even the best case is past the limit";
                 LastExpansions = 0;
                 return Outcome.Failed(PathFailure.NoRouteExists, 0, 0, obstacles.Count, new Tally());
             }
@@ -494,6 +653,8 @@ namespace BattleChess.Rules.HybridPlanning
             int expansions = 0;
             int primitivesTried = 0;
 
+            LastStop = corridor != null ? "nothing left to expand (bounded)" : "nothing left to expand";
+
             StrayedSideways = 0f;
             StrayedAlong = 0f;
             AskedFor = Vec2.Distance(start, goal);
@@ -502,8 +663,39 @@ namespace BattleChess.Rules.HybridPlanning
             float orderLength = alongTheOrder.Length;
             Vec2 orderUnit = orderLength > Vec2.Epsilon ? alongTheOrder / orderLength : Vec2.Zero;
 
+            // Read once, so a lever changed mid-search cannot move the finish
+            // line under a search already running.
+            long stopAt = MillisecondsPerSearch > 0f
+                ? System.Diagnostics.Stopwatch.GetTimestamp() +
+                  (long)(MillisecondsPerSearch * 0.001d * System.Diagnostics.Stopwatch.Frequency)
+                : long.MaxValue;
+            bool outOfTime = false;
+
             while (open.Count > 0 && expansions < budget)
             {
+                if (expansions >= budget - 1) LastStop = "the expansion budget";
+
+                if ((expansions & (ClockEvery - 1)) == 0 && expansions > 0)
+                {
+                    if (System.Diagnostics.Stopwatch.GetTimestamp() > stopAt)
+                    {
+                        outOfTime = true;
+                        LastStop = "the clock";
+                        break;
+                    }
+
+                    if (Marching.GiveUpNow != null && Marching.GiveUpNow())
+                    {
+                        LastStop = "nobody wants this route any more";
+                        LastExpansions = expansions;
+                        turnField?.Release();
+
+                        return Outcome.Failed(
+                            PathFailure.NoRouteExists, expansions, primitivesTried,
+                            obstacles.Count, tally);
+                    }
+                }
+
                 int at = open.Pop();
                 Node node = nodes[at];
 
@@ -622,6 +814,10 @@ namespace BattleChess.Rules.HybridPlanning
                         FarFromCorridor(landed.position, corridor) > corridorHalfWidthMetres)
                         continue;
 
+                    // The same idea taken off the obstacles rather than off a
+                    // traced line: ground no candidate way round could use.
+                    if (MustStayNear != null && !MustStayNear(landed.position)) continue;
+
                     float g = node.G + primitive.Seconds;
 
                     long landedBin = BinOf(landed.position, landed.heading);
@@ -651,7 +847,15 @@ namespace BattleChess.Rules.HybridPlanning
 
             LastExpansions = expansions;
 
-            PathFailure why = expansions >= budget ? PathFailure.SearchBudgetExhausted : PathFailure.NoRouteExists;
+            if (outOfTime) RanOutOfTime++;
+
+            // Out of time reports as out of budget: both mean the search gave
+            // up before exhausting the map, which is exactly what that reason
+            // says, and the staged planner treats them alike.
+            PathFailure why = outOfTime || expansions >= budget
+                ? PathFailure.SearchBudgetExhausted
+                : PathFailure.NoRouteExists;
+
             return Outcome.Failed(why, expansions, primitivesTried, obstacles.Count, tally);
         }
 

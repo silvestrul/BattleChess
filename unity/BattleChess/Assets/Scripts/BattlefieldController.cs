@@ -2,6 +2,7 @@
 using System.IO;
 using BattleChess.Contracts;
 using BattleChess.Rules;
+using BattleChess.Rules.GridPlanning;
 using UnityEngine;
 
 namespace BattleChess.Unity
@@ -440,6 +441,7 @@ namespace BattleChess.Unity
             TrackMarker.Begin();
 
             RefreshOverlayUnits();
+            RefreshRegimentGrid();
             ForgetAFinishedRoute();
 
             TrackSelection();
@@ -634,6 +636,11 @@ namespace BattleChess.Unity
 
             _lastDestination = _orderAt;
             _hasDestination = true;
+
+            // Said before the order goes in, while the field is still the one
+            // the grid was drawn on. Afterwards the regiment has been given a
+            // route and the bodies it was routed round may already be moving.
+            ReportRegimentGrid();
 
             if (_options.PreviewRouteMode)
                 PreviewRoute(Primary, _orderAt);
@@ -1550,6 +1557,169 @@ namespace BattleChess.Unity
             _ => string.Empty
         };
 
+        /// <summary>The cells last drawn, and what each of them was.</summary>
+        /// <remarks>
+        /// The cell list is kept between frames because it only changes when
+        /// the spacing does - walking the whole field to enumerate it is the
+        /// expensive half, and the bodies moving about on it is the cheap half.
+        /// </remarks>
+        private readonly List<Coord> _gridCells = new List<Coord>();
+
+        private readonly List<CellState> _gridStates = new List<CellState>();
+
+        private float _gridSpacingDrawn;
+
+        private Vec2 _gridDrawnAround;
+
+        private readonly List<OrientedRect> _reserved = new List<OrientedRect>();
+
+        /// <summary>Roughly how many cells the overlay will draw at once.</summary>
+        /// <remarks>
+        /// Four thousand hexes is twenty-four thousand triangles, which draws
+        /// in well under a millisecond and still covers the whole Great Field
+        /// at one regiment to a cell. At a tenth of one it becomes a window
+        /// about 150 m across, which is the right size for the thing that
+        /// resolution is for: checking the blocked cells against the
+        /// rectangles that blocked them.
+        /// </remarks>
+        private const int DrawnCellCap = 4000;
+
+        /// <summary>
+        /// Lays the regiment grid for whichever regiment is selected and draws
+        /// it, with the route it would take to wherever the mouse is.
+        /// </summary>
+        /// <remarks>
+        /// Routed to the mouse rather than to the last order, so the grid can
+        /// be interrogated by pointing at things: hover across a gap and watch
+        /// whether the line goes through it or round. That is the question this
+        /// whole overlay exists to answer, and a static picture of the last
+        /// order cannot answer it.
+        /// </remarks>
+        private void RefreshRegimentGrid()
+        {
+            if (_options == null || !_options.ShowRegimentGrid || _battle == null || Primary == null)
+            {
+                if (_gridCells.Count > 0)
+                {
+                    _gridCells.Clear();
+                    _gridSpacingDrawn = 0f;
+                    _gridDrawnAround = default;
+                    _overlay.SetRegimentGrid(null, null, default);
+                    _overlay.SetGridRoute(null);
+                    _overlay.SetReservedAreas(null);
+                }
+
+                return;
+            }
+
+            UnitInstance unit = Primary;
+
+            RegimentGrid.SpacingMultiple = _options.RegimentGridSpacingMultiple;
+            RegimentGrid grid = RegimentGrid.For(_battle, unit);
+
+            // A whole field is a couple of thousand cells at one regiment to a
+            // cell, and two hundred thousand at a tenth of one. So the drawing
+            // is windowed to whatever radius holds about DrawnCellCap cells,
+            // centred on the regiment being looked at - which is also where
+            // anyone checking the marking against the rectangles is looking.
+            // The search is never windowed; only the picture is.
+            float hexArea = 0.866f * grid.Spacing * grid.Spacing;
+            float radius = Mathf.Sqrt(DrawnCellCap * hexArea / Mathf.PI);
+
+            bool moved = Vec2.Distance(unit.Position, _gridDrawnAround) > grid.Spacing;
+
+            if (_gridCells.Count == 0 || moved ||
+                Mathf.Abs(grid.Spacing - _gridSpacingDrawn) > 0.01f)
+            {
+                grid.Snapshot(_gridCells, unit.Position, radius);
+                _gridSpacingDrawn = grid.Spacing;
+                _gridDrawnAround = unit.Position;
+            }
+
+            _gridStates.Clear();
+
+            for (int i = 0; i < _gridCells.Count; i++)
+                _gridStates.Add(grid.StateOf(_gridCells[i]));
+
+            _overlay.SetRegimentGrid(_gridCells, _gridStates, grid.Layout);
+
+            Vec2 to = MouseWorld();
+
+            // M82. Straightened with the same cast-ahead pass every planner's
+            // answer goes through, because the raw grid answer is a path of hex
+            // centres and nothing would ever walk it. At a tenth of a regiment
+            // to a cell the difference is 159 points a route against five.
+            _overlay.SetGridRoute(
+                grid.TryRoute(unit.Position, to, out List<Vec2> route)
+                    ? Marching.Straightened(_battle, unit, route)
+                    : null);
+
+            // What the grid is really marking against. The body drawn on screen
+            // is not it: a cell is refused where this regiment's own circle,
+            // placed at that cell, would overlap somebody - so the shape that
+            // matters is every other body grown by that circle.
+            _reserved.Clear();
+
+            if (_options.ShowReservedAreas)
+            {
+                Footprint print = unit.Shape.Footprint;
+                float reach =
+                    print.HalfDepth +
+                    (print.BoundingRadius - print.HalfDepth) * RegimentGrid.ClearanceFraction +
+                    RegimentGrid.MarginMetres;
+
+                foreach (UnitInstance body in _battle.UnitsOnField())
+                {
+                    if (body.Id == unit.Id) continue;
+                    if (Vec2.Distance(body.Position, unit.Position) > 600f) continue;
+
+                    _reserved.Add(new OrientedRect(
+                        body.Shape.Centre, body.Shape.Facing,
+                        new Footprint(
+                            body.Shape.Footprint.Width + 2f * reach,
+                            body.Shape.Footprint.Depth + 2f * reach)));
+                }
+            }
+
+            _overlay.SetReservedAreas(_reserved);
+        }
+
+        /// <summary>
+        /// Says what the grid made of the order just given, next to what the
+        /// cascade actually did with it.
+        /// </summary>
+        private void ReportRegimentGrid()
+        {
+            if (_options == null || !_options.ShowRegimentGrid || _battle == null || Primary == null)
+                return;
+
+            UnitInstance unit = Primary;
+            Vec2 to = _hasDestination ? _lastDestination : MouseWorld();
+
+            RegimentGrid.SpacingMultiple = _options.RegimentGridSpacingMultiple;
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            RegimentGrid grid = RegimentGrid.For(_battle, unit);
+            double built = watch.Elapsed.TotalMilliseconds;
+
+            watch.Restart();
+            bool found = grid.TryRoute(unit.Position, to, out List<Vec2> route);
+            double searched = watch.Elapsed.TotalMilliseconds;
+
+            _console.Info("Grid",
+                $"{unit.Def.DisplayName}: cells {grid.Spacing:0.#} m " +
+                $"({unit.Shape.Footprint.Width:0.#} x {unit.Shape.Footprint.Depth:0.#} m regiment, " +
+                $"bounding circle {unit.Shape.Footprint.BoundingRadius * 2f:0.#} m), " +
+                $"{RegimentGrid.LastBlockedCells} cells held by bodies. " +
+                (found
+                    ? $"Route in {route.Count} waypoints over {RegimentGrid.LastCellsExplored} cells settled."
+                    : $"No route: {RegimentGrid.LastCellsExplored} cells settled and every way round blocked.") +
+                $" Built {built:0.00} ms, searched {searched:0.00} ms. " +
+                $"In the cascade it is {GridRoutePlanner.Use} " +
+                $"(asked {GridRoutePlanner.Asked}, found {GridRoutePlanner.Found}, " +
+                $"held {GridRoutePlanner.Held}).");
+        }
+
         private void RefreshOverlayUnits()
         {
             var shapes = new List<OverlayUnit>();
@@ -1919,6 +2089,45 @@ namespace BattleChess.Unity
         /// corridor filter tuned for planning is exactly the kind of thing that
         /// might itself be the bug being chased.
         /// </remarks>
+        /// <summary>
+        /// The arrangement an order was given in, written once for the field
+        /// and once per regiment ordered.
+        /// </summary>
+        /// <remarks>
+        /// The whole field rather than what is near the route, deliberately and
+        /// for the same reason <see cref="ReportScene"/> gives: a filter tuned
+        /// for planning is exactly the kind of thing that turns out to be the
+        /// bug being chased, and one that hid the cause would be worse than no
+        /// line at all.
+        /// </remarks>
+        private void ReportOrderedScene(IReadOnlyList<UnitInstance> wing, Vec2[] wanted)
+        {
+            if (_battle == null || wing == null || wing.Count == 0) return;
+
+            for (int i = 0; i < wing.Count && i < wanted.Length; i++)
+            {
+                UnitInstance unit = wing[i];
+                if (unit == null) continue;
+
+                _console.Info("Scene",
+                    $"ordered {unit.Def.DisplayName} at ({unit.Position.X:0.0},{unit.Position.Y:0.0}) " +
+                    $"facing {unit.Facing.Degrees:0.0}°, " +
+                    $"{unit.Footprint.Width:0}x{unit.Footprint.Depth:0} m, " +
+                    $"to ({wanted[i].X:0.0},{wanted[i].Y:0.0}).",
+                    unit.Id);
+            }
+
+            foreach (UnitInstance other in _battle.UnitsOnField())
+            {
+                _console.Info("Scene",
+                    $"  {other.Def.DisplayName} #{other.Id} at " +
+                    $"({other.Position.X:0.0},{other.Position.Y:0.0}) " +
+                    $"facing {other.Facing.Degrees:0.0}°, " +
+                    $"{other.Footprint.Width:0}x{other.Footprint.Depth:0} m, " +
+                    $"{(other.Owner == wing[0]!.Owner ? "ours" : "theirs")}.");
+            }
+        }
+
         private void ReportScene(UnitInstance unit, Vec2 destination)
         {
             _console.Info("Preview",
@@ -2057,15 +2266,30 @@ namespace BattleChess.Unity
         {
             public System.Threading.Tasks.Task Task = null!;
             public Worked[] Results = null!;
+
+            /// <summary>Who each result is for, so a later order can find it.</summary>
+            public UnitInstance[] Units = null!;
+
+            /// <summary>
+            /// Set when a newer order re-targets that regiment. M80: the route
+            /// being worked out is no longer the one anybody asked for, so it
+            /// is abandoned where it has not started and thrown away where it
+            /// has. Written on the drawing thread, read on the workers, so
+            /// <c>volatile</c> - an ordinary bool may never be re-read inside
+            /// the loop that polls it.
+            /// </summary>
+            public volatile bool[] Dropped = null!;
             public bool Quiet;
             public bool AsAWing;
             public bool Together;
-            public string? Status;
+            /// <summary>Null unless the order carried a status line.</summary>
+            public string Status;
             public System.Diagnostics.Stopwatch Spent = null!;
             public int Frames;
         }
 
-        private RouteWork? _working;
+        /// <summary>Null unless a plan is out with a worker.</summary>
+        private RouteWork _working;
 
         /// <summary>Whether a plan is out with a worker and the clock is held.</summary>
         private bool WorkingOutARoute => _working != null;
@@ -2107,8 +2331,21 @@ namespace BattleChess.Unity
                 return;
             }
 
+            int thrownAway = 0;
+
             for (int i = 0; i < work.Results.Length; i++)
+            {
+                // M80. Either it was never started or it stopped part way, and
+                // either way the order it was answering has been replaced.
+                if (work.Dropped[i]) { thrownAway++; continue; }
+
                 ApplyRoute(work.Results[i], work.Quiet);
+            }
+
+            if (thrownAway > 0)
+                _console.Info("Path",
+                    $"{thrownAway} of {work.Results.Length} route(s) thrown away - " +
+                    "a newer order asked those regiments for somewhere else.");
 
             if (work.AsAWing)
             {
@@ -2133,6 +2370,31 @@ namespace BattleChess.Unity
         /// against a field another order is changing - is the class of bug that
         /// took four attempts to find last time.
         /// </remarks>
+        /// <summary>
+        /// Marks anything still being worked out for these regiments as no
+        /// longer wanted. M80.
+        /// </summary>
+        /// <remarks>
+        /// By regiment rather than wholesale: a click that orders one wing must
+        /// not silently drop an order given to a different one a moment ago.
+        /// What supersedes a plan is a newer order for that same regiment.
+        /// </remarks>
+        private void Supersede(IReadOnlyList<UnitInstance> wing)
+        {
+            if (_working == null || wing == null) return;
+
+            for (int i = 0; i < _working.Units.Length; i++)
+            {
+                for (int w = 0; w < wing.Count; w++)
+                {
+                    if (wing[w] == null || _working.Units[i].Id != wing[w].Id) continue;
+
+                    _working.Dropped[i] = true;
+                    break;
+                }
+            }
+        }
+
         private void SettleRoutes()
         {
             if (_working == null) return;
@@ -2148,11 +2410,30 @@ namespace BattleChess.Unity
         /// </summary>
         private void WorkOutRoutes(
             IReadOnlyList<UnitInstance> wing, Vec2[] wanted, Facing? bearing,
-            bool quiet, bool asAWing, string? status)
+            bool quiet, bool asAWing, string status)
         {
-            // A plan already out is finished first. Two of them reading while
-            // one may finish and give an order is the same hazard the clock is
-            // held for.
+            // Written on every real order, not only on previews behind a
+            // toggle, and this is why: the 7,7x route of 25 August was given in
+            // ordinary play with the comparison off, so the recording had the
+            // route and its cost and no way to rebuild the arrangement that
+            // produced it. A diagnostic that needs somebody to still have the
+            // app open and reproduce on demand is not a diagnostic. It costs
+            // one line per regiment per order against logs already running to
+            // hundreds of kilobytes, which is nothing set against being unable
+            // to answer "what happened?" at all.
+            ReportOrderedScene(wing, wanted);
+
+            // M80. Anything still being worked out for a regiment this order
+            // re-targets is no longer wanted: the player has asked for
+            // somewhere else. Marked before the join, so a search already
+            // running sees it at its next poll and stops instead of spending a
+            // frame on an answer that is discarded on arrival.
+            Supersede(wing);
+
+            // A plan already out is still joined - not because its answer is
+            // wanted, but because the worker reads the battle that what comes
+            // next writes to. Two of them reading while one may finish and give
+            // an order is the same hazard the clock is held for.
             SettleRoutes();
 
             // Every body's rectangle worked out before the routes rather than
@@ -2166,6 +2447,7 @@ namespace BattleChess.Unity
             for (int i = 0; i < wing.Count; i++) units[i] = wing[i];
 
             var results = new Worked[units.Length];
+            var dropped = new bool[units.Length];
 
             // Instant movement teleports each regiment as its order is applied,
             // so a later plan in the same wing is made against a field the
@@ -2176,6 +2458,8 @@ namespace BattleChess.Unity
             var work = new RouteWork
             {
                 Results = results,
+                Units = units,
+                Dropped = dropped,
                 Quiet = quiet,
                 AsAWing = asAWing,
                 Together = together,
@@ -2199,13 +2483,27 @@ namespace BattleChess.Unity
                         range =>
                         {
                             for (int i = range.Item1; i < range.Item2; i++)
-                                results[i] = WorkOutRoute(units[i], wanted[i], bearing);
+                            {
+                                if (dropped[i]) continue;
+
+                                int mine = i;
+                                Marching.GiveUpNow = () => dropped[mine];
+                                try { results[i] = WorkOutRoute(units[i], wanted[i], bearing); }
+                                finally { Marching.GiveUpNow = null; }
+                            }
                         });
                 }
                 else
                 {
                     for (int i = 0; i < units.Length; i++)
-                        results[i] = WorkOutRoute(units[i], wanted[i], bearing);
+                    {
+                        if (dropped[i]) continue;
+
+                        int mine = i;
+                        Marching.GiveUpNow = () => dropped[mine];
+                        try { results[i] = WorkOutRoute(units[i], wanted[i], bearing); }
+                        finally { Marching.GiveUpNow = null; }
+                    }
                 }
 
                 PlanMarker.End();
@@ -2445,11 +2743,24 @@ namespace BattleChess.Unity
                 $"{unit.Def.DisplayName} planned by {RoutePlanners.Default.Name} " +
                 $"in {worked.Milliseconds:0.0} ms: {plan.Effort}.", unit.Id);
 
+            // What the same order would have cost on an empty field. A route
+            // is only judgeable against the walk it replaces, and a recording
+            // that omits it cannot answer "was that detour reasonable?" - which
+            // is the question every screenshot of a bad route actually asks.
+            float straight = path.Waypoints.Count > 0
+                ? Marching.SecondsToWalk(
+                    _battle, unit, new[] { unit.Position, path.Waypoints[path.Waypoints.Count - 1] }, null)
+                : 0f;
+            float took = Marching.SecondsToWalk(_battle, unit, path.Waypoints, plan.Hold);
+
             if (!quiet)
                 _console.Decision("Path",
                     $"{unit.Def.DisplayName} route ({(_options.RouteLikeAi ? "fastest" : "direct")}): " +
                     $"{path.Distance:0} m walked, {path.EffectiveDistance:0} m effective, " +
                     $"{seconds / 60f:0.0} turns at {unit.BaseSpeed:0.00} m/s. " +
+                    (straight > 1f
+                        ? $"{took / straight:0.0}x what walking straight there would cost. "
+                        : string.Empty) +
                     $"{path.SearchCells.Count} cells reduced to {path.Waypoints.Count} waypoints, " +
                     $"{path.CellsExplored} explored, {worked.Clearance:0} m clearance.",
                     unit.Id);

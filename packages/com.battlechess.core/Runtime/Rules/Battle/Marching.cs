@@ -255,6 +255,21 @@ namespace BattleChess.Rules
     public static class Marching
     {
         /// <summary>
+        /// Asked periodically while a route is being worked out: has whoever
+        /// wanted it stopped wanting it?
+        /// </summary>
+        /// <remarks>
+        /// M80. A player who clicks somewhere else has superseded the order a
+        /// search is answering, and finishing it spends a frame on a route
+        /// that is thrown away on arrival - which [M79] made as dear as 179 ms
+        /// for one regiment. Per-thread, because a wing is planned across
+        /// several and each answers for its own regiment. Null means nobody is
+        /// asking, which is the ordinary case and costs one null check every
+        /// sixty-four expansions of the lattice.
+        /// </remarks>
+        [ThreadStatic] public static Func<bool>? GiveUpNow;
+
+        /// <summary>
         /// How finely the ground under a straight line is checked, in metres.
         /// </summary>
         /// <remarks>
@@ -430,7 +445,27 @@ namespace BattleChess.Rules
                     // And what it cost, because "the arcs look too wide" is a
                     // judgement, a judgement needs a number, and no rule
                     // anywhere used to record one.
-                    if (arching <= crabbing)
+                    // M79, at the rung that actually draws these. Arch and crab
+                    // were weighed against each other and never against simply
+                    // walking there - and `straight` was computed right here,
+                    // three lines up, only to be printed. A recording has one at
+                    // 837 s against 109 s, 7,7x: four hundred metres west and
+                    // three hundred and forty back east for a hop of a hundred,
+                    // with the ratio in its own log line and nothing acting on
+                    // it. Declined rather than returned, because returning it
+                    // short-circuits everything below: on that same order the
+                    // grid had a two-waypoint answer and was never asked.
+                    float cheapest = MathF.Min(arching, crabbing);
+                    bool wayRoundTooDear =
+                        StagedRoutePlanner.StraightLineCostCeiling > 0f &&
+                        straight > 1f &&
+                        cheapest > straight * StagedRoutePlanner.StraightLineCostCeiling;
+
+                    if (wayRoundTooDear)
+                    {
+                        StagedRoutePlanner.WayRoundTooDear++;
+                    }
+                    else if (arching <= crabbing)
                     {
                         Say(log, unit, blocking,
                             "is going round its own {0} rather than through it",
@@ -443,18 +478,20 @@ namespace BattleChess.Rules
 
                         return Straight(arch!);
                     }
+                    else
+                    {
+                        Say(log, unit, blocking,
+                            "is turning side-on to thread a gap beside its own {0} — its front will not fit",
+                            crabbing, straight, threaded!, destination,
+                            arching < float.MaxValue
+                                ? $" Arching round would have cost {arching:0} s."
+                                : " There was no way round it.",
+                            hold);
 
-                    Say(log, unit, blocking,
-                        "is turning side-on to thread a gap beside its own {0} — its front will not fit",
-                        crabbing, straight, threaded!, destination,
-                        arching < float.MaxValue
-                            ? $" Arching round would have cost {arching:0} s."
-                            : " There was no way round it.",
-                        hold);
+                        unit.LastRung = 3;
 
-                    unit.LastRung = 3;
-
-                    return Straight(threaded!, hold);
+                        return Straight(threaded!, hold);
+                    }
                 }
 
                 // Rung 3: through its own. Nothing fits, nothing goes round and
@@ -554,6 +591,55 @@ namespace BattleChess.Rules
         /// is costed as the crab it is rather than as a march of the same
         /// length.
         /// </param>
+        /// <summary>
+        /// The same route with every waypoint dropped that the regiment can see
+        /// past - the cast-ahead pass every planner's answer goes through.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M82.</b> Exposed for the route preview, which had no way to reach
+        /// it: <c>RouteSmoothing</c> is internal to the rules, and the drawing
+        /// code is a Unity assembly outside them. So the preview drew
+        /// <see cref="GridPlanning.RegimentGrid.TryRoute"/>'s answer raw, a path
+        /// of hex centres, while every route the planner actually hands out has
+        /// been straightened - and the grid stage inside the cascade straightens
+        /// its own answer before it will even offer it.
+        /// </para>
+        /// <para>
+        /// The gap is not cosmetic. On the field the screenshots were taken
+        /// from, at the tenth-of-a-regiment cell size they were taken at, the
+        /// preview draws <b>2 864 points across eighteen routes</b> - 159 a
+        /// route - where the planner would walk <b>98</b>, five a route, over
+        /// <b>8,7% less ground</b>. A picture of a route no planner would ever
+        /// return is worse than no picture, because it is read as evidence.
+        /// </para>
+        /// <para>
+        /// Same shape as <b>W5</b> and as the scene report that had to be pulled
+        /// out from behind a preview toggle: a diagnostic that reports something
+        /// other than what happens sends every investigation that trusts it to
+        /// the wrong place.
+        /// </para>
+        /// </remarks>
+        public static IReadOnlyList<Vec2> Straightened(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+            if (waypoints == null) throw new ArgumentNullException(nameof(waypoints));
+            if (waypoints.Count < 3) return waypoints;
+
+            float length = 0f;
+            for (int i = 1; i < waypoints.Count; i++)
+                length += Vec2.Distance(waypoints[i - 1], waypoints[i]);
+
+            var plan = new Plan(
+                PathResult.Success(
+                    waypoints, Array.Empty<Coord>(), length, length, 0),
+                hold: null, pressedThrough: false);
+
+            return RouteSmoothing.Applied(battle, unit, plan).Path.Waypoints;
+        }
+
         public static float SecondsToWalk(
             BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints,
             IReadOnlyList<Facing?>? hold = null)
@@ -1030,9 +1116,24 @@ namespace BattleChess.Rules
                 break;
             }
 
+            bool theWholeWay = entry <= 0f && exit >= length;
+
+            // M81. How much of this route is actually walked side-on. The rung
+            // is a manoeuvre at a gap; past the ceiling it is not threading
+            // anything, it is just a slow march, and the cascade below is
+            // better placed to answer than a crab nobody priced against it.
+            float crabbed = theWholeWay ? length : MathF.Max(0f, exit - entry);
+
+            if (StagedRoutePlanner.CrabbedShareCeiling < 1f &&
+                crabbed > length * StagedRoutePlanner.CrabbedShareCeiling)
+            {
+                StagedRoutePlanner.CrabTooLong++;
+                return null;
+            }
+
             // The squeeze runs the whole way, so there is nothing to come back
             // onto and the simple form is the honest one.
-            if (entry <= 0f && exit >= length)
+            if (theWholeWay)
             {
                 hold = new Facing?[] { null, sideOn };
                 return new[] { unit.Position, destination };

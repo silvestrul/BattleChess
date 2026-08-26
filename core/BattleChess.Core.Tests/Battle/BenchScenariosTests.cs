@@ -44,24 +44,53 @@ namespace BattleChess.Tests.Battle
         private readonly ITestOutputHelper _out;
         public BenchScenariosTests(ITestOutputHelper output) => _out = output;
 
-        /// <summary>The three fields, and what each one is built to make dear.</summary>
+        /// <summary>The fields, and what each one is built to make dear.</summary>
+        /// <remarks>
+        /// <b>W8.</b> The first three were designed; <c>sidewaysmile</c> was
+        /// not. It is an arrangement that happened in play and produced a wrong
+        /// route (<b>M81</b>), kept as a field so that what it costs is swept on
+        /// every lever change rather than only passed or failed once. What it
+        /// makes dear is the <i>pose</i>: three of its regiments have already
+        /// moved and are facing oddly, which is the case
+        /// <see cref="StagedRoutePlanner.StraightLineCostCeiling"/> was added
+        /// for and the one a deployment can never produce.
+        /// </remarks>
         public static IEnumerable<object[]> Scenarios => new[]
         {
             new object[] { "crucible", "the crowd" },
             new object[] { "longmarch", "the distance" },
             new object[] { "brokencountry", "the ground" },
+            new object[] { "sidewaysmile", "the pose" },
         };
+
+        /// <summary>How many regiments the battle file asks for.</summary>
+        private static int Authored(string key)
+        {
+            int deployments = 0;
+
+            foreach (string line in File.ReadAllLines(
+                         Path.Combine(TestContent.Root, "battles", key + ".battle.txt")))
+            {
+                if (line.TrimStart().StartsWith("[deploy", StringComparison.Ordinal)) deployments++;
+            }
+
+            return deployments;
+        }
 
         internal static BattleState Load(string key)
         {
             string root = TestContent.Root;
             ITerrainCatalogue terrain = TestContent.Terrain;
 
-            BattleMapDefinition map = AsciiMapReader.Read(
-                File.ReadAllText(Path.Combine(root, "maps", key + ".map.txt")), terrain);
-
             BattleSetup setup = BattleSetup.Parse(
                 File.ReadAllText(Path.Combine(root, "battles", key + ".battle.txt")));
+
+            // The battle file names its own map, and that is not always its own
+            // key: sidewaysmile is an arrangement recorded in play on
+            // greatfield's ground. Assuming the two names match held only
+            // because every bench field so far had been authored as a pair.
+            BattleMapDefinition map = AsciiMapReader.Read(
+                File.ReadAllText(Path.Combine(root, "maps", setup.MapName + ".map.txt")), terrain);
 
             return setup.Build(map, terrain, TestContent.Units, TestContent.Formations,
                 new TerrainMovementModel(terrain));
@@ -128,9 +157,38 @@ namespace BattleChess.Tests.Battle
             _out.WriteLine(
                 $"{key}: {all.Count} regiments, {makesDear} is the dear part, {wrong.Count} problems");
 
-            Assert.Equal(80, all.Count);
-            Assert.True(wrong.Count == 0, $"{key}: {wrong.Count} regiments are badly deployed.");
+            // Every regiment the battle file authored actually reached the
+            // field. This was `Assert.Equal(80, ...)`, which was true of the
+            // three designed fields and read as a law rather than as a fact
+            // about them - a recorded arrangement has whatever strength it had
+            // on the day, and sidewaysmile has forty. What is worth checking is
+            // that none of them were silently dropped on the way in.
+            Assert.Equal(Authored(key), all.Count);
+            Assert.Equal(TangledAtDeployment(key), wrong.Count);
         }
+
+        /// <summary>
+        /// How many regiments a field is <i>known</i> to start tangled, and why.
+        /// </summary>
+        /// <remarks>
+        /// Zero for a designed field: a scenario nobody can deploy in measures
+        /// nothing, which is what this gate has always been for. But
+        /// <c>sidewaysmile</c> is not designed, it is recorded, and at the
+        /// moment the order was given the mover was <b>already 2,1% inside its
+        /// own Horse Archers</b> - checked at the recording's exact metre
+        /// positions, not at the cell centres the reader snaps them to. That
+        /// overlap is not a flaw in the fixture, it is the case: it is why the
+        /// straight line was refused "by its own Horse Archers", and the route
+        /// that followed held side-on for 404 m to get clear of eight metres of
+        /// corner. Nudging it apart would delete the thing being measured.
+        /// <para>
+        /// Declared as an exact count rather than allowed for by relaxing the
+        /// assert, so that a <i>second</i> tangle appearing in this field still
+        /// fails the build.
+        /// </para>
+        /// </remarks>
+        private static int TangledAtDeployment(string key) =>
+            key == "sidewaysmile" ? 1 : 0;
 
         // ----------------------------------------------------------- the bench
 
@@ -172,7 +230,7 @@ namespace BattleChess.Tests.Battle
             PlanningProfile.Stop();
 
             _out.WriteLine(
-                $"=== {key}: forty a side, eighty orders at once, {makesDear} is what this field makes dear ===");
+                $"=== {key}: {Authored(key)} orders at once, {makesDear} is what this field makes dear ===");
             _out.WriteLine(string.Empty);
             _out.WriteLine(
                 $"{measured.Orders} orders   {bareMilliseconds,9:0.0} ms total   " +
@@ -210,12 +268,18 @@ namespace BattleChess.Tests.Battle
                 $"(SmoothRoute, the only caller that bypasses it, " +
                 $"{PlanningProfile.InclusiveMilliseconds(PlanningProfile.Step.SmoothRoute):0.0} ms inclusive)");
 
-            Assert.Equal(80, measured.Orders);
+            Assert.Equal(Authored(key), measured.Orders);
 
             // A bench that stopped routing would still produce a tidy table, and
             // the table would be measuring failure rather than planning.
-            Assert.True(measured.Found >= 60,
-                $"{key}: only {measured.Found} of 80 orders produced a route — this is measuring refusals.");
+            // Three quarters of them, rather than a flat sixty, so that a field
+            // with forty regiments is held to the same standard as one with
+            // eighty instead of to a threshold it clears by existing.
+            int mustRoute = Authored(key) * 3 / 4;
+
+            Assert.True(measured.Found >= mustRoute,
+                $"{key}: only {measured.Found} of {Authored(key)} orders produced a route — " +
+                "this is measuring refusals.");
 
             // Both runs must do the same work, or the breakdown describes
             // something other than the headline.
@@ -224,7 +288,7 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
-        /// The same eighty orders, put to every planner in turn.
+        /// The same orders, put to every planner in turn.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -247,7 +311,8 @@ namespace BattleChess.Tests.Battle
         [MemberData(nameof(Scenarios))]
         public void WhatEachPlannerSpendsItOn(string key, string makesDear)
         {
-            _out.WriteLine($"=== {key}: eighty orders, every planner, {makesDear} is what this field makes dear ===");
+            _out.WriteLine(
+                $"=== {key}: {Authored(key)} orders, every planner, {makesDear} is what this field makes dear ===");
             _out.WriteLine(string.Empty);
 
             foreach (IRoutePlanner planner in RoutePlanners.All)
@@ -289,7 +354,7 @@ namespace BattleChess.Tests.Battle
 
                 _out.WriteLine(string.Empty);
 
-                Assert.Equal(80, bare.Orders);
+                Assert.Equal(Authored(key), bare.Orders);
             }
         }
 
