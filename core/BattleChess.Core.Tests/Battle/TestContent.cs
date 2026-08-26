@@ -37,6 +37,14 @@ namespace BattleChess.Tests.Battle
         private static readonly Lazy<IFormationCatalogue> LazyFormations =
             new Lazy<IFormationCatalogue>(() => FormationCatalogueReader.Read(ReadFile("formations.cfg")));
 
+        /// <summary>The repository's own <c>content</c> directory.</summary>
+        /// <remarks>
+        /// Exposed for the tests that read a whole battle or map file rather
+        /// than a catalogue — the scenario checks, which have to load exactly
+        /// what ships rather than a fixture standing in for it.
+        /// </remarks>
+        public static string Root => Directory.Value;
+
         public static ITerrainCatalogue Terrain => LazyTerrain.Value;
 
         public static IUnitCatalogue Units => LazyUnits.Value;

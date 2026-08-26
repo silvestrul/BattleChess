@@ -23,3 +23,8 @@
 *.blend binary
 *.dll  binary
 *.unitypackage binary
+
+# Shell scripts keep LF whatever the platform. `* text=auto` above checks out
+# native, and a CRLF shebang is a "bad interpreter" error rather than a
+# cosmetic difference — tools/unity-check.sh is run, not read.
+*.sh text eol=lf

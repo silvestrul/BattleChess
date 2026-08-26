@@ -1,0 +1,495 @@
+# The Long March
+#
+# The same forty regiments a side as The Crucible, on four times the ground.
+# The composition is deliberately identical so that the only thing changing
+# between the two is the distance and the terrain.
+
+name        = The Long March
+map         = longmarch
+seed        = 20260819
+
+[army 0]
+name        = Army of the West
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,18
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,20
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,22
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,24
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,26
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,28
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,30
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,32
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,34
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,36
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,38
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,40
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,42
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,44
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,46
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 10,48
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,22
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,24
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,26
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,28
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,30
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,32
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,34
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,36
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,38
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,40
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,42
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 7,44
+facing   = east
+
+[deploy 0]
+type     = archers
+strength = 700
+at       = 4,30
+facing   = east
+
+[deploy 0]
+type     = archers
+strength = 700
+at       = 4,32
+facing   = east
+
+[deploy 0]
+type     = archers
+strength = 700
+at       = 4,34
+facing   = east
+
+[deploy 0]
+type     = archers
+strength = 700
+at       = 4,36
+facing   = east
+
+[deploy 0]
+type     = horsearchers
+strength = 700
+at       = 9,5
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 600
+at       = 9,8
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 600
+at       = 9,11
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 600
+at       = 9,14
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 600
+at       = 9,51
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 600
+at       = 9,54
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 600
+at       = 9,57
+facing   = east
+
+[deploy 0]
+type     = horsearchers
+strength = 700
+at       = 9,60
+facing   = east
+
+[army 1]
+name        = Army of the East
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,18
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,20
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,22
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,24
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,26
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,28
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,30
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,32
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,34
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,36
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,38
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,40
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,42
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,44
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,46
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 89,48
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,22
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,24
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,26
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,28
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,30
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,32
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,34
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,36
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,38
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,40
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,42
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 92,44
+facing   = west
+
+[deploy 1]
+type     = archers
+strength = 700
+at       = 95,30
+facing   = west
+
+[deploy 1]
+type     = archers
+strength = 700
+at       = 95,32
+facing   = west
+
+[deploy 1]
+type     = archers
+strength = 700
+at       = 95,34
+facing   = west
+
+[deploy 1]
+type     = archers
+strength = 700
+at       = 95,36
+facing   = west
+
+[deploy 1]
+type     = horsearchers
+strength = 700
+at       = 90,5
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 600
+at       = 90,8
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 600
+at       = 90,11
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 600
+at       = 90,14
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 600
+at       = 90,51
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 600
+at       = 90,54
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 600
+at       = 90,57
+facing   = west
+
+[deploy 1]
+type     = horsearchers
+strength = 700
+at       = 90,60
+facing   = west

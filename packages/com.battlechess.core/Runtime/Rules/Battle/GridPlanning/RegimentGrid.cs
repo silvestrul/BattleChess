@@ -1,0 +1,577 @@
+using System;
+using System.Collections.Generic;
+using BattleChess.Contracts;
+
+namespace BattleChess.Rules.GridPlanning
+{
+    /// <summary>What shape is reserved round every body.</summary>
+    public enum HaloShape
+    {
+        /// <summary>
+        /// The mover's circumscribed circle, which fits it at any facing and
+        /// therefore needs to know none.
+        /// </summary>
+        Circle,
+
+        /// <summary>
+        /// The mover's own rectangle, squared to the line it is about to walk.
+        /// </summary>
+        /// <remarks>
+        /// <c>M24</c>: every question a route asks is asked of the regiment
+        /// squared to the line it is about to walk. Measured and refused - see
+        /// M77 - because a rectangle is sized for a facing and the routes that
+        /// need this grid are the ones that bend. Kept so it is not re-derived.
+        /// </remarks>
+        Rectangle,
+    }
+
+    /// <summary>What one cell of the grid is, once the bodies have been marked on it.</summary>
+    public enum CellState : byte
+    {
+        /// <summary>The mover could stand here.</summary>
+        Clear,
+
+        /// <summary>Partly covered, but there is still free ground in it.</summary>
+        Partial,
+
+        /// <summary>A regiment is in the way.</summary>
+        Body,
+
+        /// <summary>The going here is impassable to this mover.</summary>
+        Ground,
+    }
+
+    /// <summary>
+    /// A hex grid at regiment scale that knows where the regiments are, and
+    /// plain A* over it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The designer's proposal, and the one fact that makes it work.</b>
+    /// A regiment collides as a <b>2:1 block</b> - <c>Formation.FootprintFor</c>
+    /// with <c>BlockWidthToDepth = 2</c>, which is <c>S2</c>, and is not the
+    /// 40 m by 6 m of ground the <c>units.cfg</c> header describes. That is
+    /// <c>SpaceFor</c>: the men and their spacing, a different number for a
+    /// different purpose. The bounding circle of a 2:1 rectangle is
+    /// <b>1,118 times its long side</b>, and measured across three bench
+    /// fields it is 1,12x for every unit type without exception.
+    /// </para>
+    /// <para>
+    /// That twelve percent is what buys the whole thing: a cell that holds the
+    /// circle holds the regiment however it is turned, so the heading dimension
+    /// the lattice pays for disappears. Two dimensions instead of three, and a
+    /// dictionary lookup per neighbour instead of a swept rectangle against
+    /// every nearby body.
+    /// </para>
+    /// <para>
+    /// This type is now a thin per-mover view onto a <see cref="SharedField"/>
+    /// that is built once and kept: see there for why, and for how a mover
+    /// subtracts its own body from a field that has everybody on it.
+    /// </para>
+    /// </remarks>
+    public sealed class RegimentGrid
+    {
+        /// <summary>Cell spacing as a multiple of the mover's own bounding diameter.</summary>
+        public static float SpacingMultiple = 1f;
+
+        /// <summary>Room left round a body on top of the mover's own radius, in metres.</summary>
+        public static float MarginMetres = 2f;
+
+        /// <summary>
+        /// How much of the mover's circumscribed radius is reserved round every
+        /// body. 1 is the full circle; below that the halo shrinks toward the
+        /// body's own half-depth.
+        /// </summary>
+        /// <remarks>
+        /// <b>0,75 on the measurement.</b> Swept at 1,00 / 0,75 / 0,50 / 0,25 /
+        /// 0,00, routes held were 42/45/34/35/33, 52/55/54/50/47 and
+        /// 73/73/73/58/43. Shrinking the halo finds more routes and holds fewer,
+        /// because <b>A* returns one route and not a menu</b>: an optimistic
+        /// grid does not hand back a route that might work, it threads a gap the
+        /// regiment cannot use and the gate refuses the whole thing.
+        /// </remarks>
+        public static float ClearanceFraction = 0.75f;
+
+        /// <summary>Whether the halo is the mover's circle or its rectangle.</summary>
+        public static HaloShape Halo = HaloShape.Circle;
+
+        /// <summary>Sample points per cell: 1, 7 or 19.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The designer's second proposal.</b> A cell a body is five percent
+        /// into should not be as blocked as one it fills. Sampling the cell at
+        /// several points rather than only at its centre measures how much of it
+        /// is really covered, and two things follow: a cell is refused only when
+        /// enough of it is gone (<see cref="FillToBlock"/>), and a cell that
+        /// keeps some free ground is <b>entered at that free ground rather than
+        /// at its centre</b>.
+        /// </para>
+        /// <para>
+        /// That second half is the important one, and it is what subdividing a
+        /// cell would have been for. Splitting a hex into smaller hexes buys
+        /// resolution near the edges of bodies, which is exactly where gaps are;
+        /// moving the node to the free part of the cell buys the same
+        /// resolution without a second graph to search, because what a finer
+        /// cell would really have given the route is a place to stand that the
+        /// coarse centre could not name.
+        /// </para>
+        /// </remarks>
+        public static int SubSamples = 7;
+
+        /// <summary>
+        /// What fraction of a cell must be covered before it is refused
+        /// outright. 1 refuses only cells with no free sample left.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>0,35 on the measurement, and it beats one sample on every
+        /// field.</b> Swept at seven samples: 40 / 48 / <b>48</b> / 41 / 33
+        /// routes held on the Crucible at 75 / 50 / <b>35</b> / 25 / 14
+        /// percent, 46 / 51 / <b>57</b> / 50 / 47 on Broken Country and
+        /// 71 / 74 / <b>76</b> / 73 / 70 on the Long March. Against 45, 55 and
+        /// 73 for the single centre sample, that is <b>181 held against 173</b>
+        /// and a win on all three rather than a net one.
+        /// </para>
+        /// <para>
+        /// <b>Note the direction.</b> The proposal was to refuse a cell only
+        /// once it was about three-quarters gone; the measurement puts the cut
+        /// at a third. Seven samples do two things at once and they pull
+        /// opposite ways - a better estimate of coverage than one point can
+        /// give, which lets a cell a body barely clips stay open, and a
+        /// stricter one for a cell whose centre happens to be free while its
+        /// edges are not. A third is where those two balance.
+        /// </para>
+        /// <para>
+        /// Nineteen samples buy nothing over seven - 49 held at half gone
+        /// against 48, for half again the cost - so the ring is enough and the
+        /// second ring is not.
+        /// </para>
+        /// </remarks>
+        public static float FillToBlock = 0.35f;
+
+        /// <summary>Whether a field once built is kept and shared between orders.</summary>
+        public static bool Reuse = true;
+
+        /// <summary>Cells one search may settle before it gives up.</summary>
+        internal static int CellBudget = 40_000;
+
+        /// <summary>Cells settled by the last search on this thread.</summary>
+        [ThreadStatic] public static int LastCellsExplored;
+
+        /// <summary>Cells holding a body on the last grid built on this thread.</summary>
+        [ThreadStatic] public static int LastBlockedCells;
+
+        /// <summary>Waypoints in the last raw route, before any smoothing.</summary>
+        [ThreadStatic] internal static int LastRawWaypoints;
+
+        /// <summary>Shared fields found already built, on this thread.</summary>
+        [ThreadStatic] public static int FieldsReused;
+
+        /// <summary>Shared fields built from nothing, on this thread.</summary>
+        [ThreadStatic] public static int FieldsBuilt;
+
+        // One cache per thread: plans are worked out on several at once, and a
+        // dictionary shared across them would need a lock on the hot path for
+        // the sake of saving a rebuild that costs under a millisecond.
+        [ThreadStatic] private static Dictionary<long, SharedField>? _fields;
+        [ThreadStatic] private static long _fieldStamp;
+
+        private readonly SharedField _field;
+
+        /// <summary>The mover's own coverage, to be taken off the shared field.</summary>
+        private readonly Dictionary<Coord, byte[]> _mine;
+
+        private RegimentGrid(SharedField field, Dictionary<Coord, byte[]> mine)
+        {
+            _field = field;
+            _mine = mine;
+        }
+
+        /// <summary>The grid itself, for drawing and for turning cells back into ground.</summary>
+        public HexLayout Layout => _field.Layout;
+
+        /// <summary>Centre-to-centre spacing, in metres.</summary>
+        public float Spacing => _field.Spacing;
+
+        /// <summary>How many cells this mover cannot stand in.</summary>
+        public int BlockedCells { get; private set; }
+
+        /// <summary>Throws away every kept field, so the next order rebuilds.</summary>
+        public static void Forget()
+        {
+            _fields?.Clear();
+            _fieldStamp = 0;
+        }
+
+        /// <summary>
+        /// Lays a grid over the field, or finds the one already laid, and
+        /// returns the view of it that belongs to this mover.
+        /// </summary>
+        public static RegimentGrid For(
+            BattleState battle, UnitInstance mover, Facing? travellingOn = null)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+            if (mover == null) throw new ArgumentNullException(nameof(mover));
+
+            Footprint print = mover.Shape.Footprint;
+            float fraction = Math.Clamp(ClearanceFraction, 0f, 1f);
+            float reach =
+                print.HalfDepth + (print.BoundingRadius - print.HalfDepth) * fraction +
+                MathF.Max(0f, MarginMetres);
+
+            float spacing = MathF.Max(1f, print.BoundingRadius * 2f * SpacingMultiple);
+            int samples = SubSamples >= 19 ? 19 : SubSamples >= 7 ? 7 : 1;
+
+            OrientedRect? moving =
+                Halo == HaloShape.Rectangle && travellingOn.HasValue
+                    ? new OrientedRect(mover.Position, travellingOn.Value, print)
+                    : (OrientedRect?)null;
+
+            SharedField field = FieldFor(battle, mover, spacing, samples, reach, moving);
+
+            // The mover's own body, worked out fresh. One rectangle over a few
+            // dozen cells is nothing beside the field it is subtracted from,
+            // and keeping it per unit would be a cache of a cache.
+            var mine = new Dictionary<Coord, byte[]>();
+            (float across, float along) = ReachOn(mover.Shape, reach, moving);
+            field.Mark(mover.Shape, across, along, +1, mine);
+
+            var grid = new RegimentGrid(field, mine);
+            grid.CountBlocked();
+
+            LastBlockedCells = grid.BlockedCells;
+            return grid;
+        }
+
+        /// <summary>How far the mover reaches on a body's two axes.</summary>
+        private static (float Across, float Along) ReachOn(
+            in OrientedRect body, float reach, OrientedRect? moving)
+        {
+            if (!moving.HasValue) return (reach, reach);
+
+            float margin = MathF.Max(0f, MarginMetres);
+
+            return (moving.Value.ProjectedRadius(body.Right) + margin,
+                    moving.Value.ProjectedRadius(body.Forward) + margin);
+        }
+
+        /// <summary>
+        /// The shared field for this footprint and this arrangement of bodies,
+        /// built if nobody has built it.
+        /// </summary>
+        private static SharedField FieldFor(
+            BattleState battle, UnitInstance mover, float spacing, int samples, float reach,
+            OrientedRect? moving)
+        {
+            long stamp = StampOf(battle);
+
+            _fields ??= new Dictionary<long, SharedField>();
+
+            if (!Reuse || stamp != _fieldStamp)
+            {
+                _fields.Clear();
+                _fieldStamp = stamp;
+            }
+
+            // A rectangle halo differs per order rather than per footprint, so
+            // a field built with one cannot answer for another. Keyed on the
+            // facing as well, which in practice means it is rebuilt each time -
+            // one more reason M77 refused it.
+            long key = (long)MathF.Round(spacing * 16f) * 1_000_003L
+                     + samples * 7919L
+                     + (long)mover.Def.Movement * 131L
+                     + (long)MathF.Round(reach * 16f) * 17L
+                     + (moving.HasValue ? (long)MathF.Round(moving.Value.Facing.Degrees) : -1L);
+
+            if (_fields.TryGetValue(key, out SharedField found))
+            {
+                FieldsReused++;
+                return found;
+            }
+
+            float fastest = 0f;
+
+            foreach (TerrainDef def in battle.TerrainCatalogue.All)
+                fastest = MathF.Max(fastest, battle.Movement.SpeedMultiplier(def.Id, mover.Def.Movement));
+
+            if (fastest <= 0f) fastest = 1f;
+
+            var field = new SharedField(
+                HexLayout.FromNeighbourDistance(spacing, battle.Terrain.Bounds.Min),
+                battle.Terrain, battle.Movement, mover.Def.Movement, spacing, fastest, samples);
+
+            // Everybody, including the mover. Whoever asks takes themselves off
+            // again, which is what lets one field answer for all of them.
+            foreach (UnitInstance body in battle.UnitsOnField())
+            {
+                (float across, float along) = ReachOn(body.Shape, reach, moving);
+                field.Mark(body.Shape, across, along, +1);
+            }
+
+            _fields[key] = field;
+            FieldsBuilt++;
+            return field;
+        }
+
+        /// <summary>
+        /// A number that changes whenever anything has moved, so a field built
+        /// before it moved is simply not found.
+        /// </summary>
+        /// <remarks>
+        /// Staleness cannot be a matter of discipline. A kept field that has
+        /// gone out of date is a route through a regiment that is no longer
+        /// there, which is the class of bug this project has spent four
+        /// attempts on; a hash over eighty units costs microseconds against the
+        /// milliseconds it saves.
+        /// </remarks>
+        private static long StampOf(BattleState battle)
+        {
+            long stamp = 17;
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                unchecked
+                {
+                    stamp = stamp * 31 + (long)MathF.Round(unit.Position.X * 8f);
+                    stamp = stamp * 31 + (long)MathF.Round(unit.Position.Y * 8f);
+                    stamp = stamp * 31 + (long)MathF.Round(unit.Facing.Degrees);
+                    stamp = stamp * 31 + unit.Shape.Footprint.Width.GetHashCode();
+                }
+            }
+
+            return stamp;
+        }
+
+        /// <summary>How much of a cell is covered, for this mover, from 0 to 1.</summary>
+        public float FillAt(Coord cell)
+        {
+            byte[]? all = _field.CoverAt(cell);
+            if (all == null) return 0f;
+
+            _mine.TryGetValue(cell, out byte[] mine);
+
+            int covered = 0;
+
+            for (int i = 0; i < all.Length; i++)
+            {
+                int count = all[i] - (mine != null ? mine[i] : 0);
+                if (count > 0) covered++;
+            }
+
+            return covered / (float)all.Length;
+        }
+
+        /// <summary>Whether this mover is refused this cell.</summary>
+        public bool IsBlocked(Coord cell)
+        {
+            float fill = FillAt(cell);
+
+            // At one sample there is nothing to be partial about, so any
+            // coverage at all is the whole cell - which is what this did before
+            // sampling existed, and is still what it does at SubSamples = 1.
+            return fill > 0f && fill >= MathF.Min(FillToBlock, 1f);
+        }
+
+        /// <summary>
+        /// Where in a cell the regiment actually stands: the middle of whatever
+        /// of it is free, or the cell's centre when all of it is.
+        /// </summary>
+        /// <remarks>
+        /// This is the half of sampling that earns its keep. A route through a
+        /// half-covered cell that aims at the cell's centre aims at ground
+        /// inside a regiment; aiming at the free half is what subdividing the
+        /// cell would have bought, without a second graph to search.
+        /// </remarks>
+        public Vec2 NodeAt(Coord cell)
+        {
+            byte[]? all = _field.CoverAt(cell);
+            if (all == null || all.Length <= 1) return _field.Layout.ToWorld(cell);
+
+            _mine.TryGetValue(cell, out byte[] mine);
+
+            float x = 0f, y = 0f;
+            int free = 0;
+
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] - (mine != null ? mine[i] : 0) > 0) continue;
+
+                Vec2 at = _field.SampleAt(cell, i);
+                x += at.X;
+                y += at.Y;
+                free++;
+            }
+
+            return free == 0 ? _field.Layout.ToWorld(cell) : new Vec2(x / free, y / free);
+        }
+
+        /// <summary>What a cell is, for drawing.</summary>
+        public CellState StateOf(Coord cell)
+        {
+            if (IsBlocked(cell)) return CellState.Body;
+            if (_field.GoingAt(cell) <= 0f) return CellState.Ground;
+
+            return FillAt(cell) > 0f ? CellState.Partial : CellState.Clear;
+        }
+
+        private void CountBlocked()
+        {
+            int blocked = 0;
+
+            foreach (Coord cell in _field.TouchedCells())
+                if (IsBlocked(cell))
+                    blocked++;
+
+            BlockedCells = blocked;
+        }
+
+        /// <summary>Every cell of the field, for drawing the whole grid at once.</summary>
+        public void Snapshot(List<Coord> into) =>
+            Snapshot(into, _field.Bounds.Centre, float.PositiveInfinity);
+
+        /// <summary>
+        /// The cells within <paramref name="radiusMetres"/> of a point, for
+        /// drawing a window rather than a whole field.
+        /// </summary>
+        public void Snapshot(List<Coord> into, Vec2 around, float radiusMetres)
+        {
+            if (into == null) throw new ArgumentNullException(nameof(into));
+
+            into.Clear();
+
+            MapBounds bounds = _field.Bounds;
+
+            float minX = bounds.Min.X, maxX = bounds.Max.X;
+            float minY = bounds.Min.Y, maxY = bounds.Max.Y;
+
+            if (!float.IsInfinity(radiusMetres))
+            {
+                minX = MathF.Max(minX, around.X - radiusMetres);
+                maxX = MathF.Min(maxX, around.X + radiusMetres);
+                minY = MathF.Max(minY, around.Y - radiusMetres);
+                maxY = MathF.Min(maxY, around.Y + radiusMetres);
+            }
+
+            var seen = new HashSet<Coord>();
+            float step = _field.Spacing * 0.45f;
+
+            for (float y = minY; y <= maxY + step; y += step)
+            for (float x = minX; x <= maxX + step; x += step)
+            {
+                Coord cell = _field.Layout.ToCoord(new Vec2(x, y));
+                if (seen.Add(cell)) into.Add(cell);
+            }
+        }
+
+        /// <summary>
+        /// A* from one point to another over the cells, returning the ground
+        /// each cell is entered at with the true ends substituted in.
+        /// </summary>
+        /// <remarks>
+        /// The start and goal cells are always enterable however they are
+        /// marked. A regiment about to move is nearly always standing inside
+        /// some other body's margin - that is what being in a line means - and
+        /// refusing its own cell would refuse every order given in contact.
+        /// </remarks>
+        public bool TryRoute(Vec2 from, Vec2 to, out List<Vec2> waypoints)
+        {
+            waypoints = null!;
+            LastCellsExplored = 0;
+            LastRawWaypoints = 0;
+
+            HexLayout layout = _field.Layout;
+            Coord start = layout.ToCoord(from);
+            Coord goal = layout.ToCoord(to);
+
+            if (start == goal)
+            {
+                waypoints = new List<Vec2> { from, to };
+                LastRawWaypoints = 2;
+                return true;
+            }
+
+            var cameFrom = new Dictionary<Coord, Coord>();
+            var bestCost = new Dictionary<Coord, float> { [start] = 0f };
+            var settled = new HashSet<Coord>();
+            var open = new CoordMinHeap();
+
+            open.Push(start, Heuristic(start, goal));
+
+            int explored = 0;
+            Span<Coord> neighbours = stackalloc Coord[HexMath.DirectionCount];
+
+            while (open.TryPop(out Coord current))
+            {
+                if (!settled.Add(current)) continue;
+
+                explored++;
+
+                if (current == goal)
+                {
+                    LastCellsExplored = explored;
+                    waypoints = Reconstruct(cameFrom, start, goal, from, to);
+                    LastRawWaypoints = waypoints.Count;
+                    return true;
+                }
+
+                if (explored >= CellBudget) break;
+
+                float cost = bestCost[current];
+                HexMath.Neighbours(current, neighbours);
+
+                for (int i = 0; i < neighbours.Length; i++)
+                {
+                    Coord next = neighbours[i];
+                    if (settled.Contains(next)) continue;
+
+                    // The goal cell is enterable whatever is marked on it, so
+                    // it also needs a going the arithmetic can divide by.
+                    float going = next == goal
+                        ? MathF.Max(_field.GoingAt(next), 0.01f)
+                        : _field.GoingAt(next);
+
+                    if (going <= 0f) continue;
+                    if (next != goal && IsBlocked(next)) continue;
+
+                    float tentative = cost + _field.Spacing / going;
+
+                    if (bestCost.TryGetValue(next, out float known) && tentative >= known) continue;
+
+                    bestCost[next] = tentative;
+                    cameFrom[next] = current;
+                    open.Push(next, tentative + Heuristic(next, goal));
+                }
+            }
+
+            LastCellsExplored = explored;
+            return false;
+        }
+
+        /// <summary>
+        /// Nudges the search toward the goal so that, among the enormous number
+        /// of routes that tie on open ground, it prefers the direct one.
+        /// </summary>
+        private float Heuristic(Coord cell, Coord goal) =>
+            Coord.Distance(cell, goal) * _field.Spacing / _field.Fastest * 1.001f;
+
+        private List<Vec2> Reconstruct(
+            Dictionary<Coord, Coord> cameFrom, Coord start, Coord goal, Vec2 from, Vec2 to)
+        {
+            var cells = new List<Coord>();
+
+            for (Coord at = goal; at != start; at = cameFrom[at]) cells.Add(at);
+
+            cells.Add(start);
+            cells.Reverse();
+
+            // The true ends rather than the cells that hold them, and in
+            // between, the free part of each cell rather than its middle.
+            var points = new List<Vec2>(cells.Count) { from };
+
+            for (int i = 1; i < cells.Count - 1; i++) points.Add(NodeAt(cells[i]));
+
+            points.Add(to);
+            return points;
+        }
+    }
+}

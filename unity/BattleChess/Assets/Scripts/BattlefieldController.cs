@@ -2,6 +2,7 @@
 using System.IO;
 using BattleChess.Contracts;
 using BattleChess.Rules;
+using BattleChess.Rules.GridPlanning;
 using UnityEngine;
 
 namespace BattleChess.Unity
@@ -69,6 +70,12 @@ namespace BattleChess.Unity
         [Tooltip("Battle file to load from content/battles, without the extension.")]
         public string BattleName = "ford";
 
+        [Tooltip("Routes the tick may work out in one frame before the rest wait their turn.")]
+        public int RoutesPerFrame = PlanningBudget.DefaultRoutesPerFrame;
+
+        [Tooltip("Milliseconds one frame may spend working out routes before the rest wait their turn.")]
+        public float MillisecondsPerFrame = PlanningBudget.DefaultMillisecondsPerFrame;
+
         private BattleState _battle;
         private BattleMapDefinition _map;
         private TerrainCatalogue _terrainCatalogue;
@@ -134,6 +141,14 @@ namespace BattleChess.Unity
         private void Start()
         {
             _quietened = new SteadyStateLog(_console);
+
+            // Recording is on from the first tick, not from whenever somebody
+            // remembers to press the button. Every fault in this project has
+            // been found in a recording and several were found late because the
+            // session that showed them was not being written down — a log that
+            // has to be asked for is a log that is missing exactly when it is
+            // wanted. The button now stops it rather than starting it.
+            _console.StartRecording(DebugConsole.DefaultLogDirectory());
 
             try
             {
@@ -244,9 +259,139 @@ namespace BattleChess.Unity
             _pathLine.positionCount = 0;
         }
 
+        /// <summary>
+        /// A frame slower than this is worth a line in the recording.
+        /// </summary>
+        /// <remarks>
+        /// Two frames' worth at sixty. Below that nobody feels anything; above
+        /// it, something stopped for long enough to see.
+        /// </remarks>
+        private const float ASlowFrameMs = 33f;
+
+        private readonly System.Diagnostics.Stopwatch _frame = new System.Diagnostics.Stopwatch();
+
+        private int _collectionsLastFrame;
+        private long _heapLastFrame;
+
+        // Where a frame goes. Fifty-two of sixty-eight slow frames ran no
+        // collection at all, so the litter was real and was not the whole
+        // story — and a frame that only knows its own total cannot say which
+        // part of itself is slow (W5).
+        private readonly System.Diagnostics.Stopwatch _simClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch _viewClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch _trackClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch _guiClock = new System.Diagnostics.Stopwatch();
+
+        private int _ticksThisFrame;
+
+        // Where the battle's own planning clock stood at the top of the last
+        // frame, so the frame line can report the difference rather than the
+        // running total.
+        private long _planningTicksLastFrame;
+        private int _routesPlannedLastFrame;
+
+        // The same splits, named for the Unity profiler, so a capture and the
+        // frame line in the console answer the same question the same way. A
+        // profiler that only knows Update() cannot say which part of a frame
+        // is slow, which is the whole reason the console line exists — but a
+        // capture is what gets taken when something is felt rather than
+        // reproduced, so both have to work.
+        private static readonly global::Unity.Profiling.ProfilerMarker SimMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Simulation");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker ViewMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Views");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker TrackMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Tracking");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker GuiMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.Interface");
+
+        private static readonly global::Unity.Profiling.ProfilerMarker PlanMarker =
+            new global::Unity.Profiling.ProfilerMarker("BattleChess.PlanRoute");
+
         private void Update()
         {
             if (_battle == null) return;
+
+            // What the last frame cost, reported at the top of this one, because
+            // a frame cannot time itself: the drawing that makes it slow happens
+            // after Update returns. So the clock runs across the whole frame and
+            // is read at the next.
+            if (_frame.IsRunning)
+            {
+                _frame.Stop();
+
+                float ms = (float)_frame.Elapsed.TotalMilliseconds;
+
+                if (ms >= ASlowFrameMs)
+                {
+                    int marching = 0;
+                    int onField = 0;
+
+                    foreach (UnitInstance unit in _battle.UnitsOnField())
+                    {
+                        onField++;
+                        if (unit.IsMarching) marching++;
+                    }
+
+                    // The two numbers together are the whole question: a slow
+                    // frame with nobody marching is drawing, and one that only
+                    // arrives when a wing is on the move is the movement.
+                    // <b>Whether it collected.</b> Measured on the bench, one
+                    // route plan allocates 205 kB against a whole simulation
+                    // tick's 1,1 — so the frames that stop are far more likely
+                    // to be the collector running than anything the battle did,
+                    // and a frame line that cannot say which sends the next
+                    // investigation the same way this one went.
+                    int collections = System.GC.CollectionCount(0);
+                    long heap = System.GC.GetTotalMemory(forceFullCollection: false);
+
+                    // Planning is inside sim, not beside it, so it is
+                    // reported as a share of that rather than as another
+                    // column that would not add up.
+                    double planningMs =
+                        (_battle.RoutePlanningTicks - _planningTicksLastFrame)
+                        * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+                    int planned = _battle.RoutesPlanned - _routesPlannedLastFrame;
+
+                    _console.Info("Frame",
+                        $"{ms:0} ms on one frame — sim {_simClock.Elapsed.TotalMilliseconds:0.0} " +
+                        $"({_ticksThisFrame} ticks, of which planning {planningMs:0.0} for " +
+                        $"{planned} routes, {_battle.Planning.Waiting} waiting), " +
+                        $"views {_viewClock.Elapsed.TotalMilliseconds:0.0}, " +
+                        $"tracking {_trackClock.Elapsed.TotalMilliseconds:0.0}, " +
+                        $"gui {_guiClock.Elapsed.TotalMilliseconds:0.0}, " +
+                        $"rest {ms - _simClock.Elapsed.TotalMilliseconds - _viewClock.Elapsed.TotalMilliseconds - _trackClock.Elapsed.TotalMilliseconds - _guiClock.Elapsed.TotalMilliseconds:0.0}. " +
+                        $"{marching} of {onField} marching, {_views.Count} drawn, " +
+                        $"{_selection.Count} selected, " +
+                        $"{collections - _collectionsLastFrame} collections, heap " +
+                        $"{heap / 1048576.0:0.0} MB ({(heap - _heapLastFrame) / 1024.0:+0;-0} kB).");
+                }
+            }
+
+            // Reset here rather than in OnGUI: OnGUI runs more than once a
+            // frame (a layout pass and a repaint pass at least), and what is
+            // wanted is what all of them together cost.
+            _guiClock.Reset();
+
+            _collectionsLastFrame = System.GC.CollectionCount(0);
+            _heapLastFrame = System.GC.GetTotalMemory(forceFullCollection: false);
+            _planningTicksLastFrame = _battle.RoutePlanningTicks;
+            _routesPlannedLastFrame = _battle.RoutesPlanned;
+
+            // A fresh allowance for this frame. This is the call that turns
+            // rationing on at all — without a host doing it every request is
+            // granted, which is how the CLI and the tests stay as they were.
+            // It belongs here rather than beside AdvanceClock because it is a
+            // *frame's* allowance: a frame that has fallen behind runs up to
+            // eight ticks to catch up, and the whole point is that those eight
+            // share one allowance instead of taking one each.
+            _battle.Planning.OpenFrame(RoutesPerFrame, MillisecondsPerFrame);
+
+            _frame.Restart();
 
             if (Input.GetKeyDown(KeyCode.F1))
                 _options.Visible = !_options.Visible;
@@ -255,7 +400,24 @@ namespace BattleChess.Unity
 
             HandleClockKeys();
             HandleFogKeys();
+
+            // Taken before the clock is asked to move, because taking it is
+            // what lets the clock move again.
+            CollectFinishedRoutes();
+
+            _simClock.Restart();
+            SimMarker.Begin();
+            int before = _clock?.Tick ?? 0;
             AdvanceClock();
+            _ticksThisFrame = (_clock?.Tick ?? 0) - before;
+            SimMarker.End();
+            _simClock.Stop();
+
+            // Both of these can change a regiment's shape or stance, which is a
+            // write to the field a worker may be reading, so both settle first
+            // — but each settles inside itself, once a key has actually been
+            // pressed. Settling here instead waited on the worker every single
+            // frame, which is the whole of the off-thread pass undone.
             HandleFormationKeys();
             HandleStanceKeys();
 
@@ -264,16 +426,29 @@ namespace BattleChess.Unity
             // clock is running.
             float alpha = Mathf.Clamp01(_tickAccumulator / BattleClock.SecondsPerTick);
 
+            _viewClock.Restart();
+            ViewMarker.Begin();
+
             ApplyFog();
 
             foreach (UnitView view in _views)
                 view.Render(alpha);
 
+            ViewMarker.End();
+            _viewClock.Stop();
+
+            _trackClock.Restart();
+            TrackMarker.Begin();
+
             RefreshOverlayUnits();
+            RefreshRegimentGrid();
             ForgetAFinishedRoute();
 
             TrackSelection();
             TrackOrders();
+
+            TrackMarker.End();
+            _trackClock.Stop();
         }
 
         /// <summary>
@@ -409,6 +584,12 @@ namespace BattleChess.Unity
         {
             if (Input.GetMouseButtonDown(1) && !PointerOverPanels())
             {
+                // Every branch below either gives an order or asks for a plan,
+                // and both write to the field a worker may still be reading.
+                // Settling here covers the attack, the preview and the march in
+                // one place rather than three.
+                if (WorkingOutARoute) SettleRoutes();
+
                 if (_selection.Count == 0)
                 {
                     _console.Blocked("Order", "Nothing selected — left-click a regiment first.");
@@ -419,9 +600,10 @@ namespace BattleChess.Unity
                 Vec2 at = MouseWorld();
                 UnitInstance clicked = UnitAt(at);
 
-                // Right-clicking an enemy is an attack, which follows the target
-                // as it moves rather than marching at where it used to be.
-                if (clicked != null && clicked.Owner != Primary.Owner)
+                // Right-clicking an enemy is ordinarily an attack. In preview
+                // mode nothing is ordered at all, so the point clicked is just
+                // ground to plan against, enemy regiment or not.
+                if (!_options.PreviewRouteMode && clicked != null && clicked.Owner != Primary.Owner)
                 {
                     AttackWithSelection(clicked);
                     return;
@@ -440,10 +622,12 @@ namespace BattleChess.Unity
 
             if (Input.GetMouseButton(1))
             {
-                _status = far
-                    ? $"Forming a line on that bearing, facing {FrontOfDrawnLine(drawn).Degrees:0}° — " +
-                      "release to confirm, drag the other way to face about."
-                    : "Drag out the line they should form on, or release to keep the current front.";
+                _status = _options.PreviewRouteMode
+                    ? "Previewing — release to compute the route, nothing will move."
+                    : far
+                        ? $"Forming a line on that bearing, facing {FrontOfDrawnLine(drawn).Degrees:0}° — " +
+                          "release to confirm, drag the other way to face about."
+                        : "Drag out the line they should form on, or release to keep the current front.";
 
                 return;
             }
@@ -453,7 +637,15 @@ namespace BattleChess.Unity
             _lastDestination = _orderAt;
             _hasDestination = true;
 
-            MarchSelection(_orderAt, far ? FrontOfDrawnLine(drawn) : (Facing?)null);
+            // Said before the order goes in, while the field is still the one
+            // the grid was drawn on. Afterwards the regiment has been given a
+            // route and the bodies it was routed round may already be moving.
+            ReportRegimentGrid();
+
+            if (_options.PreviewRouteMode)
+                PreviewRoute(Primary, _orderAt);
+            else
+                MarchSelection(_orderAt, far ? FrontOfDrawnLine(drawn) : (Facing?)null);
         }
 
         /// <summary>
@@ -739,10 +931,22 @@ namespace BattleChess.Unity
                 $"keeping their shape" +
                 (bearing.HasValue ? $", to arrive facing {bearing.Value.Degrees:0}°." : "."));
 
-            foreach (UnitInstance unit in _selection)
-                PlanRoute(unit, destination + (unit.Position - origin), bearing, quiet: true);
+            // The whole wing on one clock. A regiment's own plan is a few
+            // milliseconds and nobody would feel it; a wing of them lands inside
+            // a single frame, and that is what a stutter on a group order is.
+            var wing = new List<UnitInstance>(_selection);
+            var wanted = new Vec2[wing.Count];
 
-            _status = $"{_selection.Count} regiments marching, keeping their formation.";
+            for (int i = 0; i < wing.Count; i++)
+                wanted[i] = destination + (wing[i].Position - origin);
+
+            // Handed to a worker and applied when it lands. The clock is held
+            // meanwhile, so the field the wing is planned against is the field
+            // the player clicked on and not one a tick has moved underneath it.
+            WorkOutRoutes(
+                wing, wanted, bearing,
+                quiet: true, asAWing: true,
+                status: $"{wing.Count} regiments marching, keeping their formation.");
         }
 
         /// <summary>
@@ -1184,6 +1388,19 @@ namespace BattleChess.Unity
         {
             if (!_options.Running) return;
 
+            // A plan is out with a worker reading positions, shapes and the
+            // spatial index. A tick writes to all three, so the battle waits -
+            // which is the trade this whole arrangement makes: the clock loses
+            // a fraction of a tick, the frame loses nothing.
+            if (WorkingOutARoute)
+            {
+                // Not accumulated while held, or the moment the plan lands the
+                // battle would fast-forward through every tick it owed and
+                // undo the point of waiting.
+                _tickAccumulator = 0f;
+                return;
+            }
+
             _tickAccumulator += Time.deltaTime * _options.TimeScale;
 
             // Cap the catch-up so a stall cannot fast-forward the battle.
@@ -1249,6 +1466,10 @@ namespace BattleChess.Unity
             {
                 if (!Input.GetKeyDown(KeyCode.Alpha1 + i)) continue;
 
+                // A change of formation rewrites the footprint a worker may be
+                // reading, so the plan lands before the shape moves under it.
+                if (WorkingOutARoute) SettleRoutes();
+
                 FormationDef target = _formations.All[i];
 
                 foreach (UnitInstance unit in _selection)
@@ -1306,6 +1527,10 @@ namespace BattleChess.Unity
 
             if (chosen == null) return;
 
+            // Same reason as the formation keys: the plan lands before the
+            // stance it was planned under changes.
+            if (WorkingOutARoute) SettleRoutes();
+
             foreach (UnitInstance unit in _selection)
             {
                 if (unit.Stance == chosen.Value) continue;
@@ -1331,6 +1556,169 @@ namespace BattleChess.Unity
             Stance.Evade => "withdraws from anything that comes near.",
             _ => string.Empty
         };
+
+        /// <summary>The cells last drawn, and what each of them was.</summary>
+        /// <remarks>
+        /// The cell list is kept between frames because it only changes when
+        /// the spacing does - walking the whole field to enumerate it is the
+        /// expensive half, and the bodies moving about on it is the cheap half.
+        /// </remarks>
+        private readonly List<Coord> _gridCells = new List<Coord>();
+
+        private readonly List<CellState> _gridStates = new List<CellState>();
+
+        private float _gridSpacingDrawn;
+
+        private Vec2 _gridDrawnAround;
+
+        private readonly List<OrientedRect> _reserved = new List<OrientedRect>();
+
+        /// <summary>Roughly how many cells the overlay will draw at once.</summary>
+        /// <remarks>
+        /// Four thousand hexes is twenty-four thousand triangles, which draws
+        /// in well under a millisecond and still covers the whole Great Field
+        /// at one regiment to a cell. At a tenth of one it becomes a window
+        /// about 150 m across, which is the right size for the thing that
+        /// resolution is for: checking the blocked cells against the
+        /// rectangles that blocked them.
+        /// </remarks>
+        private const int DrawnCellCap = 4000;
+
+        /// <summary>
+        /// Lays the regiment grid for whichever regiment is selected and draws
+        /// it, with the route it would take to wherever the mouse is.
+        /// </summary>
+        /// <remarks>
+        /// Routed to the mouse rather than to the last order, so the grid can
+        /// be interrogated by pointing at things: hover across a gap and watch
+        /// whether the line goes through it or round. That is the question this
+        /// whole overlay exists to answer, and a static picture of the last
+        /// order cannot answer it.
+        /// </remarks>
+        private void RefreshRegimentGrid()
+        {
+            if (_options == null || !_options.ShowRegimentGrid || _battle == null || Primary == null)
+            {
+                if (_gridCells.Count > 0)
+                {
+                    _gridCells.Clear();
+                    _gridSpacingDrawn = 0f;
+                    _gridDrawnAround = default;
+                    _overlay.SetRegimentGrid(null, null, default);
+                    _overlay.SetGridRoute(null);
+                    _overlay.SetReservedAreas(null);
+                }
+
+                return;
+            }
+
+            UnitInstance unit = Primary;
+
+            RegimentGrid.SpacingMultiple = _options.RegimentGridSpacingMultiple;
+            RegimentGrid grid = RegimentGrid.For(_battle, unit);
+
+            // A whole field is a couple of thousand cells at one regiment to a
+            // cell, and two hundred thousand at a tenth of one. So the drawing
+            // is windowed to whatever radius holds about DrawnCellCap cells,
+            // centred on the regiment being looked at - which is also where
+            // anyone checking the marking against the rectangles is looking.
+            // The search is never windowed; only the picture is.
+            float hexArea = 0.866f * grid.Spacing * grid.Spacing;
+            float radius = Mathf.Sqrt(DrawnCellCap * hexArea / Mathf.PI);
+
+            bool moved = Vec2.Distance(unit.Position, _gridDrawnAround) > grid.Spacing;
+
+            if (_gridCells.Count == 0 || moved ||
+                Mathf.Abs(grid.Spacing - _gridSpacingDrawn) > 0.01f)
+            {
+                grid.Snapshot(_gridCells, unit.Position, radius);
+                _gridSpacingDrawn = grid.Spacing;
+                _gridDrawnAround = unit.Position;
+            }
+
+            _gridStates.Clear();
+
+            for (int i = 0; i < _gridCells.Count; i++)
+                _gridStates.Add(grid.StateOf(_gridCells[i]));
+
+            _overlay.SetRegimentGrid(_gridCells, _gridStates, grid.Layout);
+
+            Vec2 to = MouseWorld();
+
+            // M82. Straightened with the same cast-ahead pass every planner's
+            // answer goes through, because the raw grid answer is a path of hex
+            // centres and nothing would ever walk it. At a tenth of a regiment
+            // to a cell the difference is 159 points a route against five.
+            _overlay.SetGridRoute(
+                grid.TryRoute(unit.Position, to, out List<Vec2> route)
+                    ? Marching.Straightened(_battle, unit, route)
+                    : null);
+
+            // What the grid is really marking against. The body drawn on screen
+            // is not it: a cell is refused where this regiment's own circle,
+            // placed at that cell, would overlap somebody - so the shape that
+            // matters is every other body grown by that circle.
+            _reserved.Clear();
+
+            if (_options.ShowReservedAreas)
+            {
+                Footprint print = unit.Shape.Footprint;
+                float reach =
+                    print.HalfDepth +
+                    (print.BoundingRadius - print.HalfDepth) * RegimentGrid.ClearanceFraction +
+                    RegimentGrid.MarginMetres;
+
+                foreach (UnitInstance body in _battle.UnitsOnField())
+                {
+                    if (body.Id == unit.Id) continue;
+                    if (Vec2.Distance(body.Position, unit.Position) > 600f) continue;
+
+                    _reserved.Add(new OrientedRect(
+                        body.Shape.Centre, body.Shape.Facing,
+                        new Footprint(
+                            body.Shape.Footprint.Width + 2f * reach,
+                            body.Shape.Footprint.Depth + 2f * reach)));
+                }
+            }
+
+            _overlay.SetReservedAreas(_reserved);
+        }
+
+        /// <summary>
+        /// Says what the grid made of the order just given, next to what the
+        /// cascade actually did with it.
+        /// </summary>
+        private void ReportRegimentGrid()
+        {
+            if (_options == null || !_options.ShowRegimentGrid || _battle == null || Primary == null)
+                return;
+
+            UnitInstance unit = Primary;
+            Vec2 to = _hasDestination ? _lastDestination : MouseWorld();
+
+            RegimentGrid.SpacingMultiple = _options.RegimentGridSpacingMultiple;
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            RegimentGrid grid = RegimentGrid.For(_battle, unit);
+            double built = watch.Elapsed.TotalMilliseconds;
+
+            watch.Restart();
+            bool found = grid.TryRoute(unit.Position, to, out List<Vec2> route);
+            double searched = watch.Elapsed.TotalMilliseconds;
+
+            _console.Info("Grid",
+                $"{unit.Def.DisplayName}: cells {grid.Spacing:0.#} m " +
+                $"({unit.Shape.Footprint.Width:0.#} x {unit.Shape.Footprint.Depth:0.#} m regiment, " +
+                $"bounding circle {unit.Shape.Footprint.BoundingRadius * 2f:0.#} m), " +
+                $"{RegimentGrid.LastBlockedCells} cells held by bodies. " +
+                (found
+                    ? $"Route in {route.Count} waypoints over {RegimentGrid.LastCellsExplored} cells settled."
+                    : $"No route: {RegimentGrid.LastCellsExplored} cells settled and every way round blocked.") +
+                $" Built {built:0.00} ms, searched {searched:0.00} ms. " +
+                $"In the cascade it is {GridRoutePlanner.Use} " +
+                $"(asked {GridRoutePlanner.Asked}, found {GridRoutePlanner.Found}, " +
+                $"held {GridRoutePlanner.Held}).");
+        }
 
         private void RefreshOverlayUnits()
         {
@@ -1486,6 +1874,7 @@ namespace BattleChess.Unity
             _pathLine.positionCount = 0;
             _overlay.SetSearchCells(null, default);
             _overlay.SetRawPath(null, default);
+            _overlay.ClearRoutePreview();
 
             foreach (UnitView view in _views)
                 view.SetSelected(_selection.Contains(view.Unit));
@@ -1510,36 +1899,667 @@ namespace BattleChess.Unity
         }
 
         /// <summary>
+        /// Works out what would be ordered, and draws it, without ordering it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Everything <see cref="PlanRoute"/> does up to the point it would call
+        /// <c>GiveOrder</c> — the same clearance rule, the same placement search
+        /// when the exact point is taken or impassable — reused rather than
+        /// duplicated, so a preview can never show a route the real order
+        /// wouldn't. It stops before touching the unit at all.
+        /// </para>
+        /// <para>
+        /// Draws the ladder's answer and the search's answer as two separate
+        /// lines when <see cref="DebugOptions.PreviewEveryPlanner"/> is on,
+        /// because the disagreement between them is usually the thing worth
+        /// looking at, and marks every place <see cref="RouteSearch"/> considered
+        /// bending at — not only the ones its winning route used — since a
+        /// candidate that <i>wasn't</i> picked is exactly what explains a route
+        /// that looks wrong.
+        /// </para>
+        /// </remarks>
+        private void PreviewRoute(UnitInstance unit, Vec2 destination)
+        {
+            if (unit == null) return;
+
+            float clearance = _options.RespectUnitWidth
+                ? unit.Footprint.Width * 0.5f
+                : HexPathfinder.DefaultClearanceMetres;
+
+            IPathfinder pathfinder = _options.RouteLikeAi
+                ? new HexPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance)
+                : new DirectPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance);
+
+            if (OrderSystem.TryFindPlacement(_battle, unit, destination, unit.Facing, out Vec2 stand))
+                destination = stand;
+            else
+                destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
+
+            _overlay.ClearRoutePreview();
+
+            // The one thing a screenshot cannot give back: enough to rebuild
+            // the exact arrangement later without guessing pixel positions off
+            // a picture. Written once per preview, not per planner, and before
+            // either plan runs, so it is here even if something below throws.
+            ReportScene(unit, destination);
+
+            if (_options.ShowRouteCandidates)
+                _overlay.SetRouteCandidates(RouteSearch.DebugCandidatePlaces(_battle, unit, destination));
+
+            // What GiveOrder would set for the click being previewed: a plain
+            // right-click draws no bearing, so the front is the line of march.
+            // Left to the planner's own fallback it reads the *previous*
+            // order's front instead, and the search pays for that one in
+            // ground.
+            Facing arriveOn = Marching.AlongTheLine(unit.Position, destination, unit.Facing);
+
+            string key = DrawEveryPlanner(unit, destination, pathfinder, arriveOn, report: true);
+
+            _status = $"Previewing {unit.Def.DisplayName}'s route — nothing moved. " + key +
+                       (_options.ShowRouteCandidates ? "  Cyan crosses: candidate places." : string.Empty);
+        }
+
+        /// <summary>
+        /// Plans the same march with every planner asked for and draws each in
+        /// its own colour. Returns the colour key, for the status line.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Called for a previewed click <i>and</i> for a real order, because the
+        /// question "why did it go that way" is asked about marches that
+        /// happened far more often than about ones being rehearsed. The route
+        /// actually walked is drawn by the ordinary route overlay; these are
+        /// what the other planners would have answered.
+        /// </para>
+        /// <para>
+        /// Not for group orders. Four extra plans is nothing for one regiment
+        /// and is forty times that for a wing, which is the stutter the whole
+        /// planning budget exists to avoid — and it would be a stutter this
+        /// debug view invented.
+        /// </para>
+        /// </remarks>
+        /// <param name="already">
+        /// The default planner's answer, when the caller has already worked it
+        /// out. Without this a real order plans the default twice — which was
+        /// merely wasteful at a millisecond and is unusable while the default is
+        /// the hybrid at a second and more.
+        /// </param>
+        private string DrawEveryPlanner(
+            UnitInstance unit, Vec2 destination, IPathfinder pathfinder, Facing arriveOn, bool report,
+            Plan? already = null)
+        {
+            // Which planners to ask. The default is always asked and always
+            // drawn, because it is the only one a real order will use — a
+            // preview that leaves it out is a preview of something the game
+            // does not do, which is what this used to be: it drew TheSearch
+            // while orders went through TheTangents.
+            var asking = new List<int>();
+
+            for (int i = 0; i < RoutePlanners.All.Count; i++)
+            {
+                IRoutePlanner planner = RoutePlanners.All[i];
+
+                if (ReferenceEquals(planner, RoutePlanners.Default))
+                {
+                    asking.Add(i);
+                    continue;
+                }
+
+                if (!_options.PreviewEveryPlanner) continue;
+
+                // The hybrid is a second and more for a single order, and a
+                // preview pays that inside one frame. Asked only by name.
+                if (ReferenceEquals(planner, RoutePlanners.TheHybridAStar) && !_options.PreviewTheHybrid)
+                    continue;
+
+                asking.Add(i);
+            }
+
+            var key = new System.Text.StringBuilder();
+
+            foreach (int i in asking)
+            {
+                IRoutePlanner planner = RoutePlanners.All[i];
+                bool isDefault = ReferenceEquals(planner, RoutePlanners.Default);
+
+                bool reused = isDefault && already.HasValue;
+
+                var spent = System.Diagnostics.Stopwatch.StartNew();
+
+                Plan plan = reused
+                    ? already!.Value
+                    : Marching.PlanTo(
+                        _battle, unit, pathfinder, destination, planner: planner, arriveOn: arriveOn);
+
+                spent.Stop();
+
+                _overlay.AddRoutePreview(i, plan.Path.Waypoints);
+
+                if (report)
+                {
+                    _console.Info("Preview",
+                        $"{planner.Name} — {ColourName(i)} — " +
+                        (plan.Path.Found
+                            ? $"{plan.Path.Waypoints.Count} waypoints, {plan.Path.Distance:0} m, " +
+                              $"{Marching.SecondsToWalk(_battle, unit, plan.Path.Waypoints, plan.Hold):0} s" +
+                              (plan.PressedThrough ? ", pressing through its own" : string.Empty)
+                            : $"no route — {plan.Path.FailureDetail}") +
+                        (reused
+                            ? "  <- this is the one it will walk."
+                            : $" — worked out in {spent.Elapsed.TotalMilliseconds:0.0} ms" +
+                              (isDefault ? "  <- this is the one it will walk." : ".")),
+                        unit.Id);
+                }
+
+                if (key.Length > 0) key.Append("  ");
+                key.Append(ColourName(i)).Append(": ").Append(planner.Name);
+
+                if (isDefault) key.Append(" (walked)");
+            }
+
+            return key.ToString();
+        }
+
+        /// <summary>
+        /// What to call each planner's colour in the console and the status
+        /// line, in the order <c>RoutePlanners.All</c> gives them.
+        /// </summary>
+        /// <remarks>
+        /// Named rather than swatched because the console is text, and a line
+        /// saying "green" is findable in a log file six days later while a
+        /// coloured pixel is not. Kept in step with
+        /// <see cref="DebugOverlay.PlannerColours"/> by hand — there are five of
+        /// them and they change about once a year.
+        /// </remarks>
+        private static readonly string[] PlannerColourNames =
+            { "orange", "green", "cyan", "yellow", "violet" };
+
+        private static string ColourName(int which) =>
+            PlannerColourNames[which % PlannerColourNames.Length];
+
+        /// <summary>
+        /// Everything about the arrangement a preview was asked against: the
+        /// mover, the resolved destination, and every friendly regiment on the
+        /// field that a route could conceivably bend around.
+        /// </summary>
+        /// <remarks>
+        /// Friendly rather than nearby-filtered, and deliberately: the point of
+        /// this line is rebuilding the scene from the log alone, and a
+        /// corridor filter tuned for planning is exactly the kind of thing that
+        /// might itself be the bug being chased.
+        /// </remarks>
+        /// <summary>
+        /// The arrangement an order was given in, written once for the field
+        /// and once per regiment ordered.
+        /// </summary>
+        /// <remarks>
+        /// The whole field rather than what is near the route, deliberately and
+        /// for the same reason <see cref="ReportScene"/> gives: a filter tuned
+        /// for planning is exactly the kind of thing that turns out to be the
+        /// bug being chased, and one that hid the cause would be worse than no
+        /// line at all.
+        /// </remarks>
+        private void ReportOrderedScene(IReadOnlyList<UnitInstance> wing, Vec2[] wanted)
+        {
+            if (_battle == null || wing == null || wing.Count == 0) return;
+
+            for (int i = 0; i < wing.Count && i < wanted.Length; i++)
+            {
+                UnitInstance unit = wing[i];
+                if (unit == null) continue;
+
+                _console.Info("Scene",
+                    $"ordered {unit.Def.DisplayName} at ({unit.Position.X:0.0},{unit.Position.Y:0.0}) " +
+                    $"facing {unit.Facing.Degrees:0.0}°, " +
+                    $"{unit.Footprint.Width:0}x{unit.Footprint.Depth:0} m, " +
+                    $"to ({wanted[i].X:0.0},{wanted[i].Y:0.0}).",
+                    unit.Id);
+            }
+
+            foreach (UnitInstance other in _battle.UnitsOnField())
+            {
+                _console.Info("Scene",
+                    $"  {other.Def.DisplayName} #{other.Id} at " +
+                    $"({other.Position.X:0.0},{other.Position.Y:0.0}) " +
+                    $"facing {other.Facing.Degrees:0.0}°, " +
+                    $"{other.Footprint.Width:0}x{other.Footprint.Depth:0} m, " +
+                    $"{(other.Owner == wing[0]!.Owner ? "ours" : "theirs")}.");
+            }
+        }
+
+        private void ReportScene(UnitInstance unit, Vec2 destination)
+        {
+            _console.Info("Preview",
+                $"{unit.Def.DisplayName} at ({unit.Position.X:0.0},{unit.Position.Y:0.0}) " +
+                $"facing {unit.Facing.Degrees:0.0}°, {unit.Footprint.Width:0}x{unit.Footprint.Depth:0} m, " +
+                $"to ({destination.X:0.0},{destination.Y:0.0}).");
+
+            foreach (UnitInstance other in _battle.UnitsOnField())
+            {
+                if (ReferenceEquals(other, unit)) continue;
+                if (other.Owner != unit.Owner) continue;
+
+                _console.Info("Preview",
+                    $"  {other.Def.DisplayName} at ({other.Position.X:0.0},{other.Position.Y:0.0}) " +
+                    $"facing {other.Facing.Degrees:0.0}°, {other.Footprint.Width:0}x{other.Footprint.Depth:0} m.");
+            }
+        }
+
+        private void ReportPreview(string name, UnitInstance unit, Plan plan)
+        {
+            PathResult path = plan.Path;
+
+            if (!path.Found)
+            {
+                _console.Info("Preview", $"{unit.Def.DisplayName} — {name}: {path.FailureDetail} [{path.Failure}].");
+                return;
+            }
+
+            float seconds = Marching.SecondsToWalk(_battle, unit, path.Waypoints, plan.Hold);
+
+            var waypoints = new System.Text.StringBuilder();
+            for (int i = 0; i < path.Waypoints.Count; i++)
+            {
+                if (i > 0) waypoints.Append(" -> ");
+
+                Vec2 point = path.Waypoints[i];
+                waypoints.Append($"({point.X:0},{point.Y:0})");
+
+                if (plan.Hold != null && i < plan.Hold.Length && plan.Hold[i].HasValue)
+                    waypoints.Append($"[{plan.Hold[i]!.Value.Degrees:0}°]");
+            }
+
+            _console.Info("Preview",
+                $"{unit.Def.DisplayName} — {name}: {path.Waypoints.Count} waypoints, " +
+                $"{path.Distance:0} m, {seconds:0} s" +
+                (plan.PressedThrough ? ", presses through its own." : ".") +
+                $"  cost to work out: {plan.Effort}." +
+                $"  {waypoints}");
+        }
+
+        /// <summary>
         /// How near a regiment's own ground a right-drag has to land before it
         /// means "change front" rather than "march", in metres.
         /// </summary>
         private const float TurnInPlaceMetres = 30f;
 
+        /// <summary>
+        /// One regiment's route, worked out and not yet acted on.
+        /// </summary>
+        /// <remarks>
+        /// The split exists so that a wing can be planned all at once. Working
+        /// a route out reads the battle and writes nothing to it; giving the
+        /// order, writing the route, moving the overlay and saying any of it are
+        /// all changes to something shared. Keeping them in one method meant the
+        /// only way to plan a wing was in a queue.
+        /// </remarks>
+        private readonly struct Worked
+        {
+            public readonly UnitInstance Unit;
+
+            /// <summary>Where the player pointed.</summary>
+            public readonly Vec2 Asked;
+
+            /// <summary>Where it can actually stand, which is not always the same.</summary>
+            public readonly Vec2 Destination;
+
+            public readonly Facing? Bearing;
+
+            /// <summary>A change of front where it stands, with no march in it.</summary>
+            public readonly bool TurningOnly;
+
+            /// <summary>Whether the placement search found the ground, or the fallback did.</summary>
+            public readonly bool Placed;
+
+            public readonly float Clearance;
+            public readonly HexLayout SearchLayout;
+            public readonly IPathfinder Pathfinder;
+            public readonly Facing WillArriveOn;
+            public readonly Plan Plan;
+            public readonly double Milliseconds;
+
+            /// <summary>What the planner said while nobody could listen.</summary>
+            public readonly HeldBattleLog Said;
+
+            public Worked(
+                UnitInstance unit, Vec2 asked, Vec2 destination, Facing? bearing, bool turningOnly,
+                bool placed, float clearance, HexLayout searchLayout, IPathfinder pathfinder,
+                Facing willArriveOn, Plan plan, double milliseconds, HeldBattleLog said)
+            {
+                Unit = unit;
+                Asked = asked;
+                Destination = destination;
+                Bearing = bearing;
+                TurningOnly = turningOnly;
+                Placed = placed;
+                Clearance = clearance;
+                SearchLayout = searchLayout;
+                Pathfinder = pathfinder;
+                WillArriveOn = willArriveOn;
+                Plan = plan;
+                Milliseconds = milliseconds;
+                Said = said;
+            }
+        }
+
+        /// <summary>An order being worked out while the game carries on drawing.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Why the simulation stops while this runs.</b> Working a route out
+        /// reads the whole battle - every position, every shape, the spatial
+        /// index - and a tick would be writing to all three underneath it. The
+        /// wing order got away without a rule because it began and finished
+        /// inside one frame, with nothing in between to move anybody. Across
+        /// frames that is no longer true, so the clock is held until the plan
+        /// lands.
+        /// </para>
+        /// <para>
+        /// What that buys is the whole point: the frame does not stop. Drawing,
+        /// the camera, the panel and the selection all keep their sixty a
+        /// second while a dear order is worked out, where before the game hung
+        /// for a second on the frame that ordered it. The battle stands still
+        /// for a tenth of a second instead.
+        /// </para>
+        /// </remarks>
+        private sealed class RouteWork
+        {
+            public System.Threading.Tasks.Task Task = null!;
+            public Worked[] Results = null!;
+
+            /// <summary>Who each result is for, so a later order can find it.</summary>
+            public UnitInstance[] Units = null!;
+
+            /// <summary>
+            /// Set when a newer order re-targets that regiment. M80: the route
+            /// being worked out is no longer the one anybody asked for, so it
+            /// is abandoned where it has not started and thrown away where it
+            /// has. Written on the drawing thread, read on the workers, so
+            /// <c>volatile</c> - an ordinary bool may never be re-read inside
+            /// the loop that polls it.
+            /// </summary>
+            public volatile bool[] Dropped = null!;
+            public bool Quiet;
+            public bool AsAWing;
+            public bool Together;
+            /// <summary>Null unless the order carried a status line.</summary>
+            public string Status;
+            public System.Diagnostics.Stopwatch Spent = null!;
+            public int Frames;
+        }
+
+        /// <summary>Null unless a plan is out with a worker.</summary>
+        private RouteWork _working;
+
+        /// <summary>Whether a plan is out with a worker and the clock is held.</summary>
+        private bool WorkingOutARoute => _working != null;
+
+        /// <summary>
+        /// Takes delivery of a finished plan, if one has finished.
+        /// </summary>
+        /// <remarks>
+        /// Applying is main-thread work by construction - it gives the order,
+        /// writes the overlay and replays what the planner said into the
+        /// console - so it happens here rather than on the worker, in the
+        /// order the regiments were given, which is what keeps a recording
+        /// readable.
+        /// </remarks>
+        private void CollectFinishedRoutes()
+        {
+            if (_working == null) return;
+
+            _working.Frames++;
+
+            if (!_working.Task.IsCompleted) return;
+
+            RouteWork work = _working;
+
+            // Cleared before applying rather than after. ApplyRoute gives an
+            // order, and an order is a thing that could ask for another plan.
+            _working = null;
+
+            work.Spent.Stop();
+
+            // A faulted worker must not be swallowed: a plan that threw is a
+            // regiment that will never move, and the recording is the only
+            // place anybody would find out.
+            if (work.Task.IsFaulted)
+            {
+                _console.Blocked("Path",
+                    $"Working out {work.Results.Length} route(s) threw: " +
+                    $"{work.Task.Exception?.GetBaseException().Message}");
+                return;
+            }
+
+            int thrownAway = 0;
+
+            for (int i = 0; i < work.Results.Length; i++)
+            {
+                // M80. Either it was never started or it stopped part way, and
+                // either way the order it was answering has been replaced.
+                if (work.Dropped[i]) { thrownAway++; continue; }
+
+                ApplyRoute(work.Results[i], work.Quiet);
+            }
+
+            if (thrownAway > 0)
+                _console.Info("Path",
+                    $"{thrownAway} of {work.Results.Length} route(s) thrown away - " +
+                    "a newer order asked those regiments for somewhere else.");
+
+            if (work.AsAWing)
+            {
+                _console.Info("Group",
+                    $"{work.Results.Length} routes worked out in " +
+                    $"{work.Spent.Elapsed.TotalMilliseconds:0.0} ms " +
+                    $"({(work.Together ? $"all at once on {System.Environment.ProcessorCount} cores" : "one after another")}), " +
+                    $"off the drawing thread over {work.Frames} frame(s) - the clock waited, the picture did not.");
+            }
+
+            if (work.Status != null) _status = work.Status;
+        }
+
+        /// <summary>
+        /// Waits for an outstanding plan, because what comes next would write
+        /// to the battle the worker is reading.
+        /// </summary>
+        /// <remarks>
+        /// This is the one place the old freeze can still happen, and it is the
+        /// right place for it: a second order given while the first is still
+        /// being worked out. Rare by hand, and the alternative - planning
+        /// against a field another order is changing - is the class of bug that
+        /// took four attempts to find last time.
+        /// </remarks>
+        /// <summary>
+        /// Marks anything still being worked out for these regiments as no
+        /// longer wanted. M80.
+        /// </summary>
+        /// <remarks>
+        /// By regiment rather than wholesale: a click that orders one wing must
+        /// not silently drop an order given to a different one a moment ago.
+        /// What supersedes a plan is a newer order for that same regiment.
+        /// </remarks>
+        private void Supersede(IReadOnlyList<UnitInstance> wing)
+        {
+            if (_working == null || wing == null) return;
+
+            for (int i = 0; i < _working.Units.Length; i++)
+            {
+                for (int w = 0; w < wing.Count; w++)
+                {
+                    if (wing[w] == null || _working.Units[i].Id != wing[w].Id) continue;
+
+                    _working.Dropped[i] = true;
+                    break;
+                }
+            }
+        }
+
+        private void SettleRoutes()
+        {
+            if (_working == null) return;
+
+            try { _working.Task.Wait(); }
+            catch (System.AggregateException) { /* said by CollectFinishedRoutes */ }
+
+            CollectFinishedRoutes();
+        }
+
+        /// <summary>
+        /// Hands a set of orders to a worker and returns without waiting.
+        /// </summary>
+        private void WorkOutRoutes(
+            IReadOnlyList<UnitInstance> wing, Vec2[] wanted, Facing? bearing,
+            bool quiet, bool asAWing, string status)
+        {
+            // Written on every real order, not only on previews behind a
+            // toggle, and this is why: the 7,7x route of 25 August was given in
+            // ordinary play with the comparison off, so the recording had the
+            // route and its cost and no way to rebuild the arrangement that
+            // produced it. A diagnostic that needs somebody to still have the
+            // app open and reproduce on demand is not a diagnostic. It costs
+            // one line per regiment per order against logs already running to
+            // hundreds of kilobytes, which is nothing set against being unable
+            // to answer "what happened?" at all.
+            ReportOrderedScene(wing, wanted);
+
+            // M80. Anything still being worked out for a regiment this order
+            // re-targets is no longer wanted: the player has asked for
+            // somewhere else. Marked before the join, so a search already
+            // running sees it at its next poll and stops instead of spending a
+            // frame on an answer that is discarded on arrival.
+            Supersede(wing);
+
+            // A plan already out is still joined - not because its answer is
+            // wanted, but because the worker reads the battle that what comes
+            // next writes to. Two of them reading while one may finish and give
+            // an order is the same hazard the clock is held for.
+            SettleRoutes();
+
+            // Every body's rectangle worked out before the routes rather than
+            // during them. It is cached behind a flag that a move clears, and
+            // nothing moves while a plan is out - but a lazy write to a struct
+            // being read on another thread is a torn read, so the write is made
+            // to happen first and then never again.
+            foreach (UnitInstance unit in _battle.UnitsOnField()) _ = unit.Shape;
+
+            var units = new UnitInstance[wing.Count];
+            for (int i = 0; i < wing.Count; i++) units[i] = wing[i];
+
+            var results = new Worked[units.Length];
+            var dropped = new bool[units.Length];
+
+            // Instant movement teleports each regiment as its order is applied,
+            // so a later plan in the same wing is made against a field the
+            // earlier ones have already moved on. That is a real dependency
+            // between the orders and it is left alone.
+            bool together = _options.PlanTheWingTogether && !_options.MoveInstantly && units.Length > 1;
+
+            var work = new RouteWork
+            {
+                Results = results,
+                Units = units,
+                Dropped = dropped,
+                Quiet = quiet,
+                AsAWing = asAWing,
+                Together = together,
+                Status = status,
+                Spent = System.Diagnostics.Stopwatch.StartNew(),
+            };
+
+            work.Task = System.Threading.Tasks.Task.Run(() =>
+            {
+                PlanMarker.Begin();
+
+                if (together)
+                {
+                    // One regiment per chunk. What an order costs is wildly
+                    // uneven - most are a fraction of a millisecond and a few
+                    // are sixty - so handing a worker a contiguous block of the
+                    // wing lets one worker draw several of the dear ones while
+                    // the rest finish early with nothing left to take.
+                    System.Threading.Tasks.Parallel.ForEach(
+                        System.Collections.Concurrent.Partitioner.Create(0, units.Length, 1),
+                        range =>
+                        {
+                            for (int i = range.Item1; i < range.Item2; i++)
+                            {
+                                if (dropped[i]) continue;
+
+                                int mine = i;
+                                Marching.GiveUpNow = () => dropped[mine];
+                                try { results[i] = WorkOutRoute(units[i], wanted[i], bearing); }
+                                finally { Marching.GiveUpNow = null; }
+                            }
+                        });
+                }
+                else
+                {
+                    for (int i = 0; i < units.Length; i++)
+                    {
+                        if (dropped[i]) continue;
+
+                        int mine = i;
+                        Marching.GiveUpNow = () => dropped[mine];
+                        try { results[i] = WorkOutRoute(units[i], wanted[i], bearing); }
+                        finally { Marching.GiveUpNow = null; }
+                    }
+                }
+
+                PlanMarker.End();
+            });
+
+            _working = work;
+
+            // A plan that is already done - most of them are - is taken now
+            // rather than a frame later, so an ordinary order still lands on
+            // the frame that gave it and the common case is unchanged.
+            if (work.Task.IsCompleted) CollectFinishedRoutes();
+        }
+
         private void PlanRoute(UnitInstance unit, Vec2 destination, Facing? bearing = null, bool quiet = false)
         {
             if (unit == null) return;
 
+            if (_options.MoveInstantly)
+            {
+                // Teleporting is a change to the field, so it cannot be worked
+                // out beside anything. Left exactly as it was.
+                SettleRoutes();
+                ApplyRoute(WorkOutRoute(unit, destination, bearing), quiet);
+                return;
+            }
+
+            WorkOutRoutes(
+                new[] { unit }, new[] { destination }, bearing,
+                quiet, asAWing: false, status: null);
+        }
+
+        /// <summary>
+        /// Works out where a regiment can stand and how it gets there, and
+        /// changes nothing.
+        /// </summary>
+        /// <remarks>
+        /// Safe to call on several threads at once, and that is the whole point
+        /// of it, so the rules it obeys are worth stating. It reads positions,
+        /// shapes and terrain; it builds its own pathfinder rather than sharing
+        /// one; it is given its own log to talk into rather than the console;
+        /// and it does not touch the overlay, the status line or the order.
+        /// </remarks>
+        private Worked WorkOutRoute(UnitInstance unit, Vec2 asked, Facing? bearing)
+        {
             // Right-drag on a regiment where it already stands is how you change
             // front without going anywhere. Without this there is no way to
             // order it at all: the route from a point to itself is empty, the
             // pathfinder rightly refuses it, and the order was thrown away with
             // the march — so a regiment caught in the flank could never be told
             // to come about.
-            if (bearing.HasValue && Vec2.Distance(unit.Position, destination) <= TurnInPlaceMetres)
+            if (bearing.HasValue && Vec2.Distance(unit.Position, asked) <= TurnInPlaceMetres)
             {
-                unit.GiveOrder(UnitOrder.Face(bearing.Value), unit.Position);
-
-                float toTurn = Facing.AbsoluteDelta(unit.Facing, bearing.Value) * Mathf.Rad2Deg;
-                float rate = unit.Def.Get(UnitAttributes.TurnRate);
-
-                _console.Decision("Move",
-                    $"{unit.Def.DisplayName} changing front to {bearing.Value.Degrees:0}° where it stands — " +
-                    $"{toTurn:0}° at {rate:0}°/s" +
-                    (unit.EnemiesInContact > 0 ? ", and slower with the enemy among it." : "."),
-                    unit.Id);
-
-                if (!quiet) _status = $"{unit.Def.DisplayName} coming about — {toTurn:0}°.";
-                return;
+                return new Worked(
+                    unit, asked, asked, bearing, turningOnly: true, placed: true, clearance: 0f,
+                    searchLayout: default, pathfinder: null, willArriveOn: bearing.Value,
+                    plan: default, milliseconds: 0d, said: new HeldBattleLog());
             }
 
             // A unit is a point at its centre by default: if the centre can be
@@ -1554,6 +2574,10 @@ namespace BattleChess.Unity
             // Player orders go where they were pointed. Only the AI is allowed
             // to decide a longer way round is worth it because the going is
             // better — a human who marches into a swamp meant to.
+            //
+            // One each rather than one shared: a pathfinder carries its own
+            // working memory, and a wing planned at once would have several
+            // regiments writing into it together.
             IPathfinder pathfinder = _options.RouteLikeAi
                 ? new HexPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance)
                 : new DirectPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance);
@@ -1572,27 +2596,112 @@ namespace BattleChess.Unity
             //
             // Same search the rules use when a march stalls, so a click and a
             // re-plan agree about where "there" is.
-            if (OrderSystem.TryFindPlacement(_battle, unit, destination, bearing ?? unit.Facing, out Vec2 stand))
-            {
-                if (Vec2.Distance(stand, destination) > 1f)
-                    _console.Info("Path",
-                        $"{unit.Def.DisplayName} is aiming {Vec2.Distance(stand, destination):0} m off that " +
-                        $"point — the ground there is taken or impassable. It will face " +
-                        $"{Facing.Towards(unit.Position, stand).Degrees:0}° for the ground it can stand on, " +
-                        $"not {Facing.Towards(unit.Position, destination).Degrees:0}° for the point clicked.",
-                        unit.Id);
+            bool placed = OrderSystem.TryFindPlacement(
+                _battle, unit, asked, bearing ?? unit.Facing, out Vec2 stand);
 
-                destination = stand;
-            }
-            else
-            {
-                destination = OrderSystem.NearestReachable(_battle, unit, destination, unit.Position);
-            }
+            Vec2 destination = placed
+                ? stand
+                : OrderSystem.NearestReachable(_battle, unit, asked, unit.Position);
 
             // M10: the straight line first, the search only if something is
             // genuinely in the way. Most player orders across open ground now
             // never reach the pathfinder at all.
-            Plan plan = Marching.PlanTo(_battle, unit, pathfinder, destination, _console);
+            //
+            // The front is handed over rather than left to the planner to guess,
+            // because the order does not exist yet: GiveOrder is called later,
+            // and until it is, unit.OrderFacing still holds the *previous*
+            // order's front. The search prices the wheel onto the front it is
+            // given, so guessing it wrong buys the wrong wheel with real ground.
+            // The same expression GiveOrder itself will use — the drawn bearing
+            // if there is one, otherwise the line of march.
+            Facing willArriveOn = bearing ?? Marching.AlongTheLine(unit.Position, destination, unit.Facing);
+
+            // Timed, because "it lags when you move several at once" is a
+            // question about milliseconds and the recording could only ever
+            // answer it in legs. Legs were a stand-in for a clock, and a bad one:
+            // measured on the bench, the same leg count cost between six and
+            // nineteen microseconds depending on what else was running (W5).
+            //
+            // The clock is per regiment and the marker is not: a profiler marker
+            // begun on a worker thread has no scope to close on the main one, so
+            // the wing is marked once around the whole batch by whoever ordered
+            // it.
+            var said = new HeldBattleLog();
+            var spent = System.Diagnostics.Stopwatch.StartNew();
+
+            Plan plan = Marching.PlanTo(
+                _battle, unit, pathfinder, destination, said, arriveOn: willArriveOn);
+
+            spent.Stop();
+
+            return new Worked(
+                unit, asked, destination, bearing, turningOnly: false, placed: placed,
+                clearance: clearance, searchLayout: searchLayout, pathfinder: pathfinder,
+                willArriveOn: willArriveOn, plan: plan,
+                milliseconds: spent.Elapsed.TotalMilliseconds, said: said);
+        }
+
+        /// <summary>
+        /// Does something about a route that has been worked out: says it, draws
+        /// it, and gives the order.
+        /// </summary>
+        /// <remarks>
+        /// The main thread only. Everything here touches something shared — the
+        /// console, the overlay, the status line, and the regiment's own order.
+        /// </remarks>
+        private void ApplyRoute(in Worked worked, bool quiet)
+        {
+            UnitInstance unit = worked.Unit;
+            if (unit == null) return;
+
+            Facing? bearing = worked.Bearing;
+            Vec2 destination = worked.Destination;
+
+            if (worked.TurningOnly)
+            {
+                unit.GiveOrder(UnitOrder.Face(bearing!.Value), unit.Position);
+
+                float toTurn = Facing.AbsoluteDelta(unit.Facing, bearing.Value) * Mathf.Rad2Deg;
+                float rate = unit.Def.Get(UnitAttributes.TurnRate);
+
+                _console.Decision("Move",
+                    $"{unit.Def.DisplayName} changing front to {bearing.Value.Degrees:0}° where it stands — " +
+                    $"{toTurn:0}° at {rate:0}°/s" +
+                    (unit.EnemiesInContact > 0 ? ", and slower with the enemy among it." : "."),
+                    unit.Id);
+
+                if (!quiet) _status = $"{unit.Def.DisplayName} coming about — {toTurn:0}°.";
+                return;
+            }
+
+            if (worked.Placed && Vec2.Distance(destination, worked.Asked) > 1f)
+                _console.Info("Path",
+                    $"{unit.Def.DisplayName} is aiming {Vec2.Distance(destination, worked.Asked):0} m off that " +
+                    $"point — the ground there is taken or impassable. It will face " +
+                    $"{Facing.Towards(unit.Position, destination).Degrees:0}° for the ground it can stand on, " +
+                    $"not {Facing.Towards(unit.Position, worked.Asked).Degrees:0}° for the point clicked.",
+                    unit.Id);
+
+            // Whatever the planner said while it was working, said now — in its
+            // own order, and in the wing's order rather than in whichever order
+            // the threads happened to finish.
+            worked.Said.ReplayInto(_console);
+
+            Plan plan = worked.Plan;
+
+            // The same comparison the preview draws, on a march that is actually
+            // happening. Single orders only — see DrawEveryPlanner.
+            if (!quiet && _options.ComparePlannersOnOrders)
+            {
+                _overlay.ClearRoutePreview();
+
+                if (_options.ShowRouteCandidates)
+                    _overlay.SetRouteCandidates(RouteSearch.DebugCandidatePlaces(_battle, unit, destination));
+
+                DrawEveryPlanner(
+                    unit, destination, worked.Pathfinder, worked.WillArriveOn, report: true, already: plan);
+            }
+
             PathResult path = plan.Path;
 
             // The route overlay and the drawn line show one march. Ordering a
@@ -1600,8 +2709,8 @@ namespace BattleChess.Unity
             // leave whichever finished last, which is worse than showing none.
             if (!quiet)
             {
-                _overlay.SetSearchCells(path.SearchCells, searchLayout);
-                _overlay.SetRawPath(path.SearchCells, searchLayout);
+                _overlay.SetSearchCells(path.SearchCells, worked.SearchLayout);
+                _overlay.SetRawPath(path.SearchCells, worked.SearchLayout);
             }
 
             if (!path.Found)
@@ -1626,13 +2735,34 @@ namespace BattleChess.Unity
 
             float seconds = path.SecondsAt(unit.BaseSpeed);
 
+            // Every order, not only previews, and quiet ones too. What a plan
+            // cost to work out is the one thing a recording could never answer,
+            // so it was measured by hand four times over in one afternoon
+            // before it was simply written down.
+            _console.Info("Cost",
+                $"{unit.Def.DisplayName} planned by {RoutePlanners.Default.Name} " +
+                $"in {worked.Milliseconds:0.0} ms: {plan.Effort}.", unit.Id);
+
+            // What the same order would have cost on an empty field. A route
+            // is only judgeable against the walk it replaces, and a recording
+            // that omits it cannot answer "was that detour reasonable?" - which
+            // is the question every screenshot of a bad route actually asks.
+            float straight = path.Waypoints.Count > 0
+                ? Marching.SecondsToWalk(
+                    _battle, unit, new[] { unit.Position, path.Waypoints[path.Waypoints.Count - 1] }, null)
+                : 0f;
+            float took = Marching.SecondsToWalk(_battle, unit, path.Waypoints, plan.Hold);
+
             if (!quiet)
                 _console.Decision("Path",
                     $"{unit.Def.DisplayName} route ({(_options.RouteLikeAi ? "fastest" : "direct")}): " +
                     $"{path.Distance:0} m walked, {path.EffectiveDistance:0} m effective, " +
                     $"{seconds / 60f:0.0} turns at {unit.BaseSpeed:0.00} m/s. " +
+                    (straight > 1f
+                        ? $"{took / straight:0.0}x what walking straight there would cost. "
+                        : string.Empty) +
                     $"{path.SearchCells.Count} cells reduced to {path.Waypoints.Count} waypoints, " +
-                    $"{path.CellsExplored} explored, {clearance:0} m clearance.",
+                    $"{path.CellsExplored} explored, {worked.Clearance:0} m clearance.",
                     unit.Id);
 
             if (_options.MoveInstantly)
@@ -1698,6 +2828,7 @@ namespace BattleChess.Unity
             if (!quiet)
                 _status = $"{unit.Def.DisplayName}: {path.Distance:0} m, {seconds / 60f:0.0} turns.";
         }
+
 
         private void DrawPath(PathResult path)
         {
@@ -1786,6 +2917,22 @@ namespace BattleChess.Unity
 
         private void OnGUI()
         {
+            _guiClock.Start();
+            GuiMarker.Begin();
+
+            try
+            {
+                DrawTheInterface();
+            }
+            finally
+            {
+                GuiMarker.End();
+                _guiClock.Stop();
+            }
+        }
+
+        private void DrawTheInterface()
+        {
             if (_error != null)
             {
                 GUI.Box(new Rect(10, 10, Screen.width - 20, 110), string.Empty);
@@ -1809,7 +2956,9 @@ namespace BattleChess.Unity
 
             GUI.Label(new Rect(20, 16, Screen.width - 40, 22), clock + _status);
             GUI.Label(new Rect(20, 38, Screen.width - 40, 22),
-                "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    " +
+                (_options.PreviewRouteMode
+                    ? "PREVIEWING — R-click plans a route and draws it, nothing moves. Untick to give real orders.    "
+                    : "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    ") +
                 "B bind    1-4 reshape    QERT stance    V fog    G ghost    Space pause    . step    " +
                 "+/- speed    Middle-drag pan    F1 debug");
 
@@ -1826,8 +2975,13 @@ namespace BattleChess.Unity
             if (_options.Draw(OptionsRect) && Primary != null && _hasDestination)
             {
                 // Re-plan on any toggle, so the effect of a change is visible at
-                // once rather than needing the click repeated.
-                PlanRoute(Primary, _lastDestination);
+                // once rather than needing the click repeated. A toggle flipped
+                // while previewing must re-preview, never re-order — the whole
+                // point of the mode is that ticking boxes cannot move a unit.
+                if (_options.PreviewRouteMode)
+                    PreviewRoute(Primary, _lastDestination);
+                else
+                    PlanRoute(Primary, _lastDestination);
             }
 
             _console.Draw(ConsoleRect);

@@ -1,0 +1,297 @@
+# The Sideways Mile - the order of 25 August 2026, tick 1063.
+#
+# Not a designed scenario. This is an arrangement that happened in play,
+# recorded, and kept because the route it produced was wrong: a spearman
+# regiment held eighty-one degrees against a march on minus nine for four
+# hundred metres, arrived ninety degrees off the front it was given, and
+# averaged 0,6 m/s of the 1,0 the ground allowed. See M81.
+#
+# The rule it exists to serve (W8): a bug that was real gets a fixture built
+# from the recording, red on the code that produced it, and it joins the bench
+# so that the cost of the route is swept and not merely passed or failed.
+#
+# Everything here is read off the `Scene` block the recording writes on every
+# order - position, facing and footprint per regiment. The map, the seed and
+# the orders of battle are greatfield's, because that is what was being
+# played; what differs is that these regiments have already moved, so this is
+# a mid-battle pose rather than a deployment. Three regiments are away from
+# the start line and facing oddly, which is the whole point: M79 found that an
+# order given from a pose the last order left behind is the case no ceiling
+# was pricing.
+#
+# POSITIONS ARE SNAPPED TO CELL CENTRES, AND ROWS RUN NORTH TO SOUTH. The
+# reader takes authored map cells and row zero is the top of the drawn map, so
+# world y is 2387,5 - row * 25 and not row * 25 + 12,5. Snapping then moves the
+# recording's metre positions by up to half a cell - U5 goes from y 1776,4 to
+# 1787,5, eleven metres north, which puts it nearer the Horse Archers that
+# refused its line rather than further from them. The fault is
+# reproduced at this pose, and the exact-metre version of it lives in
+# TheSidewaysMileTests, which is the gate. This file is the bench entry.
+#
+# The mover is the spearman regiment at 12,71 facing 144,4 - the only one off
+# the column - and where it was sent is in TheSidewaysMileTests.
+
+name        = The Sideways Mile
+map         = greatfield
+seed        = 20260818
+
+[army 0]
+name        = Army of the West
+maxStrength = 2000
+
+# ---- the three that had already moved -----------------------------------
+
+# The mover. Left its place in the line on an earlier order and finished
+# facing back over its own shoulder, which is the pose that matters.
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 12,24
+facing   = 144.4
+
+# Sitting across the far end of the line the mover was about to walk.
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 29,24
+facing   = 20.6
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,2
+facing   = 3.1
+
+# ---- the rest of the west, still where they were deployed ----------------
+
+[deploy 0]
+type     = cavalry
+strength = 2000
+at       = 14,10
+facing   = east
+
+# The regiment that refused the mover's line.
+[deploy 0]
+type     = horsearchers
+strength = 2000
+at       = 14,19
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 2000
+at       = 14,61
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 2000
+at       = 14,71
+facing   = east
+
+[deploy 0]
+type     = horsearchers
+strength = 2000
+at       = 14,80
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 14,34
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 14,38
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 14,42
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 14,46
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 14,50
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 2000
+at       = 14,54
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,30
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,35
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,40
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,45
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,49
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 2000
+at       = 10,54
+facing   = east
+
+[army 1]
+name        = Army of the East
+maxStrength = 2000
+
+# Untouched, and kept because a bench field should be the field that was
+# played. None of these can obstruct the march - M15a says an enemy is never
+# in the way of a regiment that was going somewhere else - but they are what
+# the other half of the map costs to plan around.
+
+[deploy 1]
+type     = cavalry
+strength = 2000
+at       = 57,10
+facing   = west
+
+[deploy 1]
+type     = horsearchers
+strength = 2000
+at       = 57,19
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 2000
+at       = 57,61
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 2000
+at       = 57,71
+facing   = west
+
+[deploy 1]
+type     = horsearchers
+strength = 2000
+at       = 57,80
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,26
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,30
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,34
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,38
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,42
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,46
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,50
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 2000
+at       = 57,54
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,25
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,30
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,35
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,40
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,45
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,49
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 2000
+at       = 61,54
+facing   = west

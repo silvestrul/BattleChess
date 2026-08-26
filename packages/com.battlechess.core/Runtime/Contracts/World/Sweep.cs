@@ -90,6 +90,8 @@ namespace BattleChess.Contracts
         public static bool FirstTouch(
             in OrientedRect moving, Vec2 travel, in OrientedRect obstacle, out float distance)
         {
+            PlanningProfile.Tally(PlanningProfile.Step.SweepTest);
+
             float length = travel.Length;
 
             // Standing still. Only the position it is already in can be in the
@@ -130,6 +132,35 @@ namespace BattleChess.Contracts
 
             distance = clear;
             return true;
+        }
+
+        /// <summary>
+        /// Whether <paramref name="moving"/>, carried <paramref name="travel"/>
+        /// without turning, ever meets <paramref name="obstacle"/> — without
+        /// working out where.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="FirstTouch"/> answers this on the way to the distance and
+        /// then spends about ten more separating-axis tests halving down to a
+        /// tenth of a metre. Every clearance check in the planner threw that
+        /// distance away: a leg that meets anything is refused, and where along
+        /// the leg it was met changes nothing about the refusal.
+        /// </para>
+        /// <para>
+        /// Measured on a hundred and sixty regiments planning at once: 828,643
+        /// sweeps ran 5,410,144 axis tests, of which 4,581,501 — <b>eighty-five
+        /// per cent</b> — were halving steps refining an answer nobody read.
+        /// </para>
+        /// </remarks>
+        public static bool Touches(in OrientedRect moving, Vec2 travel, in OrientedRect obstacle)
+        {
+            PlanningProfile.Tally(PlanningProfile.Step.SweepTest);
+
+            if (travel.Length <= Touching)
+                return OrientedRect.Overlaps(moving, obstacle);
+
+            return SweptHullTouches(moving, travel, obstacle);
         }
 
         /// <summary>

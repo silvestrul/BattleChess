@@ -10,10 +10,21 @@ namespace BattleChess.Rules
         public PlayerId Player { get; }
         public string Name { get; }
 
-        public ArmySetup(PlayerId player, string name)
+        /// <summary>
+        /// The most men this army will put in one regiment, or null to take
+        /// the scenario's own ceiling and, failing that, the unit type's.
+        /// </summary>
+        /// <remarks>
+        /// See <see cref="BattleSetup.MaxStrength"/> for why the ceiling is
+        /// a property of the battle rather than only of the type.
+        /// </remarks>
+        public int? MaxStrength { get; }
+
+        public ArmySetup(PlayerId player, string name, int? maxStrength = null)
         {
             Player = player;
             Name = name;
+            MaxStrength = maxStrength;
         }
     }
 
@@ -68,15 +79,39 @@ namespace BattleChess.Rules
         public string Name { get; }
         public string MapName { get; }
         public ulong Seed { get; }
+
+        /// <summary>
+        /// The most men any regiment in this battle may hold, or null to
+        /// leave every type at its own <c>maxStrength</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A ceiling belongs to the battle being fought, not only to the
+        /// kind of troops fighting it. What a swordsmen regiment normally is
+        /// stays declared in <c>units.cfg</c>; how big a body <i>this</i>
+        /// engagement organises men into is a property of the engagement,
+        /// and a scenario built round 2 000-man regiments should not have to
+        /// edit shared content — and so change every other battle and the
+        /// balance harness with it — to say so.
+        /// </para>
+        /// <para>
+        /// Three scopes, tightest wins: a regiment is held to its army's
+        /// ceiling if it has one, otherwise the scenario's, otherwise the
+        /// type's own.
+        /// </para>
+        /// </remarks>
+        public int? MaxStrength { get; }
+
         public IReadOnlyList<ArmySetup> Armies { get; }
         public IReadOnlyList<DeploymentSetup> Deployments { get; }
 
-        private BattleSetup(string name, string mapName, ulong seed,
+        private BattleSetup(string name, string mapName, ulong seed, int? maxStrength,
             IReadOnlyList<ArmySetup> armies, IReadOnlyList<DeploymentSetup> deployments)
         {
             Name = name;
             MapName = mapName;
             Seed = seed;
+            MaxStrength = maxStrength;
             Armies = armies;
             Deployments = deployments;
         }
@@ -92,11 +127,16 @@ namespace BattleChess.Rules
             if (!ulong.TryParse(seedText, out ulong seed))
                 throw new FormatException($"seed must be a whole number, got '{seedText}'.");
 
+            int? maxStrength = ReadCeiling(document.RootOrDefault("maxStrength", string.Empty), "maxStrength");
+
             var armies = new List<ArmySetup>();
             foreach (ConfigSection section in document.SectionsNamed("army"))
             {
                 PlayerId player = ReadPlayer(section);
-                armies.Add(new ArmySetup(player, section.GetOrDefault("name", $"Army {player.Value}")));
+                armies.Add(new ArmySetup(
+                    player,
+                    section.GetOrDefault("name", $"Army {player.Value}"),
+                    ReadCeiling(section.GetOrDefault("maxStrength", string.Empty), "army maxStrength")));
             }
 
             if (armies.Count == 0)
@@ -109,7 +149,18 @@ namespace BattleChess.Rules
             if (deployments.Count == 0)
                 throw new FormatException("A battle needs at least one [deploy].");
 
-            return new BattleSetup(name, mapName, seed, armies, deployments);
+            return new BattleSetup(name, mapName, seed, maxStrength, armies, deployments);
+        }
+
+        /// <summary>Reads an optional regiment ceiling, insisting it be a positive whole number if present.</summary>
+        private static int? ReadCeiling(string text, string what)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+
+            if (!int.TryParse(text, out int ceiling) || ceiling <= 0)
+                throw new FormatException($"{what} must be a whole number above zero, got '{text}'.");
+
+            return ceiling;
         }
 
         /// <summary>
@@ -127,8 +178,13 @@ namespace BattleChess.Rules
 
             var battle = new BattleState(Name, map.Terrain, terrainCatalogue, unitCatalogue, formationCatalogue, movement, Seed);
 
+            var ceilingFor = new Dictionary<PlayerId, int?>();
+
             foreach (ArmySetup army in Armies)
+            {
                 battle.AddArmy(army.Player, army.Name);
+                ceilingFor[army.Player] = army.MaxStrength ?? MaxStrength;
+            }
 
             foreach (DeploymentSetup deployment in Deployments)
             {
@@ -147,7 +203,28 @@ namespace BattleChess.Rules
                     !formationCatalogue.TryGetByKey(deployment.FormationKey, out formation))
                     throw new FormatException($"No formation called '{deployment.FormationKey}'.");
 
-                int strength = def.ClampStrength(deployment.Strength ?? def.DefaultStrength);
+                // Tightest scope wins, and a request over the ceiling is an
+                // error rather than a quiet trim. It used to clamp in
+                // silence, which meant a battle file could state a 2 000-man
+                // cavalry regiment, deploy 700, and read as though it had
+                // fielded the army it described — the order of battle on the
+                // page and the one on the field disagreeing with nothing to
+                // say so.
+                int ceiling = (ceilingFor.TryGetValue(deployment.Player, out int? own) ? own : null)
+                              ?? def.MaxStrength;
+
+                int wanted = deployment.Strength ?? def.DefaultStrength;
+
+                if (wanted > ceiling)
+                    throw new FormatException(
+                        $"{def.DisplayName} at ({deployment.Column},{deployment.Row}) asks for {wanted} men, " +
+                        $"above the {ceiling} this battle allows one regiment. Raise maxStrength on the " +
+                        $"[army] or on the battle, or ask for fewer.");
+
+                // Below the type's minimum still rounds up rather than
+                // throwing: a body too small to be a regiment is a different
+                // problem, and content already leans on that.
+                int strength = Math.Clamp(wanted, def.MinStrength, ceiling);
                 Vec2 position = map.Terrain.CellCentre(deployment.Column, deployment.Row);
 
                 battle.AddUnit(deployment.Player, def, position, deployment.Facing, strength, formation);

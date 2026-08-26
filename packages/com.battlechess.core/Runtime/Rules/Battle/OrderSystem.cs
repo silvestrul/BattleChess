@@ -121,10 +121,33 @@ namespace BattleChess.Rules
 
         public string Name => "Orders";
 
+        /// <summary>
+        /// How many routes one tick may plan before the recording says so.
+        /// </summary>
+        /// <remarks>
+        /// Two is an ordinary tick — an order given, a chase corrected. Anything
+        /// above it is the shape of <b>M38</b>, and the line exists so that the
+        /// next time a frame takes 608 ms the recording names what it was doing
+        /// rather than leaving it to be reconstructed (<b>W5</b>, <b>W6</b>).
+        /// </remarks>
+        private const int RoutesWorthReporting = 3;
+
         public void Step(BattleState battle, int tick, IBattleLog log)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
+            int plannedBefore = battle.RoutesPlanned;
+
+            StepOrders(battle, tick, log);
+
+            int planned = battle.RoutesPlanned - plannedBefore;
+
+            if (planned >= RoutesWorthReporting)
+                log.Info("Cost", $"{planned} routes planned on this one tick.");
+        }
+
+        private void StepOrders(BattleState battle, int tick, IBattleLog log)
+        {
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
                 if (unit.State == UnitState.Routing)
@@ -262,6 +285,13 @@ namespace BattleChess.Rules
                 unit.Route = null;
                 return;
             }
+
+            // Put off rather than refused: it keeps the route it has and asks
+            // again next frame, which is what the cadence has it doing on most
+            // ticks anyway. Asked before the placement search as well as before
+            // the plan, because that search is itself geometry this frame has
+            // no allowance left for.
+            if (!battle.Planning.MayPlan(unit.Id)) return;
 
             unit.FailedReplans++;
 
@@ -464,13 +494,33 @@ namespace BattleChess.Rules
                 return;
             }
 
-            if (unit.IsMarching && tick % RepathIntervalTicks != 0) return;
+            // The third copy of the same shape, and the one that is felt: a
+            // routing regiment that is not marching planned a fresh flight every
+            // tick, and this one is a terrain A* rather than a route search —
+            // thousands of cells, per regiment, per tick, at exactly the moment
+            // a line breaks and a dozen of them start running at once. That is
+            // *"especially after armies start retreating"* (M38, M39).
+            // No quarry: a regiment running away is not aiming at anybody.
+            if (!WorthAskingAgain(battle, unit, null, tick)) return;
 
             Vec2 flight = bounds.Clamp(unit.Position + home * MathF.Min(toEdge, RetreatDistanceMetres));
+
+            // Counted, because it is a route being planned. It does not come
+            // through Marching.PlanTo, so the counter could not see the one path
+            // that mattered most.
+            battle.RoutesPlanned++;
+
             PathResult path = _pathfinder.FindPath(unit.Position, flight, unit.Def.Movement);
 
             if (path.Found && path.Waypoints.Count >= 2)
+            {
                 unit.Route = new MovementRoute(path.Waypoints, wheelFirst: false);
+                RememberTheChase(battle, unit, path, tick, unit.Position);
+            }
+            else
+            {
+                unit.AskAboutTheChaseOnTick = tick + RepathIntervalTicks;
+            }
         }
 
         /// <summary>How far the map edge is in a given direction.</summary>
@@ -557,7 +607,12 @@ namespace BattleChess.Rules
                 return false;
             }
 
-            if (unit.IsMarching && tick % RepathIntervalTicks != 0) return true;
+            // The same rule as the attack path, and for the same reason: this
+            // branch has the same shape — a marching regiment is throttled to a
+            // beat, and one that is *not* marching falls straight through to
+            // plan again. "Not marching" is what a chase is most of the time,
+            // because its routes are short and keep completing (M38, M39).
+            if (!WorthAskingAgain(battle, unit, quarry, tick)) return true;
 
             if (ChaseToward(battle, unit, quarry, tick, log, "closing with"))
                 return true;
@@ -630,21 +685,156 @@ namespace BattleChess.Rules
             // which is the entire thing dressing exists to prevent.
             bool shouldDress = WillDressOn(unit, target);
 
-            // Deliberately NOT put behind the re-planning cadence, though that
-            // was the obvious reading of finding 7. A chase is a run of short
-            // routes each of which completes almost at once, so throttling the
-            // "not marching" case to one tick in five made a pursuer move in
-            // bursts with pauses between them: measured, a broken enemy took
-            // 24% losses whether it was chased or left entirely alone. The
-            // repeated work was real; the cadence was the wrong lever for it.
-            bool stale = !unit.IsMarching ||
-                         shouldDress != unit.DressingBearing.HasValue ||
-                         (tick % RepathIntervalTicks == 0 &&
+            // A fixed cadence was tried here and lost: a chase is a run of
+            // short routes each completing almost at once, so throttling the
+            // finished-route case to one tick in five made a pursuer move in
+            // bursts, and a broken enemy took 24% losses chased or left alone.
+            // The repeated work was real; a clock was the wrong lever for it
+            // (M38).
+            bool stale = shouldDress != unit.DressingBearing.HasValue ||
+                         WorthAskingAgain(battle, unit, target, tick) ||
+                         (unit.IsMarching && tick % RepathIntervalTicks == 0 &&
                           Vec2.Distance(unit.Route!.Destination, target.Position) > RepathThresholdMetres);
 
             if (stale)
                 ChaseToward(battle, unit, target, tick, log, "attacking");
         }
+
+        /// <summary>
+        /// Whether a chase's route is worth planning again.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M39</b>, the designer's rule: ask again when the answer could have
+        /// changed, and otherwise on a cadence the route sets for itself.
+        /// </para>
+        /// <para>
+        /// What could change the answer is the ground the regiment is about to
+        /// walk. The first leg is the only part of a route it is about to walk
+        /// and the only part it can act on, so that leg meeting somebody other
+        /// than whoever it was drawn around is the event, and it costs one swept
+        /// rectangle a tick against a plan's several hundred legs.
+        /// </para>
+        /// <para>
+        /// Failing an event, only a regiment that <b>cannot get where it was
+        /// sent</b> asks at all — a route still being walked is the answer, and
+        /// asking about it can only produce the same one. A stuck regiment asks
+        /// on a quarter of its own first leg's walking time, which is a cadence
+        /// that scales itself: a few metres of shuffling asks often, a march
+        /// across a field asks rarely.
+        /// </para>
+        /// <para>
+        /// The whole route is checked against friendly bodies only when the
+        /// cadence fires, not every tick — the designer's own qualification, and
+        /// the right one, since walking every leg of every route every tick is a
+        /// smaller version of the cost this removes.
+        /// </para>
+        /// </remarks>
+        private static bool WorthAskingAgain(
+            BattleState battle, UnitInstance unit, UnitInstance? quarry, int tick)
+        {
+            // Cannot get where it was sent — no route, or one it has finished
+            // walking without arriving. This is the case that was asking every
+            // tick.
+            if (unit.Route == null || unit.Route.IsComplete)
+            {
+                // Its quarry has moved, so the aim it was given is stale
+                // whatever the clock says. Without this a cadence holds the
+                // pursuit back and the broken enemy walks away — measured
+                // twice now, and it is what CavalryRidesDownArchers is for.
+                if (quarry != null &&
+                    Vec2.Distance(quarry.Position, unit.ChaseAimedAt) > QuarryMovedMetres)
+                    return true;
+
+                return tick >= unit.AskAboutTheChaseOnTick;
+            }
+
+            // Still walking: the route it has is the answer, unless the ground
+            // in front of it has changed.
+            return FirstLegMeetsSomebodyNew(battle, unit);
+        }
+
+        /// <summary>
+        /// How far a quarry moves before the aim taken at it is worth taking
+        /// again.
+        /// </summary>
+        /// <remarks>
+        /// Well under the 20 m a <i>marching</i> chase allows, because a chase
+        /// that has stopped has nothing else to tell it the world has moved on.
+        /// </remarks>
+        private const float QuarryMovedMetres = 8f;
+
+        /// <summary>
+        /// Whether the leg the regiment is about to walk now meets a different
+        /// body than the one it was planned against.
+        /// </summary>
+        private static bool FirstLegMeetsSomebodyNew(BattleState battle, UnitInstance unit)
+        {
+            MovementRoute route = unit.Route!;
+
+            if (route.IsComplete) return false;
+
+            // From where it is standing to the waypoint it is walking at, which
+            // is the leg it is actually on rather than the one it set out on.
+            Vec2 from = unit.Position;
+            Vec2 to = route.Target;
+
+            if (Vec2.Distance(from, to) <= Vec2.Epsilon) return false;
+
+            Facing along = route.HoldThisLeg ?? Marching.AlongTheLine(from, to, unit.Facing);
+
+            Marching.IsClearLine(battle, unit, from, to, along, out UnitInstance? blocker, leaving: true);
+
+            UnitId now = blocker?.Id ?? UnitId.None;
+
+            return now != unit.ChasePlannedAgainst;
+        }
+
+        /// <summary>
+        /// Records what the new route was planned against, and when a stuck
+        /// chase may ask again.
+        /// </summary>
+        private static void RememberTheChase(
+            BattleState battle, UnitInstance unit, PathResult path, int tick, Vec2 aimedAt)
+        {
+            unit.ChasePlannedAgainst = UnitId.None;
+            unit.AskAboutTheChaseOnTick = tick + 1;
+            unit.ChaseAimedAt = aimedAt;
+
+            if (path.Waypoints.Count < 2) return;
+
+            Vec2 from = path.Waypoints[0];
+            Vec2 to = path.Waypoints[1];
+
+            Facing along = Marching.AlongTheLine(from, to, unit.Facing);
+
+            Marching.IsClearLine(battle, unit, from, to, along, out UnitInstance? blocker, leaving: true);
+
+            unit.ChasePlannedAgainst = blocker?.Id ?? UnitId.None;
+
+            float seconds = Vec2.Distance(from, to) / MathF.Max(0.1f, battle.SpeedOf(unit));
+            int wait = (int)MathF.Ceiling(seconds / QuartersOfALeg);
+
+            // <b>The floor is the designer's threshold, and without it the rule
+            // does nothing.</b> A quarter of a four-metre leg is a fifth of a
+            // second, which rounds to one tick — so the shortest legs, which are
+            // exactly the ones a jostling chase makes, went on asking every
+            // tick and the cadence never bit. Measured: 57 plans over 120 ticks
+            // with no floor, against a handful with one.
+            unit.AskAboutTheChaseOnTick = tick + (wait < LeastTicksBetweenAsking
+                ? LeastTicksBetweenAsking
+                : wait);
+        }
+
+        /// <summary>
+        /// How many times a stuck regiment asks again over one first leg.
+        /// </summary>
+        private const float QuartersOfALeg = 4f;
+
+        /// <summary>
+        /// However short the leg, no chase asks again sooner than this.
+        /// </summary>
+        private const int LeastTicksBetweenAsking = RepathIntervalTicks;
 
         /// <summary>Plans a march that stops just short of a target.</summary>
         private bool ChaseToward(BattleState battle, UnitInstance unit, UnitInstance quarry, int tick, IBattleLog log, string verb)
@@ -700,6 +890,13 @@ namespace BattleChess.Rules
             // was the work repeated, every repetition announced itself.
             if (Vec2.Distance(unit.Position, aim) <= StandingCloseEnough) return true;
 
+            // Put off to a later frame. True rather than false: the chase is
+            // being dealt with, it simply keeps the route it already has for
+            // another frame — which is what the cadence has it doing on most
+            // ticks. Answering false here would read as "not chasing" and hand
+            // the unit to whatever comes after.
+            if (!battle.Planning.MayPlan(unit.Id)) return true;
+
             Plan plan = Marching.PlanTo(battle, unit, _pathfinder, aim, log);
             PathResult path = plan.Path;
 
@@ -709,10 +906,18 @@ namespace BattleChess.Rules
                     $"{unit.Def.DisplayName} cannot reach {quarry.Def.DisplayName}: {path.FailureDetail}",
                     unit.Id);
 
+                // A chase that cannot be planned is the same loop by a different
+                // door: without this it asks the planner again on the very next
+                // tick, and goes on asking for as long as it cannot reach.
+                unit.ChasePlannedAgainst = UnitId.None;
+                unit.AskAboutTheChaseOnTick = tick + RepathIntervalTicks;
+
                 return false;
             }
 
             unit.Route = plan.ToRoute(unit.Order.WheelFirst);
+
+            RememberTheChase(battle, unit, path, tick, quarry.Position);
 
             log.Decision("Order",
                 $"{unit.Def.DisplayName} is {verb} {quarry.Def.DisplayName}.",
@@ -1239,6 +1444,17 @@ namespace BattleChess.Rules
         private const float WalkingIsCheap = 0.1f;
 
         /// <summary>Whether a regiment could legally stand at a placement at all.</summary>
+        /// <remarks>
+        /// <b>Narrowing this by the spatial index was tried and does not pay.</b>
+        /// It looked like the biggest single item in a real one-click order -
+        /// 6,9 ms a regiment against the bench's 2,2 - and the difference turned
+        /// out to be nothing to do with standing: a wing sent to one block asks
+        /// the lattice forty-six times where a wing sent across the field asks
+        /// it thirty-two, and that is the whole of it. Measured with the index:
+        /// Broken Country 536,6 ms against 555,4 for eighty, which is noise
+        /// either way. In the profile this is <c>FormationFits</c> at 11,5 ms of
+        /// 630. Left as the plain walk it always was.
+        /// </remarks>
         private static bool CanStandThere(BattleState battle, UnitInstance unit, Vec2 where, Facing front)
         {
             if (!battle.FormationFits(unit, where, front)) return false;

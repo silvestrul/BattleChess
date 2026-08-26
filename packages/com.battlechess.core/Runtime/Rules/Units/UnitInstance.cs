@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -34,11 +34,55 @@ namespace BattleChess.Rules
         /// <summary>What kind of unit this is. Its per-man qualities live here.</summary>
         public UnitDef Def { get; }
 
+        private Vec2 _position;
+        private Facing _facing;
+        private OrientedRect _shape;
+        private bool _shapeKnown;
+
         /// <summary>Centre of the formation, in world metres.</summary>
-        public Vec2 Position { get; set; }
+        /// <remarks>
+        /// Backed rather than automatic so that moving a regiment can tell the
+        /// battle it has moved. <see cref="BattleState"/> keeps a spatial index
+        /// of where everybody is standing, and the only thing that can
+        /// invalidate it is this setter. Written this way rather than by
+        /// rebuilding the index every time somebody asks, because "who is near
+        /// this line" is asked tens of thousands of times per plan and answered
+        /// far less often than it changes.
+        /// </remarks>
+        public Vec2 Position
+        {
+            get => _position;
+            set
+            {
+                _position = value;
+                _shapeKnown = false;
+                Home?.NoteUnitsMoved();
+            }
+        }
 
         /// <summary>Which way the formation is facing.</summary>
-        public Facing Facing { get; set; }
+        /// <remarks>
+        /// Not indexed on: the index buckets a regiment by its centre and widens
+        /// every query by the widest bounding radius on the field, so which way
+        /// a body points can never move it into a bucket the query did not
+        /// already look in.
+        /// </remarks>
+        public Facing Facing
+        {
+            get => _facing;
+            set
+            {
+                _facing = value;
+                _shapeKnown = false;
+            }
+        }
+
+        /// <summary>
+        /// The battle this regiment was raised into, so that moving it can
+        /// invalidate what the battle has cached about where everybody is.
+        /// Null until it is raised.
+        /// </summary>
+        internal BattleState? Home { get; set; }
 
         public UnitState State { get; set; }
 
@@ -136,6 +180,40 @@ namespace BattleChess.Rules
         /// contact system fight each other every tick.
         /// </remarks>
         public UnitId HeldUpBy { get; set; } = UnitId.None;
+
+        /// <summary>
+        /// Who the first leg of this unit's chase route was planned against, or
+        /// <see cref="UnitId.None"/> if that leg was clear when it was planned.
+        /// </summary>
+        /// <remarks>
+        /// <b>M39.</b> A route is worth re-planning when the answer could have
+        /// changed, and the cheapest thing that says so is the first leg meeting
+        /// somebody other than whoever it was drawn around. One swept rectangle
+        /// a tick against a whole plan's several hundred legs.
+        /// </remarks>
+        public UnitId ChasePlannedAgainst { get; set; } = UnitId.None;
+
+        /// <summary>
+        /// The tick a stuck chase may ask for a new route again.
+        /// </summary>
+        /// <remarks>
+        /// Set from the route's own first leg — a quarter of the time that leg
+        /// takes to walk — so a regiment shuffling a few metres asks often and
+        /// one crossing a field asks rarely, and neither needs a constant
+        /// choosing for it.
+        /// </remarks>
+        public int AskAboutTheChaseOnTick { get; set; }
+
+        /// <summary>Where the quarry stood when this chase was last planned.</summary>
+        /// <remarks>
+        /// A cadence alone cannot govern a pursuit: hold a chase back five ticks
+        /// and a broken enemy walks away, which is the failure that killed the
+        /// first attempt at this and killed the second. A quarry that has moved
+        /// is the plainest case of the answer having changed, so it re-plans on
+        /// the movement and waits on the clock only while its quarry stands
+        /// still.
+        /// </remarks>
+        public Vec2 ChaseAimedAt { get; set; }
 
         /// <summary>
         /// Morale damage reported by combat this pulse, waiting to be applied.
@@ -673,13 +751,36 @@ namespace BattleChess.Rules
             float before = Organization;
 
             FormationOrder = formation;
+            _shapeKnown = false;
             Organization -= formation.OrganizationCost;
 
             return before - Organization;
         }
 
         /// <summary>This unit's footprint placed where it actually stands.</summary>
-        public OrientedRect Shape => new OrientedRect(Position, Facing, Footprint);
+        /// <remarks>
+        /// <b>Kept, not rebuilt.</b> This was a fresh <see cref="OrientedRect"/>
+        /// on every read, and since that type began caching its own axes the
+        /// constructor costs a sine and a cosine — so every read of a standing
+        /// body's shape paid for trigonometry that had not changed since the
+        /// body last moved. One clearance check reads it once per nearby body
+        /// and the bench counts thirty-six thousand of them in eighty orders.
+        /// A regiment's shape changes when it moves, when it turns, and when it
+        /// re-forms, and those are the three places that clear the flag.
+        /// </remarks>
+        public OrientedRect Shape
+        {
+            get
+            {
+                if (!_shapeKnown)
+                {
+                    _shape = new OrientedRect(_position, _facing, Footprint);
+                    _shapeKnown = true;
+                }
+
+                return _shape;
+            }
+        }
 
         /// <summary>Open-ground speed in metres per second, ignoring terrain.</summary>
         public float BaseSpeed => Def.Speed;

@@ -344,16 +344,39 @@ namespace BattleChess.Rules
 
                 best[0] = 0f;
 
+                // How far each node still is from the finish, in a straight
+                // line. Costs here are metres, so this can never overstate what
+                // remains — which is what lets it both order the search and
+                // prune it without either changing the answer.
+                var toGoal = new float[count];
+                for (int i = 0; i < count; i++) toGoal[i] = Vec2.Distance(nodes[i], nodes[1]);
+
                 for (int step = 0; step < count; step++)
                 {
                     int at = -1;
+                    float leading = float.MaxValue;
 
+                    // Nearest the finish rather than nearest the start. Plain
+                    // Dijkstra settles outward in every direction at once and
+                    // asks the dear clearance question about each of them; the
+                    // same search told which way the finish lies reaches it
+                    // having settled a fraction as many.
                     for (int i = 0; i < count; i++)
-                        if (!settled[i] && best[i] < float.MaxValue && (at < 0 || best[i] < best[at]))
-                            at = i;
+                    {
+                        if (settled[i] || best[i] >= float.MaxValue) continue;
+
+                        float reckoned = best[i] + toGoal[i];
+                        if (reckoned >= leading) continue;
+
+                        leading = reckoned;
+                        at = i;
+                    }
 
                     if (at < 0) break;
                     if (at == 1) break;
+
+                    // Nothing still to come can beat a finish already reached.
+                    if (leading >= best[1]) break;
 
                     settled[at] = true;
 
@@ -362,14 +385,19 @@ namespace BattleChess.Rules
                         if (settled[to] || to == at) continue;
 
                         float step2 = Vec2.Distance(nodes[at], nodes[to]);
+                        float reached = best[at] + step2;
 
-                        if (best[at] + step2 >= best[to]) continue;
+                        if (reached >= best[to]) continue;
+
+                        // Nor can a way through this node, if going on from it
+                        // is already dearer than the finish in hand.
+                        if (reached + toGoal[to] >= best[1]) continue;
 
                         // The expensive question, asked last and only when the
                         // answer could change the route.
                         if (!Marching.IsClearLeg(battle, unit, nodes[at], nodes[to], unit.Facing)) continue;
 
-                        best[to] = best[at] + step2;
+                        best[to] = reached;
                         cameFrom[to] = at;
                     }
                 }

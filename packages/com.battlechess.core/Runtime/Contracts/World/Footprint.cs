@@ -29,14 +29,17 @@ namespace BattleChess.Contracts
 
             Width = width;
             Depth = depth;
+            _boundingRadius = MathF.Sqrt(width * width + depth * depth) * 0.5f;
         }
+
+        private readonly float _boundingRadius;
 
         public float HalfWidth => Width * 0.5f;
         public float HalfDepth => Depth * 0.5f;
         public float Area => Width * Depth;
 
         /// <summary>Radius of the circle that fully contains this footprint.</summary>
-        public float BoundingRadius => MathF.Sqrt(HalfWidth * HalfWidth + HalfDepth * HalfDepth);
+        public float BoundingRadius => _boundingRadius;
 
         public bool Equals(Footprint other) => Width.Equals(other.Width) && Depth.Equals(other.Depth);
         public override bool Equals(object? obj) => obj is Footprint other && Equals(other);
@@ -59,18 +62,26 @@ namespace BattleChess.Contracts
         public readonly Facing Facing;
         public readonly Footprint Footprint;
 
+        private readonly Vec2 _forward;
+        private readonly Vec2 _right;
+
         public OrientedRect(Vec2 centre, Facing facing, Footprint footprint)
         {
             Centre = centre;
             Facing = facing;
             Footprint = footprint;
+
+            float cos = MathF.Cos(facing.Radians);
+            float sin = MathF.Sin(facing.Radians);
+            _forward = new Vec2(cos, sin);
+            _right = new Vec2(sin, -cos);
         }
 
         /// <summary>Unit vector along the unit's depth axis, pointing where it faces.</summary>
-        public Vec2 Forward => Facing.ToVector();
+        public Vec2 Forward => _forward;
 
         /// <summary>Unit vector along the unit's frontage axis, pointing to its right.</summary>
-        public Vec2 Right => Facing.RightVector();
+        public Vec2 Right => _right;
 
         /// <summary>
         /// The four corners, anticlockwise from the front-right. Mainly for
@@ -243,6 +254,8 @@ namespace BattleChess.Contracts
         /// </remarks>
         public static float OverlapFraction(in OrientedRect a, in OrientedRect b)
         {
+            PlanningProfile.Tally(PlanningProfile.Step.OverlapTest);
+
             if (!Overlaps(a, b)) return 0f;
 
             // Two convex quadrilaterals meet in at most an octagon.

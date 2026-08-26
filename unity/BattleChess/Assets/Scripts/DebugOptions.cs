@@ -1,3 +1,4 @@
+﻿using BattleChess.Rules.GridPlanning;
 using UnityEngine;
 
 namespace BattleChess.Unity
@@ -72,6 +73,96 @@ namespace BattleChess.Unity
 
         /// <summary>Draw the raw search cells of the route rather than the smoothed line.</summary>
         public bool ShowRawPath;
+
+        /// <summary>
+        /// Draws the regiment-sized hex grid the selected unit would be routed
+        /// over, with the cells bodies are standing in picked out.
+        /// </summary>
+        public bool ShowRegimentGrid;
+
+        /// <summary>
+        /// Draws the rectangle each body actually reserves - itself grown by
+        /// the mover's halo - which is the thing the grid marks cells against
+        /// and is very much larger than the body drawn on screen.
+        /// </summary>
+        public bool ShowReservedAreas = true;
+
+        /// <summary>
+        /// Cell spacing as a multiple of the regiment's own bounding diameter.
+        /// One means a cell holds exactly one regiment at any facing.
+        /// </summary>
+        public float RegimentGridSpacingMultiple = 1f;
+
+        /// <summary>
+        /// Right-click computes and draws a route instead of giving the order.
+        /// </summary>
+        /// <remarks>
+        /// For working out why a planner chose what it chose, without spending a
+        /// real order to find out — the regiment never moves, so the same ground
+        /// can be tried at as many angles as it takes.
+        /// </remarks>
+        public bool PreviewRouteMode;
+
+
+        /// <summary>
+        /// Draw every planner in <c>RoutePlanners.All</c>, each in its own
+        /// colour, rather than only the ladder and the search.
+        /// </summary>
+        public bool PreviewEveryPlanner = true;
+
+        /// <summary>
+        /// Include the hybrid A* prototype in that. Off by default and worth
+        /// leaving off: it is measured at a second and more for a single order,
+        /// which a preview pays in one frame — the editor visibly stops.
+        /// </summary>
+        public bool PreviewTheHybrid;
+
+        /// <summary>
+        /// Draw the same comparison on a real order, not only on a previewed
+        /// one — because "why did it go that way" is asked about marches that
+        /// happened far more often than about ones being rehearsed.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Single orders only. Four extra plans is nothing for one regiment and
+        /// forty times that for a wing.
+        /// </para>
+        /// <para>
+        /// <b>Off by default, because it was not nothing.</b> Recorded in play,
+        /// every frame over 90 ms that the game itself caused was a frame that
+        /// planned five routes for one regiment - 547 ms at tick 651, of which
+        /// 520 was planning. The comparison is a tool for reading a route, not
+        /// a thing to leave switched on while playing, and leaving it on made
+        /// the planner look like it cost four times what it costs.
+        /// </para>
+        /// </remarks>
+        public bool ComparePlannersOnOrders;
+
+        /// <summary>
+        /// Work out a wing's routes all at once rather than one after another.
+        /// </summary>
+        /// <remarks>
+        /// A plan reads the battle and writes nothing to it, so the regiments of
+        /// a wing are independent questions and a click that asks eighty of them
+        /// need not ask them in a queue. Measured on the bench fields: a hundred
+        /// orders in 96, 95 and 36 ms against 305, 439 and 220 one at a time,
+        /// and the routes come back identical to the decimal.
+        /// <para>
+        /// Here as a switch because it is the kind of change that is right until
+        /// it is not: if a wing order ever produces a route a single order would
+        /// not, this is the first thing to turn off, and the difference is then
+        /// one toggle rather than one build.
+        /// </para>
+        /// </remarks>
+        public bool PlanTheWingTogether = true;
+
+        /// <summary>
+        /// In preview mode, mark every place
+        /// <see cref="BattleChess.Rules.RouteSearch"/> considered bending the
+        /// route at — the corners and face projections its candidate generator
+        /// built, not just the ones the winning route used.
+        /// </summary>
+        public bool ShowRouteCandidates = true;
 
         /// <summary>Whose eyes the field is shown through. -1 shows everything.</summary>
         /// <remarks>
@@ -169,11 +260,60 @@ namespace BattleChess.Unity
             ShowClearance = GUILayout.Toggle(ShowClearance, " Width used for routing");
 
             GUILayout.Space(6);
+            GUILayout.Label($"Route preview   {(PreviewRouteMode ? "ON — right-click plans, does not move" : "off")}");
+            PreviewRouteMode = GUILayout.Toggle(PreviewRouteMode, " Preview route (no move)");
+            PreviewEveryPlanner = GUILayout.Toggle(PreviewEveryPlanner, " Show every planner, one colour each");
+            ComparePlannersOnOrders = GUILayout.Toggle(ComparePlannersOnOrders, " ...on real orders too, not just previews");
+            PlanTheWingTogether = GUILayout.Toggle(PlanTheWingTogether, " Plan a wing's routes all at once");
+
+            if (PreviewEveryPlanner)
+                PreviewTheHybrid = GUILayout.Toggle(PreviewTheHybrid, " ...including hybrid A* (slow — freezes a frame)");
+            ShowRouteCandidates = GUILayout.Toggle(ShowRouteCandidates, " Mark the search's candidate places");
+
+            GUILayout.Space(6);
             GUILayout.Label("Lines and labels");
             ShowSightLines = GUILayout.Toggle(ShowSightLines, " Who is looking at whom");
             ShowUnitLabels = GUILayout.Toggle(ShowUnitLabels, " Strength / morale / order");
             ShowRawPath = GUILayout.Toggle(ShowRawPath, " Raw route line");
             ShowSearchCells = GUILayout.Toggle(ShowSearchCells, " Raw route cells");
+
+            GUILayout.Space(6);
+            GUILayout.Label("Regiment grid (M77)");
+            ShowRegimentGrid = GUILayout.Toggle(ShowRegimentGrid, " Draw it for the selected regiment");
+            GUILayout.Label($"   cell {RegimentGridSpacingMultiple:0.##} x the regiment");
+            RegimentGridSpacingMultiple = GUILayout.HorizontalSlider(RegimentGridSpacingMultiple, 0.10f, 3f);
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("0.1x")) RegimentGridSpacingMultiple = 0.10f;
+            if (GUILayout.Button("0.25x")) RegimentGridSpacingMultiple = 0.25f;
+            if (GUILayout.Button("0.5x")) RegimentGridSpacingMultiple = 0.5f;
+            if (GUILayout.Button("1x")) RegimentGridSpacingMultiple = 1f;
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label($"   halo {RegimentGrid.ClearanceFraction:0.00} x the regiment's radius");
+            RegimentGrid.ClearanceFraction =
+                GUILayout.HorizontalSlider(RegimentGrid.ClearanceFraction, 0f, 1f);
+
+            GUILayout.Label($"   {RegimentGrid.SubSamples} sample(s) a cell, blocked once " +
+                            $"{RegimentGrid.FillToBlock * 100f:0}% of them are inside a RESERVED");
+            GUILayout.Label("   area (a body plus the mover's halo), not inside a body");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("1")) RegimentGrid.SubSamples = 1;
+            if (GUILayout.Button("7")) RegimentGrid.SubSamples = 7;
+            if (GUILayout.Button("19")) RegimentGrid.SubSamples = 19;
+            GUILayout.EndHorizontal();
+            RegimentGrid.FillToBlock = GUILayout.HorizontalSlider(RegimentGrid.FillToBlock, 0.1f, 1f);
+
+            RegimentGrid.Reuse = GUILayout.Toggle(RegimentGrid.Reuse, " Keep the field between orders");
+            ShowReservedAreas = GUILayout.Toggle(ShowReservedAreas, " Outline what each body reserves");
+
+            GUILayout.Label($"   in the cascade: {GridRoutePlanner.Use}");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Off")) GridRoutePlanner.Use = GridUse.Off;
+            if (GUILayout.Button("Stage")) GridRoutePlanner.Use = GridUse.Stage;
+            if (GUILayout.Button("Tube")) GridRoutePlanner.Use = GridUse.Corridor;
+            if (GUILayout.Button("Only")) GridRoutePlanner.Use = GridUse.Replace;
+            GUILayout.EndHorizontal();
 
             GUILayout.Space(6);
             GUILayout.Label($"Fog   {(ViewingArmy < 0 ? "off — you see everything" : $"through army {ViewingArmy}'s eyes")}");
@@ -216,6 +356,8 @@ namespace BattleChess.Unity
             | (ShowZoneOfControl ? 1 << 5 : 0)
             | (ShowFootprintOutline ? 1 << 6 : 0)
             | (ShowRawPath ? 1 << 7 : 0)
+            | (ShowRegimentGrid ? 1 << 20 : 0)
+            | ((int)GridRoutePlanner.Use << 21)
             | (WheelBeforeMarching ? 1 << 8 : 0)
             | (GhostHiddenUnits ? 1 << 9 : 0)
             | (ShowSightRange ? 1 << 10 : 0)
@@ -225,6 +367,12 @@ namespace BattleChess.Unity
             | (NoCasualties ? 1 << 14 : 0)
             | (NoRouting ? 1 << 15 : 0)
             | (InstantReload ? 1 << 16 : 0)
+            | (PreviewRouteMode ? 1 << 24 : 0)
+            | (PreviewEveryPlanner ? 1 << 27 : 0)
+            | (PreviewTheHybrid ? 1 << 28 : 0)
+            | (ComparePlannersOnOrders ? 1 << 29 : 0)
+            | (PlanTheWingTogether ? 1 << 30 : 0)
+            | (ShowRouteCandidates ? 1 << 26 : 0)
             | ((ViewingArmy + 2) << 17);
     }
 }

@@ -60,13 +60,177 @@ namespace BattleChess.Rules
     /// pathfinding bug. Shared mutable state does not survive being convenient.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// What working out a route actually cost, in the units the work is done in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Carried on the plan rather than counted in static fields, and that is not
+    /// a stylistic preference — see <see cref="Plan"/> for the time decisions
+    /// about a route <i>were</i> static and a plan came back described by
+    /// somebody else's numbers. Effort is a property of one plan and travels
+    /// with it.
+    /// </para>
+    /// <para>
+    /// All zero means the straight line answered and no graph was ever built,
+    /// which is <b>M10</b> working and is the common case: measured on a whole
+    /// army ordered at once, seven regiments in thirteen never reach the search
+    /// at all.
+    /// </para>
+    /// </remarks>
+    public readonly struct RouteEffort
+    {
+        public RouteEffort(
+            int places, int legs, int expansions, int rounds = 0,
+            int states = 0, long frontierScans = 0, int cacheHits = 0, int pruned = 0,
+            int lineChecks = 0, int standChecks = 0, int turnChecks = 0, bool askedTheLadder = false,
+            int bodies = 0, int filteredPlaces = 0)
+        {
+            AskedTheLadder = askedTheLadder;
+            Bodies = bodies;
+            FilteredPlaces = filteredPlaces;
+            Places = places;
+            Legs = legs;
+            Expansions = expansions;
+            Rounds = rounds;
+            States = states;
+            FrontierScans = frontierScans;
+            CacheHits = cacheHits;
+            Pruned = pruned;
+            LineChecks = lineChecks;
+            StandChecks = standChecks;
+            TurnChecks = turnChecks;
+        }
+
+        /// <summary>Candidate places the route was allowed to bend at.</summary>
+        public readonly int Places;
+
+        /// <summary>
+        /// Legs actually priced. Each one costs a swept rectangle along the leg
+        /// and a standing test at either end, so this is the number to multiply
+        /// when asking what the geometry came to.
+        /// </summary>
+        public readonly int Legs;
+
+        /// <summary>States taken off the frontier and expanded.</summary>
+        public readonly int Expansions;
+
+        /// <summary>
+        /// How many times the search gave up, bought more ground to bend at
+        /// from whatever had refused it, and started again (<b>M32</b>).
+        /// </summary>
+        /// <remarks>
+        /// One means the first handful of places was enough. A high count on an
+        /// ordinary march means the march kept meeting bodies it had not been
+        /// told about, which is either a genuinely layered field or a generator
+        /// handing out places that do not help.
+        /// </remarks>
+        public readonly int Rounds;
+
+        /// <summary>
+        /// States of (place, front) created. Always at least as many as
+        /// <see cref="Places"/>, usually several times more, and the number the
+        /// frontier's cost is really measured against.
+        /// </summary>
+        public readonly int States;
+
+        /// <summary>
+        /// States looked at while choosing which to expand next.
+        /// </summary>
+        /// <remarks>
+        /// The frontier is a walk down the whole list, so this grows as the
+        /// square of the graph. A <c>long</c> because it is the one counter here
+        /// that can reach millions on a single march, which is itself the
+        /// finding: it is bookkeeping, not geometry, and nothing about a route
+        /// depends on it.
+        /// </remarks>
+        public readonly long FrontierScans;
+
+        /// <summary>Legs wanted whose answer was already known.</summary>
+        public readonly int CacheHits;
+
+        /// <summary>Edges turned back by the bound before any geometry.</summary>
+        public readonly int Pruned;
+
+        /// <summary>Swept-rectangle line checks actually run.</summary>
+        public readonly int LineChecks;
+
+        /// <summary>Standing checks actually run.</summary>
+        public readonly int StandChecks;
+
+        /// <summary>Room-to-turn checks actually run.</summary>
+        public readonly int TurnChecks;
+
+        /// <summary>
+        /// Whether the ladder was asked for a second opinion (<b>M33</b>).
+        /// </summary>
+        /// <remarks>
+        /// Recorded because the clock and the counters stopped agreeing: a plan
+        /// with two places and three legs priced — no search worth the name —
+        /// was measured at 13,3 ms in play, while plans plainly larger came in
+        /// under four. Legs cannot explain that, and a flag can.
+        /// </remarks>
+        public readonly bool AskedTheLadder;
+
+        /// <summary>
+        /// How many regiments were pulled into the corridor and asked for
+        /// candidate places.
+        /// </summary>
+        /// <remarks>
+        /// The number worth arguing about when a plan looks expensive for what
+        /// is actually on the field — the graph is built from these, and their
+        /// count times up to twenty-four points each is most of the answer to
+        /// "why does this cost so much".
+        /// </remarks>
+        public readonly int Bodies;
+
+        /// <summary>
+        /// Of the graph's places, how many actually have their legs pruned by
+        /// tangency. The rest are unfiltered by design (<b>M36</b>).
+        /// </summary>
+        public readonly int FilteredPlaces;
+
+        /// <summary>The same effort, with the ladder recorded as asked.</summary>
+        public RouteEffort WithLadder() =>
+            new RouteEffort(
+                Places, Legs, Expansions, Rounds, States, FrontierScans, CacheHits, Pruned,
+                LineChecks, StandChecks, TurnChecks, askedTheLadder: true,
+                bodies: Bodies, filteredPlaces: FilteredPlaces);
+
+        /// <summary>Every dear geometric question this plan asked.</summary>
+        public int Geometry => LineChecks + StandChecks + TurnChecks;
+
+        /// <summary>Whether a graph was built at all, or the cast answered.</summary>
+        public bool Searched => Places > 0;
+
+        /// <summary>
+        /// Everything counted, for a bench rather than a game log.
+        /// </summary>
+        public string Detail =>
+            Searched
+                ? $"{Places,3} places  {States,5} states  {Rounds} rounds | " +
+                  $"geometry {Geometry,6} ({LineChecks} line, {StandChecks} stand, {TurnChecks} turn) | " +
+                  $"legs {Legs,5} priced, {CacheHits,7} cached, {Pruned,7} pruned | " +
+                  $"frontier {FrontierScans,9}"
+                : "straight line, nothing searched";
+
+        public override string ToString() =>
+            Searched
+                ? $"{Places} places ({Bodies} bodies, {FilteredPlaces} corners filtered), " +
+                  $"{Legs} legs priced, {Expansions} expanded, " +
+                  $"{Rounds} round{(Rounds == 1 ? string.Empty : "s")}" +
+                  (AskedTheLadder ? ", asked the ladder too" : string.Empty)
+                : "straight line, nothing searched";
+    }
+
     public readonly struct Plan
     {
-        public Plan(PathResult path, Facing?[]? hold, bool pressedThrough)
+        public Plan(PathResult path, Facing?[]? hold, bool pressedThrough, RouteEffort effort = default)
         {
             Path = path;
             Hold = hold;
             PressedThrough = pressedThrough;
+            Effort = effort;
         }
 
         /// <summary>The line itself.</summary>
@@ -78,6 +242,9 @@ namespace BattleChess.Rules
         /// <summary>Whether this plan gave up on keeping clear of its own side.</summary>
         public readonly bool PressedThrough;
 
+        /// <summary>What working this route out cost.</summary>
+        public readonly RouteEffort Effort;
+
         public bool Found => Path.Found;
 
         /// <summary>Turns the plan into the route a regiment actually walks.</summary>
@@ -87,6 +254,21 @@ namespace BattleChess.Rules
 
     public static class Marching
     {
+        /// <summary>
+        /// Asked periodically while a route is being worked out: has whoever
+        /// wanted it stopped wanting it?
+        /// </summary>
+        /// <remarks>
+        /// M80. A player who clicks somewhere else has superseded the order a
+        /// search is answering, and finishing it spends a frame on a route
+        /// that is thrown away on arrival - which [M79] made as dear as 179 ms
+        /// for one regiment. Per-thread, because a wing is planned across
+        /// several and each answers for its own regiment. Null means nobody is
+        /// asking, which is the ordinary case and costs one null check every
+        /// sixty-four expansions of the lattice.
+        /// </remarks>
+        [ThreadStatic] public static Func<bool>? GiveUpNow;
+
         /// <summary>
         /// How finely the ground under a straight line is checked, in metres.
         /// </summary>
@@ -109,7 +291,69 @@ namespace BattleChess.Rules
         /// route of two waypoints having explored no cells, which is also how it
         /// shows up in a recording and makes the saving legible there.
         /// </remarks>
+        /// <param name="planner">
+        /// Which way of planning to use. Null takes
+        /// <see cref="RoutePlanners.Default"/>, which is the only thing any
+        /// caller in the game passes — the parameter exists so the harness can
+        /// put two planners against the same arrangement and print both answers.
+        /// </param>
+        /// <param name="arriveOn">
+        /// The front the regiment is meant to finish on, when the caller knows
+        /// it and the unit does not yet. Left out, the planner falls back to
+        /// <see cref="UnitInstance.OrderFacing"/>, which is right for anything
+        /// re-planning a march already under way and <b>wrong</b> for anything
+        /// planning one before giving the order — see
+        /// <see cref="RoutePlanners"/> for what that cost.
+        /// </param>
         public static Plan PlanTo(
+            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+            IBattleLog? log = null, IWayRound? wayRound = null, IRoutePlanner? planner = null,
+            Facing? arriveOn = null)
+        {
+            // Counted here because this is the one door every plan comes
+            // through, whoever opened it (M38) — and timed here for the same
+            // reason, so an order given by hand and a re-plan the tick
+            // decided on land on the same clock without either caller
+            // needing to know it is being timed.
+            // Interlocked because a plan may be worked out on a worker while
+            // the host reads these for its frame line. A plain ++ is a read, an
+            // add and a write, so two workers finishing together lose a count -
+            // and a diagnostic that quietly undercounts is worse than none.
+            System.Threading.Interlocked.Increment(ref battle.RoutesPlanned);
+
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.Plan);
+
+            long began = System.Diagnostics.Stopwatch.GetTimestamp();
+
+            try
+            {
+                return (planner ?? RoutePlanners.Default).PlanTo(
+                    battle, unit, pathfinder, destination, log, wayRound, arriveOn);
+            }
+            finally
+            {
+                long spent = System.Diagnostics.Stopwatch.GetTimestamp() - began;
+
+                System.Threading.Interlocked.Add(ref battle.RoutePlanningTicks, spent);
+
+                // Charged against this frame's allowance whoever asked, so a
+                // person's own order still shortens what the tick may spend
+                // after it. Orders are never *refused* — see PlanningBudget —
+                // but they are not invisible either.
+                battle.Planning.Spent(unit.Id, spent);
+            }
+        }
+
+        /// <summary>
+        /// <b>M18</b>'s ladder: straight line, round it, through its own, and the
+        /// search when none of those answers.
+        /// </summary>
+        /// <remarks>
+        /// Kept whole while the search that supersedes it is measured against it.
+        /// It is reachable only through <see cref="RoutePlanners.TheLadder"/>, and
+        /// it goes once the recordings agree.
+        /// </remarks>
+        public static Plan ByTheLadder(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
             IBattleLog? log = null, IWayRound? wayRound = null)
         {
@@ -117,6 +361,7 @@ namespace BattleChess.Rules
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.Ladder);
 
             // Rung 1: straight there — asked of the body squared to the line
             // it is about to walk, not the one it is standing in (M24).
@@ -200,7 +445,27 @@ namespace BattleChess.Rules
                     // And what it cost, because "the arcs look too wide" is a
                     // judgement, a judgement needs a number, and no rule
                     // anywhere used to record one.
-                    if (arching <= crabbing)
+                    // M79, at the rung that actually draws these. Arch and crab
+                    // were weighed against each other and never against simply
+                    // walking there - and `straight` was computed right here,
+                    // three lines up, only to be printed. A recording has one at
+                    // 837 s against 109 s, 7,7x: four hundred metres west and
+                    // three hundred and forty back east for a hop of a hundred,
+                    // with the ratio in its own log line and nothing acting on
+                    // it. Declined rather than returned, because returning it
+                    // short-circuits everything below: on that same order the
+                    // grid had a two-waypoint answer and was never asked.
+                    float cheapest = MathF.Min(arching, crabbing);
+                    bool wayRoundTooDear =
+                        StagedRoutePlanner.StraightLineCostCeiling > 0f &&
+                        straight > 1f &&
+                        cheapest > straight * StagedRoutePlanner.StraightLineCostCeiling;
+
+                    if (wayRoundTooDear)
+                    {
+                        StagedRoutePlanner.WayRoundTooDear++;
+                    }
+                    else if (arching <= crabbing)
                     {
                         Say(log, unit, blocking,
                             "is going round its own {0} rather than through it",
@@ -213,18 +478,20 @@ namespace BattleChess.Rules
 
                         return Straight(arch!);
                     }
+                    else
+                    {
+                        Say(log, unit, blocking,
+                            "is turning side-on to thread a gap beside its own {0} — its front will not fit",
+                            crabbing, straight, threaded!, destination,
+                            arching < float.MaxValue
+                                ? $" Arching round would have cost {arching:0} s."
+                                : " There was no way round it.",
+                            hold);
 
-                    Say(log, unit, blocking,
-                        "is turning side-on to thread a gap beside its own {0} — its front will not fit",
-                        crabbing, straight, threaded!, destination,
-                        arching < float.MaxValue
-                            ? $" Arching round would have cost {arching:0} s."
-                            : " There was no way round it.",
-                        hold);
+                        unit.LastRung = 3;
 
-                    unit.LastRung = 3;
-
-                    return Straight(threaded!, hold);
+                        return Straight(threaded!, hold);
+                    }
                 }
 
                 // Rung 3: through its own. Nothing fits, nothing goes round and
@@ -324,6 +591,55 @@ namespace BattleChess.Rules
         /// is costed as the crab it is rather than as a march of the same
         /// length.
         /// </param>
+        /// <summary>
+        /// The same route with every waypoint dropped that the regiment can see
+        /// past - the cast-ahead pass every planner's answer goes through.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M82.</b> Exposed for the route preview, which had no way to reach
+        /// it: <c>RouteSmoothing</c> is internal to the rules, and the drawing
+        /// code is a Unity assembly outside them. So the preview drew
+        /// <see cref="GridPlanning.RegimentGrid.TryRoute"/>'s answer raw, a path
+        /// of hex centres, while every route the planner actually hands out has
+        /// been straightened - and the grid stage inside the cascade straightens
+        /// its own answer before it will even offer it.
+        /// </para>
+        /// <para>
+        /// The gap is not cosmetic. On the field the screenshots were taken
+        /// from, at the tenth-of-a-regiment cell size they were taken at, the
+        /// preview draws <b>2 864 points across eighteen routes</b> - 159 a
+        /// route - where the planner would walk <b>98</b>, five a route, over
+        /// <b>8,7% less ground</b>. A picture of a route no planner would ever
+        /// return is worse than no picture, because it is read as evidence.
+        /// </para>
+        /// <para>
+        /// Same shape as <b>W5</b> and as the scene report that had to be pulled
+        /// out from behind a preview toggle: a diagnostic that reports something
+        /// other than what happens sends every investigation that trusts it to
+        /// the wrong place.
+        /// </para>
+        /// </remarks>
+        public static IReadOnlyList<Vec2> Straightened(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+            if (waypoints == null) throw new ArgumentNullException(nameof(waypoints));
+            if (waypoints.Count < 3) return waypoints;
+
+            float length = 0f;
+            for (int i = 1; i < waypoints.Count; i++)
+                length += Vec2.Distance(waypoints[i - 1], waypoints[i]);
+
+            var plan = new Plan(
+                PathResult.Success(
+                    waypoints, Array.Empty<Coord>(), length, length, 0),
+                hold: null, pressedThrough: false);
+
+            return RouteSmoothing.Applied(battle, unit, plan).Path.Waypoints;
+        }
+
         public static float SecondsToWalk(
             BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints,
             IReadOnlyList<Facing?>? hold = null)
@@ -530,7 +846,7 @@ namespace BattleChess.Rules
                     lapped = $" It sets off already standing in {other.Def.DisplayName}, " +
                              $"{overlap:0.00} of a body deep.";
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) met++;
+                if (Sweep.Touches(body, travel, other.Shape)) met++;
             }
 
             return $" {met} of its own on that line.{lapped}";
@@ -692,8 +1008,16 @@ namespace BattleChess.Rules
 
             foreach ((float _, Vec2 mouth, Vec2 far, Facing front) in mouths)
             {
-                if (!IsClearLeg(battle, unit, unit.Position, mouth, unit.Facing)) continue;
+                // The corridor first, though it is the middle leg of the three.
+                // It is the squeeze — the thing most likely to refuse — and it
+                // is also much the shortest line of the three, so its scan is
+                // the cheapest of them. Asked last, as it was, every mouth the
+                // gap itself would have rejected was paid for twice over in
+                // full-length scans up to it and away from it. The three are a
+                // conjunction of pure tests, so the order cannot change which
+                // mouths are taken, only what is spent finding out.
                 if (!IsClearLine(battle, unit, mouth, far, front, leaving: true)) continue;
+                if (!IsClearLeg(battle, unit, unit.Position, mouth, unit.Facing)) continue;
                 if (!IsClearLeg(battle, unit, far, destination, front)) continue;
 
                 // Named on the leg it belongs to, as the drawn-line crab does:
@@ -792,9 +1116,24 @@ namespace BattleChess.Rules
                 break;
             }
 
+            bool theWholeWay = entry <= 0f && exit >= length;
+
+            // M81. How much of this route is actually walked side-on. The rung
+            // is a manoeuvre at a gap; past the ceiling it is not threading
+            // anything, it is just a slow march, and the cascade below is
+            // better placed to answer than a crab nobody priced against it.
+            float crabbed = theWholeWay ? length : MathF.Max(0f, exit - entry);
+
+            if (StagedRoutePlanner.CrabbedShareCeiling < 1f &&
+                crabbed > length * StagedRoutePlanner.CrabbedShareCeiling)
+            {
+                StagedRoutePlanner.CrabTooLong++;
+                return null;
+            }
+
             // The squeeze runs the whole way, so there is nothing to come back
             // onto and the simple form is the honest one.
-            if (entry <= 0f && exit >= length)
+            if (theWholeWay)
             {
                 hold = new Facing?[] { null, sideOn };
                 return new[] { unit.Position, destination };
@@ -819,6 +1158,26 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
+        /// Somewhere for an index query to put its answer without allocating.
+        /// </summary>
+        /// <remarks>
+        /// One per thread and one per asking method, rather than one shared
+        /// between them. Nothing nests today — the body of a clearance check is
+        /// pure geometry and asks the index nothing — but a shared buffer would
+        /// make the day somebody adds a query inside one of these loops into a
+        /// silent wrong answer rather than a compile error, and that is the kind
+        /// of bug this sweep has spent its time removing.
+        /// </remarks>
+        [ThreadStatic]
+        private static List<UnitInstance>? _onTheLine;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _atThePlace;
+
+        [ThreadStatic]
+        private static List<UnitInstance>? _aheadOnTheLine;
+
+        /// <summary>
         /// Whether a regiment's whole body can travel from one point to another
         /// in a straight line without meeting anything.
         /// </summary>
@@ -836,27 +1195,191 @@ namespace BattleChess.Rules
         /// </param>
         public static bool IsClearLine(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
-            bool leaving = false)
+            bool leaving = false, bool leavingGrazeOnly = false) =>
+            IsClearLine(battle, unit, from, to, facing, out _, leaving, leavingGrazeOnly);
+
+        /// <summary>
+        /// The same question, and which regiment answered no.
+        /// </summary>
+        /// <param name="blocker">
+        /// A body that refused the line, or nothing if it was clear or the
+        /// <i>ground</i> refused it. Terrain is not something this search can
+        /// walk about — that is the pathfinder's job (<b>M10</b>).
+        /// <para>
+        /// <b>A</b> body, not the nearest one: the loop stops at the first no,
+        /// as it always has. Naming the body the march meets first instead was
+        /// built and measured, and it cost between a quarter and half again as
+        /// much time across the whole scaling bench while changing not one
+        /// route — so the extra sweeps bought nothing.
+        /// </para>
+        /// </param>
+        public static bool IsClearLine(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
+            out UnitInstance? blocker, bool leaving = false, bool leavingGrazeOnly = false)
         {
+            blocker = null;
+
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.ClearLine);
+
             Vec2 travel = to - from;
             float length = travel.Length;
 
             if (length <= 0f) return battle.FormationFits(unit, from, facing);
 
-            if (!GroundIsClear(battle, unit, from, travel, length, facing)) return false;
-
             var body = new OrientedRect(from, facing, unit.Footprint);
 
-            foreach (UnitInstance other in battle.UnitsOnField())
-            {
-                if (!IsInTheWayOf(unit, other)) continue;
-                if (WhereItIsStanding(body, travel, other)) continue;
-                if (leaving && OrientedRect.Overlaps(body, other.Shape)) continue;
+            // A safe bound on how far from the segment a body could possibly
+            // reach and still be touched: the swept rectangle's own bounding
+            // circle at either end, plus the obstacle's. It only has to be
+            // provably safe, not tight, so it can never turn a real collision
+            // into a missed one — and since M32 it decides candidate places
+            // too, by way of the blocker this hands back.
+            float reach = unit.Footprint.BoundingRadius;
+            Vec2 along = travel / length;
 
-                if (Sweep.FirstTouch(body, travel, other.Shape, out _)) return false;
+            List<UnitInstance> all = _onTheLine ??= new List<UnitInstance>(32);
+
+            // The query is inside the measured scope, not before it: narrowing
+            // the field is now part of what asking this question costs, and a
+            // stopwatch that started after it would report the saving without
+            // the price of it (W5).
+            using (PlanningProfile.Measure(PlanningProfile.Step.BodyScan))
+            {
+                battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, reach, all);
+
+                for (int u = 0; u < all.Count; u++)
+                {
+                    UnitInstance other = all[u];
+                    if (!other.IsOnField) continue;
+                    if (!IsInTheWayOf(unit, other)) continue;
+
+                    // Measured on a real battle: this alone cut a plan's cost in
+                    // half against an army of a hundred regiments none of which
+                    // were anywhere near the march, because every clearance check
+                    // on every leg was asking Sweep.FirstTouch and OverlapFraction
+                    // about bodies the segment could not geometrically reach.
+                    float span = reach + other.Footprint.BoundingRadius;
+                    if (DistanceSquaredToSegment(other.Position, from, along, length) > span * span)
+                        continue;
+
+                    if (WhereItIsStanding(body, travel, other)) continue;
+
+                    if (leaving && OrientedRect.Overlaps(body, other.Shape))
+                    {
+                        // Ordinarily any overlap at the start is excused outright:
+                        // the regiment already occupies that ground and getting
+                        // clear of it is the steering's business (M25). A candidate
+                        // the search invented is not ground anybody occupies, so
+                        // <paramref name="leavingGrazeOnly"/> narrows that.
+                        //
+                        // Narrowed to a brush <i>at the start</i>, once, and it was
+                        // not enough. A leg from a candidate that grazed one percent
+                        // of a body at its near end was excused entirely — not just
+                        // at that one point, but for the whole leg, because the
+                        // excuse skips this body's <see cref="Sweep.FirstTouch"/>
+                        // altogether. Measured: the same leg reached 66% inside that
+                        // body a fifth of the way along, unchecked, because nothing
+                        // after the first instant was ever asked about again. A
+                        // route through it read as clear and, on screen, plainly
+                        // was not.
+                        //
+                        // So a graze has to be a graze along the whole leg, not only
+                        // at the door.
+                        if (!leavingGrazeOnly || WorstOverlapAlong(body, travel, other.Shape) <= OrderSystem.GrazingTolerance)
+                            continue;
+                    }
+
+                    // Touches rather than FirstTouch: M36 wants to know *which*
+                    // body refused the line, which is this loop variable, and never
+                    // how far along it was met.
+                    if (Sweep.Touches(body, travel, other.Shape))
+                    {
+                        blocker = other;
+                        return false;
+                    }
+                }
             }
 
-            return true;
+            // The ground last, and it is worth saying why, because it used to be
+            // first and that was most of the bill.
+            //
+            // Terrain is a field rather than a shape, so it cannot be swept — it
+            // is sampled, every ten metres along the leg, and every sample tests
+            // the whole footprint over a grid of up to twenty-seven points. A
+            // leg two hundred metres long is therefore some five hundred terrain
+            // lookups, against a handful of rectangle tests for the regiments.
+            // Measured on a whole army's orders: dropping this check took
+            // planning from 82 ms to 13 for the ladder and 101 to 31 for the
+            // search, so it was around three quarters of everything.
+            //
+            // Nothing about it got cheaper. It simply runs after the cheap
+            // questions now, so a leg refused by a regiment standing in it never
+            // pays for a terrain scan it was never going to need. Same answer,
+            // asked in the order that settles it soonest.
+            return GroundIsClear(battle, unit, from, travel, length, facing);
+        }
+
+        /// <summary>
+        /// How far a point stands from the nearest point on a segment, squared.
+        /// </summary>
+        /// <remarks>
+        /// Squared, and given the segment's unit direction rather than its far
+        /// end, because this is the broad-phase test every body on the field
+        /// pays on every leg: the caller already has the direction, and a
+        /// comparison against a squared span says the same thing as a distance
+        /// without the square root.
+        /// </remarks>
+        private static float DistanceSquaredToSegment(Vec2 point, Vec2 from, Vec2 along, float length)
+        {
+            float projected = MathF.Max(0f, MathF.Min(length, Vec2.Dot(point - from, along)));
+
+            return Vec2.DistanceSquared(point, from + along * projected);
+        }
+
+        /// <summary>How many points along a leg a graze is checked at.</summary>
+        /// <remarks>
+        /// Sampled rather than swept properly, on purpose: this only runs for a
+        /// leg that already touches the body it is being asked about, on a
+        /// front held constant the whole way, which is a much smoother question
+        /// than <see cref="Sweep.FirstTouch"/>'s general one. Sixteen points
+        /// caught a leg that went from a one percent graze to sixty-six percent
+        /// inside a body eleven metres later; doubling it moved the measured
+        /// worst point by under a tenth of a percent.
+        /// </remarks>
+        private const int GrazeSamples = 16;
+
+        /// <summary>
+        /// The worst a moving body ever overlaps an obstacle along a straight
+        /// leg, as a fraction of the moving body's own area.
+        /// </summary>
+        /// <remarks>
+        /// What a leg starting inside a graze actually needs asked of it. Asking
+        /// only at the start answers "is this leg allowed to set off", which is
+        /// not the same question as "is this leg allowed to be walked" — a leg
+        /// can start touching a body by a hair and be most of the way inside it
+        /// eleven metres later, and the first question says nothing about the
+        /// second.
+        /// </remarks>
+        private static float WorstOverlapAlong(in OrientedRect moving, Vec2 travel, in OrientedRect obstacle)
+        {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GrazeAlong);
+
+            float length = travel.Length;
+            if (length <= 0f) return OrientedRect.OverlapFraction(moving, obstacle);
+
+            Vec2 direction = travel / length;
+            float worst = 0f;
+
+            for (int i = 0; i <= GrazeSamples; i++)
+            {
+                Vec2 at = moving.Centre + direction * (length * i / GrazeSamples);
+                var here = new OrientedRect(at, moving.Facing, moving.Footprint);
+
+                float overlap = OrientedRect.OverlapFraction(here, obstacle);
+                if (overlap > worst) worst = overlap;
+            }
+
+            return worst;
         }
 
         /// <summary>
@@ -1020,8 +1543,13 @@ namespace BattleChess.Rules
         {
             var body = new OrientedRect(at, unit.Facing, unit.Footprint);
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> near = _atThePlace ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, at, unit.Footprint.BoundingRadius, near);
+
+            for (int i = 0; i < near.Count; i++)
             {
+                UnitInstance other = near[i];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 if (OrientedRect.Overlaps(body, other.Shape)) return false;
@@ -1033,6 +1561,31 @@ namespace BattleChess.Rules
         private static bool GroundIsClear(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 travel, float length, Facing facing)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GroundClear);
+
+            // Everything this leg could possibly touch, however the body is
+            // turned: both ends, each grown by the footprint's own bounding
+            // circle. If none of that rectangle is ground this unit cannot
+            // enter, no point inside it can be either, and the sampling below
+            // would spend a thousand lookups proving it.
+            Vec2 to = from + travel;
+            float reach = unit.Footprint.BoundingRadius;
+
+            var min = new Vec2(MathF.Min(from.X, to.X) - reach, MathF.Min(from.Y, to.Y) - reach);
+            var max = new Vec2(MathF.Max(from.X, to.X) + reach, MathF.Max(from.Y, to.Y) + reach);
+
+            if (battle.PassableFor(unit.Def.Movement).NothingInTheWay(min, max))
+                return true;
+
+            // Asking the same question again per step was built and measured
+            // and is deliberately not here. A regiment 229 m across has a
+            // bounding circle of 128 m, so a step's own rectangle is over a
+            // quarter of a kilometre wide: on a map with mountains in it that
+            // rectangle catches one nearly everywhere the whole leg did, the
+            // table answers no, and the query is pure overhead on top of the
+            // sampling it failed to avoid. Measured: the default planner went
+            // from 48,1 ms a plan back up to 52,8, and the ladder from 20,0
+            // to 30,4.
             int steps = Math.Max(1, (int)MathF.Ceiling(length / GroundStepMetres));
 
             for (int i = 0; i <= steps; i++)
@@ -1067,8 +1620,13 @@ namespace BattleChess.Rules
             UnitInstance? nearest = null;
             float closest = float.MaxValue;
 
-            foreach (UnitInstance other in battle.UnitsOnField())
+            List<UnitInstance> near = _aheadOnTheLine ??= new List<UnitInstance>(32);
+            battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, unit.Footprint.BoundingRadius, near);
+
+            for (int i = 0; i < near.Count; i++)
             {
+                UnitInstance other = near[i];
+                if (!other.IsOnField) continue;
                 if (!IsInTheWayOf(unit, other)) continue;
 
                 // M25, and asked here too so that "what is in the way" and "is
