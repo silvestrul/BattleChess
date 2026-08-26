@@ -61,9 +61,7 @@ namespace BattleChess.Tests.Battle
 
         // ------------------------------------------------ every step, every planner
 
-        [Fact(Skip = "A record of a measurement rather than a check on one: six planners " +
-                     "over four fields with a full step table each. Un-skip to re-take, " +
-                     "and run it in Release — Debug changes the ranking, not just the totals.")]
+        [Fact]
         public void EveryPlannerOnEveryFieldStepByStep()
         {
             foreach (string field in Fields)
@@ -82,9 +80,7 @@ namespace BattleChess.Tests.Battle
 
         // ------------------------------------------------- every lever, against the clock
 
-        [Fact(Skip = "A record of a measurement rather than a check on one, and it turns " +
-                     "global planner settings over while it runs — which the test runner's " +
-                     "parallel classes would see. Un-skip to re-take, and run it alone.")]
+        [Fact(Skip = "record")]
         public void EveryLeverAgainstTheClock()
         {
             Defaults saved = Defaults.Capture();
@@ -350,6 +346,20 @@ namespace BattleChess.Tests.Battle
                 () => HybridAStarPlanner.TurnAwareHeuristic = false);
             yield return ("hybrid full primitives", () => HybridPrimitives.LeanPrimitives = false);
             yield return ("hybrid heap not dial", () => HybridTurnField.DialQueue = false);
+
+            // --- the turn field's own grid, M84. It is 52 to 88% of the hybrid
+            //     planner and had no dial on it at all. The fill settles
+            //     columns * rows * 8 states, so this is quadratic.
+            yield return ("turn cells 5 m floor", () => HybridTurnField.MinCellMetres = 5f);
+            yield return ("turn cells 20 m floor", () => HybridTurnField.MinCellMetres = 20f);
+            yield return ("turn cells 40 m floor", () => HybridTurnField.MinCellMetres = 40f);
+            yield return ("turn 24 across", () => HybridTurnField.TargetCellsAcross = 24f);
+            yield return ("turn 96 across", () => HybridTurnField.TargetCellsAcross = 96f);
+            yield return ("turn 20 m floor + 24 across", () =>
+            {
+                HybridTurnField.MinCellMetres = 20f;
+                HybridTurnField.TargetCellsAcross = 24f;
+            });
         }
 
         /// <summary>
@@ -365,6 +375,7 @@ namespace BattleChess.Tests.Battle
         private sealed class Defaults
         {
             private bool _bent, _corners, _rings, _poseFirst, _cheapCorridor, _turnAware, _lean, _dial;
+            private float _turnCell, _turnAcross;
             private int _poseBudget, _bounded, _cellBudget, _places, _headings, _shootEvery;
             private float _spacing, _corridor, _wayRound, _straight, _crab, _bin, _weight;
 
@@ -391,6 +402,8 @@ namespace BattleChess.Tests.Battle
                 _turnAware = HybridAStarPlanner.TurnAwareHeuristic,
                 _lean = HybridPrimitives.LeanPrimitives,
                 _dial = HybridTurnField.DialQueue,
+                _turnCell = HybridTurnField.MinCellMetres,
+                _turnAcross = HybridTurnField.TargetCellsAcross,
             };
 
             public void Restore()
@@ -416,6 +429,8 @@ namespace BattleChess.Tests.Battle
                 HybridAStarPlanner.TurnAwareHeuristic = _turnAware;
                 HybridPrimitives.LeanPrimitives = _lean;
                 HybridTurnField.DialQueue = _dial;
+                HybridTurnField.MinCellMetres = _turnCell;
+                HybridTurnField.TargetCellsAcross = _turnAcross;
             }
         }
     }

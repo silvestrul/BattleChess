@@ -49,9 +49,36 @@ namespace BattleChess.Rules.HybridPlanning
         /// more here — and an estimate does not need to see a four-metre
         /// feature.
         /// </summary>
-        private const float MinCellMetres = 10f;
+        /// <summary>
+        /// The floor on cell size, and a measurement lever since M84.
+        /// </summary>
+        /// <remarks>
+        /// The fill settles <c>columns * rows * 8</c> states, so its cost is
+        /// quadratic in this: halving the cell size quadruples the work. It had
+        /// never been swept, and the field is 52 to 88% of the hybrid planner's
+        /// self time and 6 to 26% of the staged planner's — the largest single
+        /// number in the profile that nobody had put a dial on.
+        /// </remarks>
+        /// <remarks>
+        /// <b>Twenty, on the sweep</b>, from ten. Least of three in Release on
+        /// the planner a battle uses: the Crucible <b>-16%</b>, the sideways
+        /// mile -5%, Broken Country -3%, the Long March -2%, and — the half that
+        /// decides it under <see href="../../../docs/DECISIONS.md">W10</see> —
+        /// <b>not one press-through, unwalkable route or second of marching
+        /// moved on any field</b>. The estimate is coarser and the routes are
+        /// the same, which is what a heuristic being over-resolved looks like.
+        /// <b>Forty was faster still and is refused</b>: -16%, -10%, -4%, but it
+        /// costs two press-throughs and two unwalkable routes on Broken
+        /// Country, and a number that improves while contact worsens is a trade
+        /// and not a win.
+        /// </remarks>
+        internal static float MinCellMetres = 20f;
 
-        private const float TargetCellsAcross = 48f;
+        /// <summary>
+        /// Cells kept along the straight run, before the margin. A measurement
+        /// lever since M84, for the same reason as <see cref="MinCellMetres"/>.
+        /// </summary>
+        internal static float TargetCellsAcross = 48f;
 
         /// <summary>
         /// Grid extents are rounded up to this, so two movers a little apart
@@ -167,7 +194,10 @@ namespace BattleChess.Rules.HybridPlanning
             int columns = Math.Max(1, (int)MathF.Ceiling((maxX - minX) / cellMetres));
             int rows = Math.Max(1, (int)MathF.Ceiling((maxY - minY) / cellMetres));
 
-            bool[] blocked = Raster(obstacles, inflateByMetres, cellMetres, minX, minY, columns, rows);
+            bool[] blocked;
+
+            using (PlanningProfile.Measure(PlanningProfile.Step.HybridRaster))
+                blocked = Raster(obstacles, inflateByMetres, cellMetres, minX, minY, columns, rows);
 
             // Borrowed rather than allocated. A field is a hundred thousand
             // floats and a plan builds one, so eighty orders churned some tens

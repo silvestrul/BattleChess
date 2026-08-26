@@ -90,6 +90,19 @@ namespace BattleChess.Contracts
             /// <summary>Walking every body on the field to see if it is in the way.</summary>
             BodyScan,
 
+            /// <summary>
+            /// Asking the spatial index which bodies lie near one line, inside
+            /// <see cref="BodyScan"/>.
+            /// </summary>
+            /// <remarks>
+            /// The same split, for the same reason. <see cref="BodyScan"/> is
+            /// the heaviest step in the whole planner on every field and every
+            /// planner but one, and "make it faster" means nothing until it is
+            /// known whether the time is in finding the candidates or in
+            /// testing them.
+            /// </remarks>
+            NearQuery,
+
             /// <summary>How deep a leg laps a body it started inside, sampled along the leg.</summary>
             GrazeAlong,
 
@@ -134,6 +147,29 @@ namespace BattleChess.Contracts
 
             /// <summary>Flood-filling the obstacle field the hybrid steers by.</summary>
             HybridField,
+
+            /// <summary>
+            /// Marking which of that field's cells a body holds, before the
+            /// fill runs over them.
+            /// </summary>
+            /// <remarks>
+            /// Split out from <see cref="HybridField"/> because the two halves
+            /// have different lifetimes and only one of them can be shared: the
+            /// raster depends on where the bodies are, which is the same for
+            /// every order given on one tick, while the fill counts seconds to
+            /// <i>this</i> order's goal. Whether sharing the raster is worth
+            /// building depends entirely on which half the time is in, and
+            /// nothing could answer that while they were one line.
+            /// </remarks>
+            /// <remarks>
+            /// It measures <see cref="HybridPlanning.HybridTurnField"/>'s
+            /// raster, not <c>HybridObstacleField</c>'s. That was worth finding
+            /// out: the obstacle field is built only when the turn-aware
+            /// heuristic is off or a corridor was asked for, so in the shipped
+            /// configuration it is never built at all and every millisecond
+            /// under <see cref="HybridField"/> belongs to the turn field.
+            /// </remarks>
+            HybridRaster,
 
             /// <summary>Working out which bodies are near, once per expansion.</summary>
             HybridStock,

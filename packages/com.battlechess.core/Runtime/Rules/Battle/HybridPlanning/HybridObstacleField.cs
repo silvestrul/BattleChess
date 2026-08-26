@@ -131,6 +131,7 @@ namespace BattleChess.Rules.HybridPlanning
         {
             var blocked = new bool[columns * rows];
 
+
             // Only the cells a body could possibly cover, not every cell on the
             // field for every body.
             //

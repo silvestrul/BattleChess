@@ -1245,7 +1245,8 @@ namespace BattleChess.Rules
             // the price of it (W5).
             using (PlanningProfile.Measure(PlanningProfile.Step.BodyScan))
             {
-                battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, reach, all);
+                using (PlanningProfile.Measure(PlanningProfile.Step.NearQuery))
+                    battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, reach, all);
 
                 for (int u = 0; u < all.Count; u++)
                 {

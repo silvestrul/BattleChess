@@ -1197,6 +1197,44 @@ tests showing the routes unchanged and the bench showing what it saved; or a fie
 recorded here on which the tangent stage does win, which would say the bench is
 what is unrepresentative rather than the ordering.
 
+## 23. The clearance path asks the index once a leg; the hybrid asks once a node
+
+Raised by [M84](DECISIONS.md#m84). `BodyScan` is the heaviest step in the planner
+on every field and for five of six planners — 33% to 72% of self time — and
+roughly **half of it is the index query itself**:
+
+| field | BodyScan self | NearQuery self | query's share |
+|---|---|---|---|
+| crucible | 28,8 ms | 24,4 ms | 46% |
+| longmarch | 7,3 ms | 8,0 ms | 52% |
+| brokencountry | 29,0 ms | 25,9 ms | 47% |
+| sidewaysmile | 4,2 ms | 7,5 ms | 64% |
+
+M84 made each query about 12% cheaper and that moved the total inside noise,
+because the query is only 15 to 28% of the bill. **The remaining move is to ask
+fewer times, and the hybrid already does it.**
+
+`HybridAStarPlanner.TakeStock` asks which bodies are near **once per expansion**
+and reuses that set across every motion primitive tried from the node: 25 503
+stock calls serving 172 021 clearance tests on the Crucible, a **6,7 to 1**
+reuse. `Marching`'s clearance path asks once per leg — 76 379 queries for 76 379
+tests, **1 to 1**.
+
+**Why the reuse should exist.** A search prices many legs between the same small
+set of candidate places, and legs sharing an endpoint share almost all of their
+neighbourhood. A set gathered once for a place, with a radius covering every leg
+that leaves it, would serve all of them.
+
+**What makes it non-trivial.** The set has to be keyed by something that is
+genuinely the same — a place and a radius — and invalidated when a body moves,
+which inside one plan it does not. `RouteSearch.Ledger` already lives for exactly
+one search and already carries per-place scratch, so it is the natural home.
+
+**What would close this entry.** The reuse built, with `RouteFingerprintTests`
+showing no route changed and the profile showing what the ratio became; or a
+measurement showing legs share too little neighbourhood for it to pay, recorded
+here with the numbers.
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
