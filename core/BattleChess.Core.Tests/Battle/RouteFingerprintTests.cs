@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text;
 using BattleChess.Contracts;
 using BattleChess.Rules;
+using BattleChess.Rules.GridPlanning;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -72,10 +73,22 @@ namespace BattleChess.Tests.Battle
         /// opposite directions sum the same. This asks each route separately.
         /// </para>
         /// <para>
-        /// <b>Against the planner that ships</b>, and on all four fields. The
-        /// theory above it runs the ladder, the search and the tangents over
-        /// three, which between them is neither the planner a played battle
-        /// reaches nor the field that most recently broke.
+        /// <b>With the regiment grid off and the tangent stage on</b>, since
+        /// <b>M86</b>. What this gates
+        /// is the tangent search's cap, and after the reorder the shipping
+        /// cascade answers most orders above that search and some fields never
+        /// reach it at all - longmarch draws the graph <i>zero</i> times now,
+        /// where before it drew it four. Run as shipped, the non-vacuity
+        /// assertion below correctly reported that the cap was never reached
+        /// and the comparison proved nothing. Turning the grid off puts the
+        /// tangent stage back in the path of every order that the ladder could
+        /// not answer, which is the condition under which the cap can matter at
+        /// all, and is strictly more orders than a played battle sends through
+        /// it.
+        /// </para>
+        /// <para>
+        /// The route-identity claim for the cascade <i>as shipped</i> is the
+        /// theory above, which writes out every route for three planners.
         /// </para>
         /// <para>
         /// <b>A gate, not a record.</b> It restores the lever in a
@@ -92,9 +105,19 @@ namespace BattleChess.Tests.Battle
         public void HalvingTheGraphChangesNoRoute(string key)
         {
             int wasPlaces = RouteSearch.MostPlaces;
+            GridUse wasGrid = GridRoutePlanner.Use;
+            bool wasStage = StagedRoutePlanner.AskTangentStage;
 
             try
             {
+                // See the remarks: the subject here is the search's cap, so the
+                // search has to be in the path of the orders being compared.
+                // Both of these are off in the cascade that ships, and both for
+                // the same reason - the grid answers first and the tangent
+                // stage answers nothing - so both have to be put back.
+                GridRoutePlanner.Use = GridUse.Off;
+                StagedRoutePlanner.AskTangentStage = true;
+
                 RouteSearch.MostPlaces = 48;
                 var full = Fingerprints(key, out int reachedAt48);
 
@@ -141,7 +164,41 @@ namespace BattleChess.Tests.Battle
             finally
             {
                 RouteSearch.MostPlaces = wasPlaces;
+                GridRoutePlanner.Use = wasGrid;
+                StagedRoutePlanner.AskTangentStage = wasStage;
             }
+        }
+
+        /// <summary>
+        /// Every route the cascade that ships actually produces, one line an
+        /// order, on all four bench fields.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The theory at the top of this file runs the ladder, the places
+        /// search and the tangent search each on its own. None of those is the
+        /// planner a played battle reaches, so nothing here wrote down what the
+        /// cascade itself returns - which meant a change to the <i>order</i> of
+        /// its stages had no record to be checked against. M86 was that change.
+        /// </para>
+        /// <para>
+        /// Asserts only that it routed something, because there is nothing
+        /// in-process to compare against: its value is the output, diffed
+        /// between two builds. That is how M86 was shown to move no route.
+        /// </para>
+        /// </remarks>
+        [Theory]
+        [InlineData("crucible")]
+        [InlineData("longmarch")]
+        [InlineData("brokencountry")]
+        [InlineData("sidewaysmile")]
+        public void EveryShippingRouteWrittenOut(string key)
+        {
+            var routes = Fingerprints(key, out _);
+
+            foreach (var pair in routes) _out.WriteLine($"SHIP {pair.Key} {pair.Value}");
+
+            Assert.True(routes.Count >= 40, $"only {routes.Count} routes on {key}");
         }
 
         /// <summary>One line an order, everything a route is made of.</summary>

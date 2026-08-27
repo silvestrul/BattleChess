@@ -128,6 +128,7 @@ rule is right but the number, threshold or exact form is the designer's to move.
 | M83 | The whole bill, asked of every planner and every lever at once. <sup>[why](#m83)</sup> | Mandatory | ✅ measured |
 | M84 | The index asked once a leg instead of once a sample, and the turn field at half the resolution. <sup>[why](#m84)</sup> | Mandatory | ✅ measured |
 | M85 | An order costs four microseconds or sixty milliseconds, and the mean describes neither. <sup>[why](#m85)</sup> | Mandatory | ✅ measured |
+| M86 | The grid is asked before the tangent search, and the tangent stage is off. <sup>[why](#m86)</sup> | Designer | ✅ shipped |
 
 ## Combat
 
@@ -215,6 +216,7 @@ be built, recorded so they are not re-derived from scratch later.
 | W8 | A real bug keeps its reproduction as a gate, and its arrangement joins the bench. <sup>[why](#w8)</sup> | Mandatory |  |
 | W9 | A check must be able to say what would have made it fail. <sup>[why](#w9)</sup> | Mandatory |  |
 | W10 | A cheaper number is not a better route, and a press-through is not automatically either. <sup>[why](#w10)</sup> | Mandatory |  |
+| W11 | A measurement across two builds proves the build, not just the number. <sup>[why](#w11)</sup> | Mandatory |  |
 
 
 ---
@@ -509,6 +511,21 @@ Twenty thousand is where quality stops being free: the Crucible and Broken Count
 
 <a id="m85"></a>
 **M85** — The designer, on [M84](#m84)'s tables: *"shouldnt worst single order be some microseconds which is ladder's straight-line -> if it works it works?"* **Two populations were tangled in one number, and only the wrong one had ever been reported.** The *worst* order is by construction never the straight-line case — it is the order where the straight line failed and the whole cascade ran. But the question underneath is right and nothing anywhere could answer it: what does an order cost when the cheap rung answers? Mean and worst cannot say, because the mean is smeared across populations three orders of magnitude apart. **Measured, by which stage counter moved, stopwatch only and the profiler off** — at this scale two timestamp reads would be a visible share of what they claim to measure:
+
+<a id="m86"></a>
+**M86** — The designer, on [M85](#m85)'s tables and the drawing of the cascade: *"do the reorder, ask the grid before tangents and then verify if we even need tangents at all"*. Both halves done, and the second answered more completely than expected. **The reorder.** `StagedRoutePlanner.Choose` asked the tangent search fourth and the regiment grid seventh; the grid now goes above the whole tangents/corners/rings block. The tangent plan has four callers — the attack path, the stage, the tube the lattice may be bounded to, and the terminal fallback — so it is now drawn through a local `Tangents()` that runs the search **at most once an order and only if something reaches it**, where before it ran eagerly whether or not any caller was live. **The verification.** From its old position the stage answered **0 of 280** bench orders while drawing the graph 83 times. Moved below the grid it is reached by only **27** of them — 9, 0, 10 and 8 on the four fields, the Long March never reaching it at all — and answers **0 of those too**. Turned off outright: **not one of the 280 routes moves**, total marching time is identical to the tenth of a second on every field, and **no order falls through to the terminal fallback**, because the lattice answers every one the grid could not. The orders that reach this stage are exactly the ones it was always going to refuse. So `AskTangentStage` ships at **off** — a lever on the stage, not a deletion of the search, which an attack order still goes straight to and which is still what stands between a regiment and no route at all. **Measured paired**, four alternating builds each, least of four, because this machine's Crucible run is bimodal between about 106 and 150 ms and an unpaired comparison of it means nothing:
+
+| field | before | after | |
+|---|---|---|---|
+| the Crucible | 141,2 ms | 116,8 ms | **-17,3%** |
+| the Long March | 24,9 ms | 19,7 ms | **-20,9%** |
+| the sideways mile | 38,0 ms | 26,9 ms | **-29,2%** |
+| Broken Country | 117,4 ms | 80,2 ms | **-31,7%** |
+
+M86 wins **every one of the sixteen paired field-runs**, and [finding 22](OPEN-FINDINGS.md)'s estimate of 13% was low because it priced only the search and not the ledger reset and clearance work hung off it. **Quality is not traded for any of it**: 280 routes byte-identical against the pre-reorder build, same routed, same refused, same five pressed through on the sideways mile, same marching seconds. **Two gates had to be repaired to stay honest.** `HalvingTheGraphChangesNoRoute` compared routes at 48 places against 24 through the shipping cascade — which after this reaches the tangent search on no field at all, and its own non-vacuity guard correctly reported that halving a cap nothing reaches proves nothing. It now turns the grid off and the stage on, so it exercises the search it names. And nothing anywhere wrote down what the *cascade* returns — the fingerprint theory runs the three planners singly, none of which is what a battle reaches — so a change to the order of its stages had no record to be checked against. `EveryShippingRouteWrittenOut` is that record, and it is what the byte-identical claim above rests on.
+
+<a id="w11"></a>
+**W11** — A measurement that compares two builds must prove it built them. The first paired run for [M86](#m86) reverted only `StagedRoutePlanner.cs` to HEAD, which no longer compiled against tests referring to the new lever; `dotnet build` was writing to `/dev/null` inside the loop, `dotnet test --no-build` then ran the assembly still sitting in `bin`, and the table showed the two builds performing identically — which is exactly what it *should* show, because they were the same build. Third instance of one defect: [M64](#m64) measured with the wrong compiler, [M82](#m82) read a stale Release DLL, this read a stale test DLL. [W9](#w9) fixed it for the Unity check by discovering every input and self-testing; the same standard applies to any measurement loop. **In a loop that rebuilds, the build's exit status is a gate and its output is evidence — never silence it**, and revert whole working trees rather than single files, because a partial revert is a different program from either side being compared.
 
 | answered by | orders | median | worst | share of all planning |
 |---|---|---|---|---|

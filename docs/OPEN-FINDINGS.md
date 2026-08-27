@@ -1152,7 +1152,7 @@ half the work: `Ledger.Reset` clears `places * places * 3` entries across five
 arrays before every search, so the cap is a quadratic tax paid whether or not
 the places exist — 6 912 slots an array at 48, 1 728 at 24.
 
-## 22. The tangent search wins nothing and is asked first
+## ~~22. The tangent search wins nothing and is asked first~~ — FIXED ([M86](DECISIONS.md#m86))
 
 Raised by the profile of 26 Aug 2026 ([M83](DECISIONS.md#m83)) while working out
 why finding 21's comparison could not fail.
@@ -1196,6 +1196,37 @@ the cascade rather than a lever, so it wants deciding rather than doing:
 tests showing the routes unchanged and the bench showing what it saved; or a field
 recorded here on which the tangent stage does win, which would say the bench is
 what is unrepresentative rather than the ordering.
+
+### Closed 27 Aug 2026 — reordered, and then the stage removed
+
+The grid was moved above the whole tangents/corners/rings block and the tangent
+plan put behind a local `Tangents()` that draws it at most once an order and only
+if a caller is reached. That much was what this entry asked for. The measurement
+that followed went further than the entry expected:
+
+| | tangent graph drawn | stage answered |
+|---|---|---|
+| asked before the grid | 83 of 280 orders | **0** |
+| asked after the grid | **27** of 280 | **0** |
+| stage off | **0** | — |
+
+The Long March stopped reaching the stage entirely. With the stage off, **not one
+of the 280 routes moves**, marching seconds are identical to the tenth on every
+field, and **no order falls through to the terminal fallback** — the lattice
+answers every order the grid could not. So the orders reaching the stage were
+exactly the ones it was always going to refuse, which is the sharper form of what
+this entry suspected.
+
+`AskTangentStage` therefore ships at **off**. The search is not deleted: an attack
+order goes straight to it, and its plan is still the terminal fallback, which has
+not fired on any bench field but is what stands between a regiment and no route at
+all.
+
+**What it saved**, paired across four alternating builds, least of four — the
+Crucible **-17,3%**, the Long March **-20,9%**, the sideways mile **-29,2%**,
+Broken Country **-31,7%**, winning all sixteen paired field-runs. The 13% estimated
+above was low because it priced the search alone and not the ledger reset and
+clearance work hung off it.
 
 ## 23. The clearance path asks the index once a leg; the hybrid asks once a node
 

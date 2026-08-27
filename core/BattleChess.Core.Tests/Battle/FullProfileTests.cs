@@ -208,7 +208,7 @@ namespace BattleChess.Tests.Battle
         /// measure.
         /// </para>
         /// </remarks>
-        [Fact(Skip = "A record of a measurement rather than a check on one. It is the one that says the straight line answers half the orders for a tenth of a per cent of the time — M85.")]
+        [Fact(Skip = "A record of a measurement rather than a check on one. It is the one that says the straight line answers half the orders for a tenth of a per cent of the time — M85, re-taken after M86.")]
         public void WhatAnOrderCostsByTheStageThatAnsweredIt()
         {
             foreach (string field in Fields)
@@ -284,6 +284,125 @@ namespace BattleChess.Tests.Battle
             if (StagedRoutePlanner.Pressed > 0) return "pressed through";
 
             return "fell through";
+        }
+
+
+        /// <summary>
+        /// Whether the tangent stage earns its place now that the grid is asked
+        /// before it, and what it costs when it does not.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two questions, and they are not the same one. <b>Is the stage
+        /// reached?</b> - after M86 the grid answers above it, so an order only
+        /// draws the tangent graph if the grid could not route it. <b>Does the
+        /// stage win anything when it is reached?</b> - from its old position
+        /// it won nothing at all on 280 bench orders, and the interesting
+        /// possibility is that the nine-odd orders which now reach it are
+        /// exactly the hard ones it was always going to refuse.
+        /// </para>
+        /// <para>
+        /// The search is <i>not</i> removed when the stage is turned off: its
+        /// plan is still the terminal fallback, so an order that falls past the
+        /// lattice and past the press still draws it. That is the honest
+        /// comparison - stage against no stage, not search against no search.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one. It is the one that says the tangent stage answers nothing from either side of the grid - M86.")]
+        public void DoWeNeedTheTangentStage()
+        {
+            bool wasStage = StagedRoutePlanner.AskTangentStage;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-15}{"stage",7}{"orders",8}{"drew",6}{"won",5}{"grid",6}" +
+                    $"{"pose",6}{"press",7}{"fell",6}{"walk s",11}{"plan ms",10}");
+
+                foreach (string field in Fields)
+                {
+                    StagedRoutePlanner.AskTangentStage = true;
+                    Dictionary<string, string> on = WithTheStage(field, "on");
+
+                    StagedRoutePlanner.AskTangentStage = false;
+                    Dictionary<string, string> off = WithTheStage(field, "off");
+
+                    var moved = new List<string>();
+
+                    foreach (KeyValuePair<string, string> pair in on)
+                        if (off[pair.Key] != pair.Value)
+                            moved.Add($"    {pair.Key}\n      on:  {pair.Value}\n      off: {off[pair.Key]}");
+
+                    _out.WriteLine(
+                        $"{string.Empty,15}{moved.Count} of {on.Count} routes move when the stage goes");
+
+                    foreach (string line in moved.Take(6)) _out.WriteLine(line);
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                StagedRoutePlanner.AskTangentStage = wasStage;
+            }
+        }
+
+        /// <summary>One field, one setting: a row of counters and every route.</summary>
+        private Dictionary<string, string> WithTheStage(string field, string label)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            // Warm, unmeasured.
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(
+                    battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            var routes = new Dictionary<string, string>();
+
+            StagedRoutePlanner.ResetCounters();
+
+            double walked = 0d;
+            long began = Stopwatch.GetTimestamp();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Plan plan = Marching.PlanTo(
+                    battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                walked += Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold);
+
+                var line = new System.Text.StringBuilder();
+                line.Append(plan.Path.Found ? "ok " : "NO ");
+                line.Append(plan.PressedThrough ? "press " : "clean ");
+
+                foreach (Vec2 at in plan.Path.Waypoints)
+                    line.Append(System.FormattableString.Invariant($"({at.X:0.00},{at.Y:0.00})"));
+
+                routes[$"u{unit.Id.Value:D3}"] = line.ToString();
+            }
+
+            double spent = (Stopwatch.GetTimestamp() - began) * 1000d / Stopwatch.Frequency;
+
+            // What fell all the way past the press to the terminal fallback: the
+            // orders for which the tangent plan is the only thing standing
+            // between a regiment and no route at all.
+            int answered =
+                StagedRoutePlanner.Staged + StagedRoutePlanner.LadderClean +
+                StagedRoutePlanner.LadderBent + StagedRoutePlanner.GridClean +
+                StagedRoutePlanner.TangentClean + StagedRoutePlanner.CornersClean +
+                StagedRoutePlanner.RingsClean + StagedRoutePlanner.PoseWon +
+                StagedRoutePlanner.Pressed;
+
+            _out.WriteLine(
+                $"{field,-15}{label,7}{routes.Count,8}{StagedRoutePlanner.TangentAsked,6}" +
+                $"{StagedRoutePlanner.TangentClean,5}{StagedRoutePlanner.GridClean,6}" +
+                $"{StagedRoutePlanner.PoseWon,6}{StagedRoutePlanner.Pressed,7}" +
+                $"{routes.Count - answered,6}{walked,11:0.0}{spent,10:0.0}");
+
+            return routes;
         }
 
         // ------------------------------------------------------------------ the work
@@ -407,6 +526,8 @@ namespace BattleChess.Tests.Battle
 
             // --- the cascade: which rungs are allowed to answer
             yield return ("no bent ladder", () => StagedRoutePlanner.AcceptBentLadder = false);
+            yield return ("ask the tangent stage",
+                () => StagedRoutePlanner.AskTangentStage = true);
             yield return ("ask corners", () => StagedRoutePlanner.AskCorners = true);
             yield return ("ask rings", () => StagedRoutePlanner.AskRings = true);
             yield return ("press before pose search",
@@ -484,6 +605,7 @@ namespace BattleChess.Tests.Battle
         private sealed class Defaults
         {
             private bool _bent, _corners, _rings, _poseFirst, _cheapCorridor, _turnAware, _lean, _dial;
+            private bool _tangentStage;
             private float _turnCell, _turnAcross;
             private int _poseBudget, _bounded, _cellBudget, _places, _headings, _shootEvery;
             private float _spacing, _corridor, _wayRound, _straight, _crab, _bin, _weight;
@@ -491,6 +613,7 @@ namespace BattleChess.Tests.Battle
             public static Defaults Capture() => new Defaults
             {
                 _bent = StagedRoutePlanner.AcceptBentLadder,
+                _tangentStage = StagedRoutePlanner.AskTangentStage,
                 _corners = StagedRoutePlanner.AskCorners,
                 _rings = StagedRoutePlanner.AskRings,
                 _poseFirst = StagedRoutePlanner.PoseSearchBeforePressing,
@@ -518,6 +641,7 @@ namespace BattleChess.Tests.Battle
             public void Restore()
             {
                 StagedRoutePlanner.AcceptBentLadder = _bent;
+                StagedRoutePlanner.AskTangentStage = _tangentStage;
                 StagedRoutePlanner.AskCorners = _corners;
                 StagedRoutePlanner.AskRings = _rings;
                 StagedRoutePlanner.PoseSearchBeforePressing = _poseFirst;

@@ -294,17 +294,54 @@ namespace BattleChess.Rules
         /// <summary>How far the lattice may stray from the cheap route guiding it.</summary>
         internal static float CheapCorridorHalfWidthMetres = 45f;
 
+        /// <summary>
+        /// Whether the tangent graph is asked as a stage of its own, between
+        /// the grid and the lattice.
+        /// </summary>
+        /// <remarks>
+        /// Separate from whether the tangent search is reachable at all: the
+        /// plan it draws is still the terminal fallback at the bottom of this
+        /// cascade, and the local <c>Tangents()</c> draws it at most once an
+        /// order however many places below want it. Turning this off removes
+        /// the stage, not the search.
+        /// </remarks>
+        /// <remarks>
+        /// <b>Off, on the measurement.</b> From above the grid the stage won
+        /// <b>0 of 280</b> bench orders. Moved below the grid it is reached by
+        /// only 27 of them - 9, 0, 10 and 8 on the four fields - and wins
+        /// <b>0 of those too</b>. Turned off: <b>not one of the 280 routes
+        /// moves</b>, total marching time is identical to the tenth of a
+        /// second on every field, and no order falls through to the terminal
+        /// fallback, because the lattice answers every one the grid could not.
+        /// That is the whole case: the orders reaching this stage are exactly
+        /// the ones it was always going to refuse.
+        /// <b>What still draws the graph.</b> An attack order, which goes
+        /// straight to it and never enters the cascade; and the terminal
+        /// fallback, which has not fired on any bench field but is what stands
+        /// between a regiment and no route at all. Neither is removed by this,
+        /// which is why it is a lever on the stage and not a deletion of the
+        /// search.
+        /// </remarks>
+        internal static bool AskTangentStage;
+
         /// <summary>Measurement counters: how many orders reach each stage.</summary>
         internal static int Staged, LadderClean, LadderBent, TangentClean, CornersClean, RingsClean,
             PoseAsked, PoseWon, PoseWidened, PoseTooDear, Pressed, GridClean, TangentTooDear,
             WayRoundTooDear, CrabTooLong;
+
+        /// <summary>
+        /// How many orders actually drew the tangent graph, as against how many
+        /// reached a stage that wanted it. The gap between those two numbers is
+        /// the whole of what M86 bought.
+        /// </summary>
+        internal static int TangentAsked;
 
         internal static void ResetCounters()
         {
             Staged = LadderClean = LadderBent = TangentClean = CornersClean = RingsClean =
                 PoseAsked = PoseWon = PoseWidened = PoseTooDear = Pressed = GridClean =
                     TangentTooDear = WayRoundTooDear = CrabTooLong =
-                    BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
+                    TangentAsked = BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
             HybridPlanning.HybridAStarPlanner.RanOutOfTime = 0;
             GridPlanning.GridRoutePlanner.ResetCounters();
@@ -340,6 +377,27 @@ namespace BattleChess.Rules
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
             IBattleLog? log, IWayRound? wayRound, Facing? arriveOn)
         {
+            // The tangent graph, drawn at most once an order however many
+            // places below want it: the attack path above, the stage below the
+            // grid, the tube the lattice may be bounded to, and the terminal
+            // fallback. Four callers for one search, and until M86 it ran
+            // eagerly whether or not any of them was reached - which on the
+            // bench meant it ran 83 times and answered nothing.
+            Plan? drawn = null;
+
+            Plan Tangents()
+            {
+                if (drawn == null)
+                {
+                    TangentAsked++;
+
+                    drawn = RouteSearch.Find(
+                        battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
+                        RouteSearch.Shape.Tangents);
+                }
+
+                return drawn.Value;
+            }
 
             // Attacks have an approach planner and a moving target.  Their
             // repeated short plans are deliberately governed by OrderSystem's
@@ -349,9 +407,7 @@ namespace BattleChess.Rules
             // their own reservation-aware approach phase.
             if (unit.Order.Kind == OrderKind.Attack)
             {
-                return RouteSearch.Find(
-                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
-                    RouteSearch.Shape.Tangents);
+                return Tangents();
             }
 
             // An egress is only useful when it is a real staging manoeuvre:
@@ -388,59 +444,6 @@ namespace BattleChess.Rules
             {
                 LadderBent++;
                 return ladder;
-            }
-
-            // The tangent graph is expensive enough to earn its use.  It is
-            // asked only after the ladder failed to provide a clean route, or
-            // explicitly chose its press-through last resort.
-            Plan tangent = RouteSearch.Find(
-                battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
-                RouteSearch.Shape.Tangents);
-
-            int badLeg = tangent.PressedThrough ? -1 : FirstBadLeg(battle, unit, tangent);
-
-            if (tangent.Path.Found && !tangent.PressedThrough && badLeg == 0)
-            {
-                TangentClean++;
-                return tangent;
-            }
-
-            if (tangent.PressedThrough) BadPressed++;
-            else if (badLeg < 0) BadNoRoute++;
-            else if (badLeg == 1) BadFirstLeg++;
-            else BadLaterLeg++;
-
-            // Tangents name only the legs that could lie on a shortest route,
-            // which is a pruning about cost and not about clearance - so a leg
-            // it declined to name can still be the one that walks.  The two
-            // richer graphs cost a fraction of a millisecond each and stand
-            // between an order and a lattice search costing tens.
-            if (AskCorners)
-            {
-                Plan corners = RouteSearch.Find(
-                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
-                    RouteSearch.Shape.Corners);
-
-                if (corners.Path.Found && !corners.PressedThrough &&
-                    WalksCleanly(battle, unit, corners))
-                {
-                    CornersClean++;
-                    return corners;
-                }
-            }
-
-            if (AskRings)
-            {
-                Plan rings = RouteSearch.Find(
-                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
-                    RouteSearch.Shape.Rings);
-
-                if (rings.Path.Found && !rings.PressedThrough &&
-                    WalksCleanly(battle, unit, rings))
-                {
-                    RingsClean++;
-                    return rings;
-                }
             }
 
             // ---- the regiment grid, M77 -------------------------------------
@@ -519,6 +522,66 @@ namespace BattleChess.Rules
                 }
             }
 
+            // ---- the tangent graph, M86 ------------------------------------
+            //
+            // Below the grid since M86, and drawn only if this line is reached.
+            // From above the grid it answered 0 of 280 bench orders while
+            // costing 731 us a call - 23,4 ms of a 128 ms field - sitting
+            // directly on top of a grid costing 219 us that answered 23 of
+            // them. Tangents name only the legs that could lie on a shortest
+            // route, which is a pruning about cost and not about clearance, so
+            // a leg it declined to name can still be the one that walks. That
+            // is why the grid, which reasons about ground rather than about
+            // shortest paths, answers what this refuses - and it is why the
+            // order between them was the wrong way round.
+            if (AskTangentStage)
+            {
+                Plan tangent = Tangents();
+
+                int badLeg = tangent.PressedThrough ? -1 : FirstBadLeg(battle, unit, tangent);
+
+                if (tangent.Path.Found && !tangent.PressedThrough && badLeg == 0)
+                {
+                    TangentClean++;
+                    return tangent;
+                }
+
+                if (tangent.PressedThrough) BadPressed++;
+                else if (badLeg < 0) BadNoRoute++;
+                else if (badLeg == 1) BadFirstLeg++;
+                else BadLaterLeg++;
+            }
+
+            // The two richer graphs cost a fraction of a millisecond each and
+            // stand between an order and a lattice search costing tens.
+            if (AskCorners)
+            {
+                Plan corners = RouteSearch.Find(
+                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
+                    RouteSearch.Shape.Corners);
+
+                if (corners.Path.Found && !corners.PressedThrough &&
+                    WalksCleanly(battle, unit, corners))
+                {
+                    CornersClean++;
+                    return corners;
+                }
+            }
+
+            if (AskRings)
+            {
+                Plan rings = RouteSearch.Find(
+                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
+                    RouteSearch.Shape.Rings);
+
+                if (rings.Path.Found && !rings.PressedThrough &&
+                    WalksCleanly(battle, unit, rings))
+                {
+                    RingsClean++;
+                    return rings;
+                }
+            }
+
             // Nothing cheap could route this cleanly, so before shouldering
             // through anybody, ask the one planner that searches poses rather
             // than points.  It is dear — tens of milliseconds — but it is asked
@@ -546,13 +609,20 @@ namespace BattleChess.Rules
                 // is the only thing it can express. That is the one defect
                 // this fixes, and the reason the tube is worth asking about
                 // again at all.
-                IReadOnlyList<Vec2>? tube =
-                    GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor && gridRoute != null && gridRoute.Count >= 2
-                        ? gridRoute
-                        : CorridorFromCheapRoute && tangent.Path.Found &&
-                          tangent.Path.Waypoints.Count >= 2
-                            ? tangent.Path.Waypoints
-                            : null;
+                IReadOnlyList<Vec2>? tube = null;
+
+                if (GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor &&
+                    gridRoute != null && gridRoute.Count >= 2)
+                {
+                    tube = gridRoute;
+                }
+                else if (CorridorFromCheapRoute)
+                {
+                    Plan cheap = Tangents();
+
+                    if (cheap.Path.Found && cheap.Path.Waypoints.Count >= 2)
+                        tube = cheap.Path.Waypoints;
+                }
 
                 // What the way round is allowed to cost, told to the search
                 // rather than applied to its answer. M65 was throwing away
@@ -650,19 +720,21 @@ namespace BattleChess.Rules
             // still handed back - a regiment with no route at all is worse than
             // one with a long one - but it is counted, so a detour of this kind
             // shows up in a recording instead of only in a screenshot.
-            if (tangent.Path.Found)
+            Plan lastResort = Tangents();
+
+            if (lastResort.Path.Found)
             {
                 if (StraightLineCostCeiling > 0f)
                 {
                     float straight = StraightSeconds(battle, unit, destination);
                     float around = Marching.SecondsToWalk(
-                        battle, unit, tangent.Path.Waypoints, tangent.Hold);
+                        battle, unit, lastResort.Path.Waypoints, lastResort.Hold);
 
                     if (straight > 1f && around > straight * StraightLineCostCeiling)
                         TangentTooDear++;
                 }
 
-                return tangent;
+                return lastResort;
             }
 
             return ladder;
