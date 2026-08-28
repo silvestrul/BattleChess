@@ -617,16 +617,22 @@ namespace BattleChess.Rules
             // is either a route it proved or a press-through it declared. M98:
             // a declared press is a legitimate answer. What is never returned
             // here is something nobody checked.
-            if (Marching.OutOfTime() && ladder.Path.Found)
+            if (Marching.StopNow() && ladder.Path.Found)
             {
                 OutOfTimeAtTheGrid++;
 
-                log?.Info("Path",
-                    $"{unit.Def.DisplayName} ran out of its search budget " +
-                    $"({Marching.SearchBudgetMs:0} ms) after the grid — taking the ladder's " +
-                    $"{(ladder.PressedThrough ? "press-through" : "route")} rather than asking " +
-                    "the finer grids, the tangents and the pose search.",
-                    unit.Id);
+                // Said only when the answer is still wanted. A superseded order
+                // is thrown away on arrival, so a line explaining what it
+                // settled for would be a line about a route nobody walks - and
+                // M80's whole point is that the click which superseded it is
+                // the event worth reading about.
+                if (Marching.OutOfTime())
+                    log?.Info("Path",
+                        $"{unit.Def.DisplayName} ran out of its search budget " +
+                        $"({Marching.SearchBudgetMs:0} ms) after the grid — taking the ladder's " +
+                        $"{(ladder.PressedThrough ? "press-through" : "route")} rather than asking " +
+                        "the finer grids, the tangents and the pose search.",
+                        unit.Id);
 
                 return ladder;
             }

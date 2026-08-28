@@ -590,7 +590,7 @@ namespace BattleChess.Rules.GridPlanning
                 // Falls out of the loop and reports no route, which is exactly
                 // what an exhausted open set does - so the cascade goes on to
                 // the stage it would have gone on to anyway.
-                if ((explored & 63) == 0 && Marching.OutOfTime()) break;
+                if ((explored & 63) == 0 && Marching.StopNow()) break;
 
                 if (current == goal)
                 {

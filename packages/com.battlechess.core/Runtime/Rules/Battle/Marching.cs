@@ -335,6 +335,34 @@ namespace BattleChess.Rules
             _deadline != 0L && System.Diagnostics.Stopwatch.GetTimestamp() > _deadline;
 
         /// <summary>
+        /// Whether this plan should stop searching, for either reason.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The two reasons are different and the distinction matters to the
+        /// caller: out of time means the answer is still wanted and something
+        /// has to be handed back, while given up on means nobody is waiting for
+        /// it at all. Both stop the search at the same places, so they are
+        /// asked together here and told apart where it matters.
+        /// </para>
+        /// <para>
+        /// <b>This is the poll <see cref="GiveUpNow"/> always claimed to have.</b>
+        /// The hook was set by the host on every plan and read by nothing in
+        /// the default cascade - a gate measured at 0 invocations over 80
+        /// orders - so a superseded search ran to completion and the click that
+        /// superseded it blocked on it.
+        /// </para>
+        /// </remarks>
+        internal static bool StopNow()
+        {
+            if (OutOfTime()) return true;
+
+            Func<bool>? asked = GiveUpNow;
+
+            return asked != null && asked();
+        }
+
+        /// <summary>
         /// How finely the ground under a straight line is checked, in metres.
         /// </summary>
         /// <remarks>
