@@ -156,6 +156,39 @@ namespace BattleChess.Contracts
             /// <summary>A* over that field, and the string-pull after it.</summary>
             GridSearch,
 
+            /// <summary>
+            /// Rung one on its own: is the straight line clear.
+            /// </summary>
+            /// <remarks>
+            /// Split out of <see cref="Ladder"/> because the two rungs answer
+            /// different questions at wildly different prices - one swept
+            /// rectangle against a whole way-round search - and a single line
+            /// covering both says which cascade stage was entered without ever
+            /// saying which of them cost anything.
+            /// </remarks>
+            Rung1,
+
+            /// <summary>
+            /// The regiment grid at its ordinary spacing, inclusive.
+            /// </summary>
+            /// <remarks>
+            /// A wrapper around the call site rather than a new measurement:
+            /// <see cref="GridField"/> and <see cref="GridSearch"/> are what it
+            /// contains, and they are shared with the tier below, so without
+            /// this and <see cref="GridFine"/> there is no way to tell a coarse
+            /// grid answering cheaply from a fine one answering dearly.
+            /// </remarks>
+            GridCoarse,
+
+            /// <summary>The finer tiers, M87, inclusive of every spacing tried.</summary>
+            GridFine,
+
+            /// <summary>Drawing the tangent visibility graph, M86.</summary>
+            TangentGraph,
+
+            /// <summary>The lattice over poses, asked before anybody is pressed through.</summary>
+            PoseSearch,
+
             /// <summary>The whole hybrid lattice search — the top of its own tree.</summary>
             HybridSearch,
 

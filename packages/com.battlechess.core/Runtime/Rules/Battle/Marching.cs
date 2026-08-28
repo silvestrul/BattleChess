@@ -472,7 +472,12 @@ namespace BattleChess.Rules
             // it is about to walk, not the one it is standing in (M24).
             Facing alongIt = AlongTheLine(unit.Position, destination, unit.Facing);
 
-            if (IsClearLine(battle, unit, unit.Position, destination, alongIt))
+            bool straightThere;
+
+            using (PlanningProfile.Measure(PlanningProfile.Step.Rung1))
+                straightThere = IsClearLine(battle, unit, unit.Position, destination, alongIt);
+
+            if (straightThere)
             {
                 var line = new[] { unit.Position, destination };
 

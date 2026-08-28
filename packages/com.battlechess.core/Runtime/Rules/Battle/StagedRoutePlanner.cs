@@ -518,6 +518,8 @@ namespace BattleChess.Rules
             {
                 if (drawn == null)
                 {
+                    using var _tangents = PlanningProfile.Measure(PlanningProfile.Step.TangentGraph);
+
                     TangentAsked++;
 
                     drawn = RouteSearch.Find(
@@ -587,6 +589,8 @@ namespace BattleChess.Rules
 
             if (GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Off)
             {
+                using var _coarse = PlanningProfile.Measure(PlanningProfile.Step.GridCoarse);
+
                 GridPlanning.GridRoutePlanner.Asked++;
                 gridRoute = GridPlanning.GridRoutePlanner.RouteFor(battle, unit, destination);
 
@@ -653,6 +657,8 @@ namespace BattleChess.Rules
                 // two fields want different tiers - the sideways mile is
                 // answered at a half and the Crucible needs a quarter - which is
                 // the argument for a ladder here rather than one number.
+                using var _fine = PlanningProfile.Measure(PlanningProfile.Step.GridFine);
+
                 foreach (float finer in FineSpacings)
                 {
                     if (finer <= 0f) continue;
@@ -817,6 +823,8 @@ namespace BattleChess.Rules
             // prefer walking through your own men.
             if (PoseSearchBeforePressing && GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Replace)
             {
+                using var _pose = PlanningProfile.Measure(PlanningProfile.Step.PoseSearch);
+
                 PoseAsked++;
 
                 // The tangent route is already computed and already known to be
