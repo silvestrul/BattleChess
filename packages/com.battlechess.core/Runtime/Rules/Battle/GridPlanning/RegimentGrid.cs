@@ -152,6 +152,16 @@ namespace BattleChess.Rules.GridPlanning
         /// <summary>Whether a field once built is kept and shared between orders.</summary>
         public static bool Reuse = true;
 
+        /// <summary>
+        /// Whether the call in flight is a finer tier than the ordinary one.
+        /// </summary>
+        /// <remarks>
+        /// Measurement only, and per-thread because a wing is planned across
+        /// several. It picks which line the field and the search book
+        /// themselves to; nothing about the answer depends on it.
+        /// </remarks>
+        [ThreadStatic] internal static bool OnTheFineTier;
+
         /// <summary>Cells one search may settle before it gives up.</summary>
         internal static int CellBudget = 40_000;
 
@@ -286,7 +296,8 @@ namespace BattleChess.Rules.GridPlanning
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (mover == null) throw new ArgumentNullException(nameof(mover));
 
-            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GridField);
+            using var _profile = PlanningProfile.Measure(
+                OnTheFineTier ? PlanningProfile.Step.GridFieldFine : PlanningProfile.Step.GridField);
 
             Footprint print = mover.Shape.Footprint;
             float fraction = Math.Clamp(ClearanceFraction, 0f, 1f);
@@ -342,7 +353,10 @@ namespace BattleChess.Rules.GridPlanning
             BattleState battle, UnitInstance mover, float spacing, int samples, float reach,
             OrientedRect? moving)
         {
-            long stamp = StampOf(battle);
+            long stamp;
+
+            using (PlanningProfile.Measure(PlanningProfile.Step.FieldStamp))
+                stamp = StampOf(battle);
 
             _fields ??= new Dictionary<long, SharedField>();
 
@@ -381,10 +395,13 @@ namespace BattleChess.Rules.GridPlanning
 
             // Everybody, including the mover. Whoever asks takes themselves off
             // again, which is what lets one field answer for all of them.
-            foreach (UnitInstance body in battle.UnitsOnField())
+            using (PlanningProfile.Measure(PlanningProfile.Step.FieldMark))
             {
-                (float across, float along) = ReachOn(body.Shape, reach, moving);
-                field.Mark(body.Shape, across, along, +1);
+                foreach (UnitInstance body in battle.UnitsOnField())
+                {
+                    (float across, float along) = ReachOn(body.Shape, reach, moving);
+                    field.Mark(body.Shape, across, along, +1);
+                }
             }
 
             _fields[key] = field;
@@ -554,7 +571,8 @@ namespace BattleChess.Rules.GridPlanning
         /// </remarks>
         public bool TryRoute(Vec2 from, Vec2 to, out List<Vec2> waypoints)
         {
-            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GridSearch);
+            using var _profile = PlanningProfile.Measure(
+                OnTheFineTier ? PlanningProfile.Step.GridSearchFine : PlanningProfile.Step.GridSearch);
 
             waypoints = null!;
             LastCellsExplored = 0;
@@ -581,6 +599,8 @@ namespace BattleChess.Rules.GridPlanning
             int explored = 0;
             Span<Coord> neighbours = stackalloc Coord[HexMath.DirectionCount];
 
+            using var _expanding = PlanningProfile.Measure(PlanningProfile.Step.GridExpand);
+
             while (open.TryPop(out Coord current))
             {
                 if (!settled.Add(current)) continue;
@@ -595,7 +615,8 @@ namespace BattleChess.Rules.GridPlanning
                 if (current == goal)
                 {
                     LastCellsExplored = explored;
-                    waypoints = Reconstruct(cameFrom, start, goal, from, to);
+                    using (PlanningProfile.Measure(PlanningProfile.Step.GridPull))
+                        waypoints = Reconstruct(cameFrom, start, goal, from, to);
                     LastRawWaypoints = waypoints.Count;
                     return true;
                 }

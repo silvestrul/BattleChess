@@ -189,6 +189,43 @@ namespace BattleChess.Contracts
             /// <summary>The lattice over poses, asked before anybody is pressed through.</summary>
             PoseSearch,
 
+            /// <summary>Raising the field at a finer spacing than the ordinary one.</summary>
+            /// <remarks>
+            /// Separate from <see cref="GridField"/> rather than added to it,
+            /// because the two tiers differ by sixteen times the cells and
+            /// averaging them together answers neither question. The coarse
+            /// tier runs on every order that gets past the ladder; the fine one
+            /// runs on a handful and is the tail.
+            /// </remarks>
+            GridFieldFine,
+
+            /// <summary>A* over a finer field.</summary>
+            GridSearchFine,
+
+            /// <summary>
+            /// Hashing every regiment's place and front, to know whether a kept
+            /// field is stale.
+            /// </summary>
+            /// <remarks>
+            /// Its own line because it is paid on every call whether or not a
+            /// field is built, so it is the floor under the grid rather than
+            /// part of its cost - and because "a hash over eighty units costs
+            /// microseconds" is a claim in the code that nothing measured.
+            /// </remarks>
+            FieldStamp,
+
+            /// <summary>Marking which cells the bodies hold. The sampling itself.</summary>
+            FieldMark,
+
+            /// <summary>The A* loop over cells, without the string-pull after it.</summary>
+            GridExpand,
+
+            /// <summary>Turning settled cells back into a line, and pulling it straight.</summary>
+            GridPull,
+
+            /// <summary>Threading a regiment through a gap side-on, M27.</summary>
+            ThreadGap,
+
             /// <summary>The whole hybrid lattice search — the top of its own tree.</summary>
             HybridSearch,
 

@@ -137,11 +137,28 @@ namespace BattleChess.Rules.GridPlanning
             // The line it is about to walk, which is what M24 says every
             // question about clearance should be asked of. Ignored entirely
             // unless the halo is a rectangle.
-            RegimentGrid grid = RegimentGrid.For(
-                battle, unit, Marching.AlongTheLine(unit.Position, destination, unit.Facing),
-                spacingMultiple);
+            // Which tier this call is, so the field and the search below can
+            // book themselves to the right line. Restored rather than cleared,
+            // because the fine tier reaches this through the coarse one's own
+            // call site and a flat reset would mislabel the outer call.
+            bool wasFine = RegimentGrid.OnTheFineTier;
+            RegimentGrid.OnTheFineTier = spacingMultiple.HasValue;
 
-            if (!grid.TryRoute(unit.Position, destination, out List<Vec2> points)) return null;
+            RegimentGrid grid;
+            List<Vec2> points;
+
+            try
+            {
+                grid = RegimentGrid.For(
+                    battle, unit, Marching.AlongTheLine(unit.Position, destination, unit.Facing),
+                    spacingMultiple);
+
+                if (!grid.TryRoute(unit.Position, destination, out points)) return null;
+            }
+            finally
+            {
+                RegimentGrid.OnTheFineTier = wasFine;
+            }
 
             if (DropUnstandableNodes) DropNodesTheBodyDoesNotFit(battle, unit, points);
 

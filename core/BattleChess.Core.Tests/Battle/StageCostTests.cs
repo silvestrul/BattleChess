@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using BattleChess.Contracts;
 using BattleChess.Rules;
+using BattleChess.Rules.GridPlanning;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -48,7 +49,7 @@ namespace BattleChess.Tests.Battle
 
         /// <summary>The cascade, stage by stage, and then its worst order alone.</summary>
         [Fact(Skip = "A record of a measurement rather than a check on one - it orders every " +
-                     "bench field five times over and profiles two of those passes.")]
+                     "bench field ten times over and profiles four of those passes.")]
         public void WhereEveryStageGoes()
         {
             float was = Marching.SearchBudgetMs;
@@ -58,11 +59,34 @@ namespace BattleChess.Tests.Battle
 
             try
             {
-                foreach (string field in Fields) Diagnose(field);
+                // Both, because the difference between them is the finding.
+                //
+                // A kept field is found again only while nothing has moved, and
+                // on a bench nothing ever does: the same arrangement is loaded
+                // for every pass, so the stamp never changes, every call after
+                // the first is a cache hit and FieldMark is never entered at
+                // all. Read on its own that table says raising the field costs
+                // 120 us, which is the price of *not* raising it.
+                //
+                // A played battle moves regiments every tick, so the stamp
+                // changes and the field is built again. Reuse off is that, and
+                // there FieldMark is the largest single step on the board.
+                foreach (bool reuse in new[] { true, false })
+                {
+                    RegimentGrid.Reuse = reuse;
+
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(reuse
+                        ? "######## fields kept between orders — a bench, where nothing moves ########"
+                        : "######## fields rebuilt every order — a battle, where everything does ########");
+
+                    foreach (string field in Fields) Diagnose(field);
+                }
             }
             finally
             {
                 Marching.SearchBudgetMs = was;
+                RegimentGrid.Reuse = true;
             }
         }
 

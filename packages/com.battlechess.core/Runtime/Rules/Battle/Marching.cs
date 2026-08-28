@@ -1030,6 +1030,8 @@ namespace BattleChess.Rules
         private static IReadOnlyList<Vec2>? ThreadAGap(
             BattleState battle, UnitInstance unit, Vec2 destination, out Facing?[]? hold)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.ThreadGap);
+
             hold = null;
 
             Vec2 travel = destination - unit.Position;
