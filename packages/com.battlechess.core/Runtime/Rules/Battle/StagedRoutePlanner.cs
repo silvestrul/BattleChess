@@ -138,8 +138,31 @@ namespace BattleChess.Rules
         /// for every ordinary order; above it the press is taken and declared,
         /// which is what a press being <i>visible</i> was always for.
         /// </para>
+        /// <para>
+        /// <b>Three and a tenth, and it is the knee - [M88a].</b> The designer
+        /// set three and rejected two and a half as too little; measured over
+        /// both order patterns on all four fields, they are right on both
+        /// counts and the tenth is not decoration. Sweeping 2 to 4 with every
+        /// wing sent to one block, <b>3,1 is the smallest ceiling at which no
+        /// way round anywhere is refused as too dear</b> - at 3,0 the Crucible
+        /// still refuses one - and it takes the Crucible from 16 presses to 15
+        /// and Broken Country from 10 to 8. Above it nothing further is bought:
+        /// 3,5 is identical, and 4,0 buys two more routes at the price of a
+        /// worst detour of 3,9x. At 2,5 the two fields press 18 and 13 times
+        /// with two and three way rounds refused outright, which is the
+        /// designer's objection in numbers.
+        /// </para>
         /// </remarks>
-        internal static float WayRoundCostCeiling = 3f;
+        internal static float WayRoundCostCeiling = ShippedWayRoundCostCeiling;
+
+        /// <summary>The value <see cref="WayRoundCostCeiling"/> ships at.</summary>
+        /// <remarks>
+        /// Named because four separate places restore the lever by writing the
+        /// number out again, and a default that lives in five places drifts the
+        /// first time it moves. It moved - [M88a] - and all four of the others
+        /// were still on the old value.
+        /// </remarks>
+        internal const float ShippedWayRoundCostCeiling = 3.1f;
 
         /// <summary>
         /// What a way round may cost against simply walking there on an empty

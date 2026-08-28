@@ -36,7 +36,7 @@ namespace BattleChess.Tests.Battle
         // The levers are global statics and xUnit runs classes side by side.
         public void Dispose()
         {
-            StagedRoutePlanner.WayRoundCostCeiling = 3f;
+            StagedRoutePlanner.WayRoundCostCeiling = StagedRoutePlanner.ShippedWayRoundCostCeiling;
             StagedRoutePlanner.PoseExpansionBudget = 20000;
         }
 
@@ -70,6 +70,45 @@ namespace BattleChess.Tests.Battle
             }
         }
 
+        /// <summary>
+        /// The ceiling either side of three, which is where the designer put
+        /// it and where they have now moved it.
+        /// </summary>
+        /// <remarks>
+        /// <b>M88a.</b> The question is narrow: the designer has said a press
+        /// is a legitimate answer and set the ceiling at <b>3,1</b>, having
+        /// rejected 2,5 as too little. This is what each of those buys. Both
+        /// order patterns, because the whole point of the ceiling is the
+        /// crowded one.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is what M88a "  +
+                     "was decided against, and it drives global levers while it runs.")]
+        public void WhereTheCeilingSitsAroundThree()
+        {
+            foreach (bool oneClick in new[] { true, false })
+            foreach (string field in new[] { "crucible", "longmarch", "brokencountry", "sidewaysmile" })
+            {
+                _out.WriteLine(
+                    $"=== {field} — {(oneClick ? "one click" : "scattered")} ===");
+                _out.WriteLine(
+                    "ceiling   ms/order   routed  unwalk  press  too dear   route s   worst detour");
+                _out.WriteLine(new string('-', 82));
+
+                foreach (float ceiling in new[] { 2f, 2.5f, 3f, 3.1f, 3.5f, 4f })
+                {
+                    StagedRoutePlanner.WayRoundCostCeiling = ceiling;
+                    Report r = Measure(field, oneClick);
+
+                    _out.WriteLine(
+                        $"{ceiling,-9:0.00} {r.MsPerOrder,8:0.00} " +
+                        $"{r.Routed,7}/{r.Orders} {r.Unwalkable,5} {r.Pressed,6} {r.TooDear,9} " +
+                        $"{r.Seconds,9:0.0} {r.WorstDetour,13:0.0}x");
+                }
+
+                _out.WriteLine(string.Empty);
+            }
+        }
+
         [Fact(Skip = "The record of a measurement rather than a check on one — minutes, and a sweep.")]
         public void WhatTheLatticeMaySpend()
         {
@@ -84,7 +123,7 @@ namespace BattleChess.Tests.Battle
 
                 foreach (int cap in new[] { 0, 40000, 20000, 10000, 5000, 2000 })
                 {
-                    StagedRoutePlanner.WayRoundCostCeiling = 3f;
+                    StagedRoutePlanner.WayRoundCostCeiling = StagedRoutePlanner.ShippedWayRoundCostCeiling;
                     StagedRoutePlanner.PoseExpansionBudget = cap;
                     Report r = Measure(field, oneClick);
 

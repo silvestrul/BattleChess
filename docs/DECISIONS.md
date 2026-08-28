@@ -142,6 +142,8 @@ rule is right but the number, threshold or exact form is the designer's to move.
 | M95 | The index's halo stays at 128 m: buckets cost more than the bodies the slack lets in. <sup>[why](#m95)</sup> | Mandatory | ✅ measured, unchanged |
 | M96 | A pose builds the box it turns out to need, not both of them. <sup>[why](#m96)</sup> | Mandatory | ✅ shipped |
 | M97 | `DetourRoomFraction` stays at 0,5. The field it sizes is built on one bench field of four. <sup>[why](#m97)</sup> | Mandatory | ✅ measured, unchanged |
+| M88a | The way-round ceiling is **3,1x** a press. <sup>[why](#m88a)</sup> | Designer | ✅ shipped |
+| M98 | A press-through is a legitimate answer. What is a defect is walking through somebody **undeclared**. <sup>[why](#m98)</sup> | Designer | ✅ shipped — the approach-angle gate is green |
 
 ## Combat
 
@@ -723,6 +725,37 @@ Extending the licence to contact does **not** wave the leg through: `EscapesWith
 **The lattice is not reached at all on three fields of four**, so the number governs a field that is never built; where it is built it is **under a millisecond**, and no route moves at any setting. There is nothing to win.
 
 **And a reason not to lower it anyway.** The fraction is the margin around the straight line the field is drawn over, so a smaller one is a narrower box — which cannot make a route worse but can make it *absent*, on an arrangement wanting a wide detour. `moved 0` says these four fields do not want one; it does not say none does. Trading a route that exists for a tenth of a millisecond on one field is the wrong side of [W10](#w10). Left at 0,5, and the entry is closed rather than carried.
+
+<a id="m88a"></a>
+**M88a** — The designer, asked what a press is worth now that it is priced rather than refused: *"i dont know the limit for press through but i think it should be around 3.1x, 2.5x is too little"*. Both halves check out, and the tenth is not decoration.
+
+Swept 2,0 to 4,0 on all four fields, both order patterns, with `WhereTheCeilingSitsAroundThree`. The crowded pattern — a whole wing sent to one block, which is what the ceiling exists for — is where it shows:
+
+| ceiling | Crucible presses | Broken Country presses | refused as *too dear* | worst detour |
+|---|---|---|---|---|
+| 2,0 | 21 | 16 | 2 and 3 | 2,0x |
+| 2,5 | 18 | 13 | 2 and 3 | 2,4x |
+| 3,0 | 16 | 10 | **1** and 0 | 3,0x |
+| **3,1** | **15** | **8** | **0 and 0** | **3,1x** |
+| 3,5 | 15 | 8 | 0 and 0 | 3,2x |
+| 4,0 | 13 | 7 | 1 and 0 | 3,9x |
+
+**3,1 is the knee, and that is a stronger reason than the round number was.** It is the smallest ceiling in the sweep at which *no way round anywhere is refused as too dear* — at 3,0 the Crucible still refuses one — and it converts one more press to a route there and two on Broken Country. Above it nothing further is bought: 3,5 is identical row for row, and 4,0 buys two more routes at the price of a worst detour of 3,9x, which is most of the way back to the five-fold march [M88](#m88) exists to stop. The designer's rejection of 2,5 is the same table read downwards: it presses 18 and 13 times with two and three way rounds refused outright.
+
+**The scattered pattern does not move at all** between 2,5 and 4,0 on any field, which is the right shape for this lever — it should be invisible until regiments are in each other's way.
+
+**And the default is named now.** `ShippedWayRoundCostCeiling`, because four separate test sites restored the lever by writing `3f` out again and all four were still on the old value after this change. A default that lives in five places drifts the first time it moves, and this one did.
+
+<a id="m98"></a>
+**M98** — The designer, closing the last question in [finding 24](OPEN-FINDINGS.md): *"a press is a legitimate answer"*.
+
+`ApproachAngleTests.EveryApproachAngleFindsAWayThroughTheGap` was written when a press was an unpriced escape hatch, and it counted one as a failure alongside a route that walked through two regiments unflagged. **Those are not the same thing.** The measurement that raised the whole *(place, front)* redesign found twelve of nineteen angles *"returning a straight line through two regiments, unflagged, so nothing charges it and no rule agreed to it"* — the fault named there is the **undeclared** one. Since [M88](#m88) a press is an answer with a price, taken only when every way round costs more than the ceiling and declared when taken.
+
+**So the gate now asks what it always meant to ask**: no angle may walk through one of its own without saying so, and none may fail to answer at all. It is **green at 13 clear and 6 pressed**.
+
+**It has teeth, and this is the part that matters.** Left there it would pass if the planner pressed all nineteen — a worse planner and a green test, which is exactly the failure mode this repository keeps finding in its own checks. So there are two more assertions: fewer than nineteen presses, and **every press re-asked with the ceiling lifted entirely**. A press stands only where the uncapped pass finds no clean way round *at any price*, or one dearer than the ceiling allows. All six stand on the first of those.
+
+**What this closes.** [Finding 24](OPEN-FINDINGS.md), entirely — four causes, three fixed in code and the fourth measured to be inert, and the six that remained were never a fault at all. It is the oldest open defect in the file.
 
 **And it is off, because the licence itself loosens the gate.** The gate stayed at **13 of 19** either way. Bisected properly — the three levers moved **at runtime**, in one process, rather than by rebuilding between cases, which is how [finding 27](OPEN-FINDINGS.md) came to be got wrong the first time:
 

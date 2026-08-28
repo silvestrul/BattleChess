@@ -1321,7 +1321,7 @@ argued on measured corridor sizes rather than on either the reuse ratio or the
 break-even — both of which this entry has now had to withdraw. `BodyScan` is
 still the heaviest step in the planner; nothing found so far makes it cheaper.
 
-## 24. Six approach angles, four causes, and the fourth turned out not to be one
+## 24. Six approach angles, four causes, and a fifth that was the test — CLOSED
 
 Raised by the designer: *"do 08"* — the oldest open defect, and the gate the whole
 *(place, front)* redesign was written for.
@@ -1452,13 +1452,35 @@ fourth built, corrected and measured to be inert. **The six remaining failures a
 now explained rather than open**: they are presses, and the gate counts a press as
 a failure.
 
-**Which is the question left, and it is a rule, not a defect.** Is `pressed
+**Which was the question left, and it is a rule, not a defect.** Is `pressed
 through` a failure? The gate was written when a press was an unpriced escape
 hatch; since [M88](DECISIONS.md#m88) it is an answer with a price, chosen over a
-way round costing more than three times as much. If a press is a legitimate answer
-then this test should say so and the count is 19 of 19 with six of them pressing;
-if it is not, then [M88](DECISIONS.md#m88)'s ceiling is what wants revisiting, not
-the arrival. **Nothing else in this entry moves until that is decided.**
+way round costing more than three times as much.
+
+### Closed 28 Aug 2026 — the designer's answer, and the entry with it
+
+*"a press is a legitimate answer"*, and the ceiling moves to **3,1x**
+([M88a](DECISIONS.md#m88a), [M98](DECISIONS.md#m98)).
+
+So the gate now asks what it always meant to ask — no angle may walk through one
+of its own **without saying so** — and it is **green at 13 clear and 6 pressed**,
+with two further assertions keeping it honest: fewer than nineteen presses, and
+every press re-asked with the ceiling lifted entirely. All six stand because
+there is no clean way round at any price.
+
+**Four causes, and this is what each turned out to be.**
+
+| | |
+|---|---|
+| route reconstruction dropped the end cells | real, fixed — [M90](DECISIONS.md#m90)a, and free-to-faster |
+| held cells refused rather than priced | real, fixed — [M90](DECISIONS.md#m90)b, and it was worse the finer the cells |
+| no leaving licence on contact | real, fixed — [M92](DECISIONS.md#m92) |
+| no arriving licence | built, corrected, **measured to be inert** — [M94a](DECISIONS.md#m94a), [M94b](DECISIONS.md#m94b) |
+| the six that remained | **never a fault** — the gate was counting a priced answer as a defect |
+
+**The oldest open defect in this file, and a third of it was the test.** Worth
+keeping for that: three real causes were found underneath a question that had one
+wrong premise in it, and the premise was only visible once the three were gone.
 
 **What would close this entry.** The arriving licence with a tolerance that
 matches `Marching.IsClearLine` rather than `AllowedContactFraction`, so it forgives

@@ -29,7 +29,7 @@ namespace BattleChess.Tests.Battle
         public void Dispose()
         {
             RouteSmoothing.SmoothTheRoute = true;
-            StagedRoutePlanner.WayRoundCostCeiling = 3f;
+            StagedRoutePlanner.WayRoundCostCeiling = StagedRoutePlanner.ShippedWayRoundCostCeiling;
             StagedRoutePlanner.PoseExpansionBudget = 20000;
         }
 
@@ -66,7 +66,7 @@ namespace BattleChess.Tests.Battle
                 foreach (int cap in new[] { 20000 })
                 {
                     RouteSmoothing.SmoothTheRoute = true;
-                    StagedRoutePlanner.WayRoundCostCeiling = 3f;
+                    StagedRoutePlanner.WayRoundCostCeiling = StagedRoutePlanner.ShippedWayRoundCostCeiling;
                     StagedRoutePlanner.PoseExpansionBudget = cap;
 
                     BattleState battle = Load();

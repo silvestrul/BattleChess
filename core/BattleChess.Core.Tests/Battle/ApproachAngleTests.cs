@@ -116,28 +116,143 @@ namespace BattleChess.Tests.Battle
             return true;
         }
 
+        /// <summary>
+        /// No approach angle may walk through one of its own without saying so.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>What this asks, and what it stopped asking - M98.</b> It was
+        /// written when a press-through was an unpriced escape hatch, so it
+        /// counted one as a failure alongside a route that walked through two
+        /// regiments unflagged. Those are not the same thing, and the designer
+        /// has settled which: <i>a press is a legitimate answer</i>. Since M88
+        /// it is an answer with a price, taken only when every way round costs
+        /// more than <c>WayRoundCostCeiling</c> times as much, and declared
+        /// when it is taken.
+        /// </para>
+        /// <para>
+        /// So the defect this guards is <b>the undeclared one</b>, which is
+        /// what the original measurement actually found: twelve of nineteen
+        /// angles returning a straight line through two regiments with nothing
+        /// charging it and no rule agreeing to it.
+        /// </para>
+        /// <para>
+        /// <b>And it has teeth, because a press has to be earned.</b> Left at
+        /// "no angle may walk through anybody unflagged" this would pass if the
+        /// planner pressed all nineteen - a worse planner and a green test. So
+        /// every press is re-asked with the ceiling lifted entirely, and it
+        /// stands only if there was no clean way round <i>at any price</i>, or
+        /// the one there was cost more than the ceiling allows.
+        /// </para>
+        /// </remarks>
         [Fact]
         public void EveryApproachAngleFindsAWayThroughTheGap()
         {
             var failures = new Dictionary<IRoutePlanner, List<string>>();
+            var pressedBy = new Dictionary<IRoutePlanner, List<int>>();
 
             // Every planner is swept before any is judged, so one planner's
             // failure does not stop the others being measured.
             foreach (IRoutePlanner planner in RoutePlanners.All)
             {
                 _out.WriteLine($"--- {planner.Name} ---");
-                failures[planner] = Sweep(planner);
+                failures[planner] = Sweep(planner, out List<int> pressed);
+                pressedBy[planner] = pressed;
             }
 
             // The gate guards whatever a march actually uses, so switching the
             // default cannot quietly switch off the test that made it credible.
             List<string> failed = failures[RoutePlanners.Default];
+            List<int> presses = pressedBy[RoutePlanners.Default];
 
             Assert.True(failed.Count == 0,
-                $"{failed.Count} of 19 approach angles cannot cross a 30 m gap with a regiment 20 m " +
-                $"across side-on: {string.Join(", ", failed)}. The gap admits it at every angle, so " +
-                "any angle that fails is the planner measuring against the line of march rather than " +
-                "against the bodies.");
+                $"{failed.Count} of 19 approach angles cross a 30 m gap by walking through one of " +
+                $"their own, or not at all: {string.Join(", ", failed)}. The gap admits a regiment " +
+                "20 m across side-on at every angle, so an angle that walks through somebody " +
+                "unflagged is the planner measuring against the line of march rather than against " +
+                "the bodies. A declared press-through is not a failure here - see the remarks - but " +
+                "it does have to be earned, which is the assertion below.");
+
+            // Non-vacuity, and it is what keeps the assertion above from being
+            // satisfiable by a planner that presses everything.
+            Assert.True(presses.Count < 19,
+                "every one of the nineteen angles pressed through, so nothing above measured a " +
+                "route at all");
+
+            List<string> unearned = PressesThatHadACheaperWayRound(presses);
+
+            Assert.True(unearned.Count == 0,
+                $"{unearned.Count} of {presses.Count} press-throughs had a clean way round inside " +
+                $"the {StagedRoutePlanner.ShippedWayRoundCostCeiling:0.0}x ceiling and pressed " +
+                $"anyway: {string.Join(", ", unearned)}.");
+        }
+
+        /// <summary>
+        /// Of the angles that pressed, the ones that need not have.
+        /// </summary>
+        /// <remarks>
+        /// Asked by lifting the ceiling and planning again. A press stands if
+        /// the uncapped pass presses too, or finds nothing, or finds something
+        /// that does not walk cleanly - all of which mean there was no clean
+        /// way round to prefer. It does not stand if the uncapped pass finds a
+        /// clean route the shipping ceiling would have afforded.
+        /// </remarks>
+        private List<string> PressesThatHadACheaperWayRound(IReadOnlyList<int> pressed)
+        {
+            var unearned = new List<string>();
+
+            float was = StagedRoutePlanner.WayRoundCostCeiling;
+
+            try
+            {
+                foreach (int degrees in pressed)
+                {
+                    StagedRoutePlanner.WayRoundCostCeiling = was;
+
+                    Battlefield capped = TheGapAt(degrees, out UnitInstance mover, out Vec2 to);
+
+                    Plan press = Marching.PlanTo(
+                        capped.State, mover, capped.Pathfinder, to, planner: RoutePlanners.Default);
+
+                    float pressSeconds = Marching.SecondsToWalk(
+                        capped.State, mover, press.Path.Waypoints, press.Hold);
+
+                    StagedRoutePlanner.WayRoundCostCeiling = 0f;
+
+                    Battlefield free = TheGapAt(degrees, out UnitInstance other, out Vec2 same);
+
+                    Plan round = Marching.PlanTo(
+                        free.State, other, free.Pathfinder, same, planner: RoutePlanners.Default);
+
+                    bool clean = round.Found && !round.PressedThrough &&
+                                 EveryLegIsClear(free, other, round.Path.Waypoints, round.Hold);
+
+                    if (!clean)
+                    {
+                        _out.WriteLine($"  {degrees,3}°  pressed, and no clean way round at any price");
+                        continue;
+                    }
+
+                    float roundSeconds = Marching.SecondsToWalk(
+                        free.State, other, round.Path.Waypoints, round.Hold);
+
+                    float multiple = pressSeconds > 1f ? roundSeconds / pressSeconds : float.MaxValue;
+
+                    _out.WriteLine(
+                        System.FormattableString.Invariant($"  {degrees,3}°  pressed at {pressSeconds:0} s; ") +
+                        System.FormattableString.Invariant(
+                            $"the way round costs {roundSeconds:0} s, {multiple:0.00}x"));
+
+                    if (multiple <= was)
+                        unearned.Add(System.FormattableString.Invariant($"{degrees}° ({multiple:0.00}x)"));
+                }
+            }
+            finally
+            {
+                StagedRoutePlanner.WayRoundCostCeiling = was;
+            }
+
+            return unearned;
         }
 
 
@@ -215,8 +330,8 @@ namespace BattleChess.Tests.Battle
 
                 for (int degrees = 0; degrees <= 90; degrees += 5)
                 {
-                    StagedRoutePlanner.WayRoundCostCeiling = 3f;
-                    (string atThree, double pressedSeconds) = OneAngle(degrees);
+                    StagedRoutePlanner.WayRoundCostCeiling = StagedRoutePlanner.ShippedWayRoundCostCeiling;
+                    (string atTheCeiling, double pressedSeconds) = OneAngle(degrees);
 
                     StagedRoutePlanner.WayRoundCostCeiling = 0f;
                     (string unlimited, double roundSeconds) = OneAngle(degrees);
@@ -224,7 +339,7 @@ namespace BattleChess.Tests.Battle
                     double ratio = pressedSeconds > 0.01 ? roundSeconds / pressedSeconds : 0d;
 
                     _out.WriteLine(
-                        $"{degrees,6}°{atThree,24}{pressedSeconds,11:0.0}{unlimited,24}" +
+                        $"{degrees,6}°{atTheCeiling,24}{pressedSeconds,11:0.0}{unlimited,24}" +
                         $"{roundSeconds,10:0.0}{ratio,8:0.00}");
                 }
             }
@@ -991,9 +1106,10 @@ namespace BattleChess.Tests.Battle
                 $"{verdict,-14} {plan.Path.Waypoints.Count,2} wpts {seconds,5:0} s  ends {ending:0.000}   ");
         }
 
-        private List<string> Sweep(IRoutePlanner planner)
+        private List<string> Sweep(IRoutePlanner planner, out List<int> pressed)
         {
             var failed = new List<string>();
+            pressed = new List<int>();
 
             for (int degrees = 0; degrees <= 90; degrees += 5)
             {
@@ -1001,10 +1117,6 @@ namespace BattleChess.Tests.Battle
 
                 Plan plan = Marching.PlanTo(
                     field.State, mover, field.Pathfinder, destination, planner: planner);
-
-                bool clear = plan.Found
-                             && !plan.PressedThrough
-                             && EveryLegIsClear(field, mover, plan.Path.Waypoints, plan.Hold);
 
                 string verdict = !plan.Found ? "no route"
                     : plan.PressedThrough ? "pressed through"
@@ -1014,10 +1126,16 @@ namespace BattleChess.Tests.Battle
                 _out.WriteLine($"  {degrees,3}°  {verdict,-22} {plan.Path.Waypoints.Count} waypoints, " +
                                $"{Marching.SecondsToWalk(field.State, mover, plan.Path.Waypoints, plan.Hold):0} s");
 
-                if (!clear) failed.Add($"{degrees}° ({verdict})");
+                // A declared press is an answer, not a failure - M98. What is a
+                // failure is walking through somebody without saying so, and
+                // finding nothing at all.
+                if (verdict == "pressed through") pressed.Add(degrees);
+                else if (verdict != "clear") failed.Add($"{degrees}° ({verdict})");
             }
 
-            _out.WriteLine($"  {19 - failed.Count} of 19 clear.");
+            _out.WriteLine(
+                $"  {19 - failed.Count - pressed.Count} of 19 clear, {pressed.Count} pressed, " +
+                $"{failed.Count} neither.");
 
             return failed;
         }
