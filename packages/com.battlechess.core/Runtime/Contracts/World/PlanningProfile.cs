@@ -325,6 +325,32 @@ namespace BattleChess.Contracts
             /// </remarks>
             ClearLineRepeat,
 
+            /// <summary>
+            /// Bodies M27 walked the whole field to find, summed over calls.
+            /// </summary>
+            /// <remarks>
+            /// These four say why threading a gap costs what it does, which the
+            /// timer alone cannot: a quadratic over a handful is nothing and a
+            /// quadratic over thirty is nine hundred, and the difference is
+            /// invisible in a millisecond figure.
+            /// </remarks>
+            GapNear,
+
+            /// <summary>Pairs of those bodies examined for a passage between them.</summary>
+            GapPairs,
+
+            /// <summary>Passages wide enough to keep.</summary>
+            GapMouths,
+
+            /// <summary>Passages actually put to the three clearance tests.</summary>
+            GapMouthsTried,
+
+            /// <summary>Passages that passed all three, and became a route.</summary>
+            GapThreaded,
+
+            /// <summary>Pairs with room between them, but far too much of it.</summary>
+            GapTooWide,
+
             /// <summary>Not a step. The number of them.</summary>
             Count,
         }

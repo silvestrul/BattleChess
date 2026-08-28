@@ -270,6 +270,60 @@ namespace BattleChess.Rules
         [ThreadStatic] public static Func<bool>? GiveUpNow;
 
         /// <summary>
+        /// How much wider than the regiment a passage may be and still count as
+        /// a passage worth threading. Zero is no ceiling.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M27 says a gap has an axis of its own, and it is right. What it
+        /// never said is what makes two bodies a gap at all.</b> The pairing had
+        /// no upper bound: any two regiments with room between them were paired,
+        /// so a body on one flank and a body on the other formed a "gap" eight
+        /// hundred metres wide, generated a mouth, and were clearance-tested
+        /// like any squeeze.
+        /// </para>
+        /// <para>
+        /// Measured across the five bench fields before this existed: 34 bodies
+        /// near a march, 587 pairs a call, <b>95% of them passing the width
+        /// test</b>, 75 318 passages clearance-tested, and 32 routes found -
+        /// two thousand three hundred candidates per answer. On the Crucible
+        /// and Great Field it was 66 calls, 27 872 passages and <b>no route at
+        /// all</b>, and because nothing succeeded there was never an early exit
+        /// either: every mouth was tried, every time.
+        /// </para>
+        /// <para>
+        /// A ceiling states the thing the rule always meant. A passage is a
+        /// squeeze; open ground is not a passage, and the straight line and the
+        /// arch above already answer it.
+        /// </para>
+        /// </remarks>
+        /// <remarks>
+        /// <b>Two, and the sweep says the march does not notice.</b> Swept from
+        /// no ceiling down to one and a half across five fields: passages tried
+        /// fall from 25 582 to 686 on the Crucible, planning falls 8% to 33% a
+        /// field, and <b>every field routes exactly as many orders, refuses
+        /// exactly as many, and presses through exactly as many</b>. The march
+        /// clock - the seconds the executor is actually handed, which is the
+        /// only number that decides whether a cheaper planner made anything
+        /// better (W10) - is unchanged on four fields and <i>improves</i> 0,49%
+        /// on the fifth.
+        /// <para>
+        /// So the wide pairs were not merely dear to test. Where they won they
+        /// were winning with routes no better than the rung below would have
+        /// drawn, and on Long March slightly worse. Threading answers 28 times
+        /// there without a ceiling and 24 with one, and those four orders now
+        /// walk a shorter march.
+        /// </para>
+        /// <para>
+        /// Two rather than one and a half because cost has flattened by then -
+        /// the last half is inside the noise - and a ceiling has to hold for
+        /// arrangements no bench contains. It is one word if a play-test ever
+        /// shows a real squeeze being missed.
+        /// </para>
+        /// </remarks>
+        internal static float GapWidthCeiling = 2f;
+
+        /// <summary>
         /// How long one plan may search before it settles for what it can
         /// already prove.
         /// </summary>
@@ -1061,14 +1115,23 @@ namespace BattleChess.Rules
                 near.Add(other);
             }
 
+            PlanningProfile.Tally(PlanningProfile.Step.GapNear, near.Count);
+
             if (near.Count < 2) return null;
 
             float wanted = unit.Footprint.Depth + RoomEitherSideMetres * 2f;
+
+            // How much wider than the regiment a passage may be and still be a
+            // passage. See GapWidthCeiling - this is the whole of the fix.
+            float widest = GapWidthCeiling > 0f ? wanted * GapWidthCeiling : float.MaxValue;
 
             // Every pair of them, and the passage between the two. Quadratic in
             // a list that is already only the bodies on this march — a handful,
             // and only on the rung the common march never reaches.
             var mouths = new List<(float Off, Vec2 Mouth, Vec2 Far, Facing Front)>();
+
+            PlanningProfile.Tally(
+                PlanningProfile.Step.GapPairs, near.Count * (near.Count - 1) / 2);
 
             for (int i = 0; i < near.Count; i++)
             for (int j = i + 1; j < near.Count; j++)
@@ -1089,6 +1152,20 @@ namespace BattleChess.Rules
                 float clear = apart - a.Shape.ProjectedRadius(side) - b.Shape.ProjectedRadius(side);
 
                 if (clear < wanted) continue;
+
+                // <b>And not too wide.</b> Two regiments eight hundred metres
+                // apart trivially have room between them, and the open country
+                // between them is not a gap - it is ground the straight line
+                // and the arch already answer. Measured before this existed:
+                // 95% of every pair examined passed the width test, 75 318
+                // passages were clearance-tested across five fields, and 32 of
+                // them became a route. The generator was drawing two thousand
+                // three hundred candidates for every answer it found.
+                if (clear > widest)
+                {
+                    PlanningProfile.Tally(PlanningProfile.Step.GapTooWide);
+                    continue;
+                }
 
                 // A corridor runs square through the gap, not along the march.
                 // That distinction is the whole of this rule: at the recorded
@@ -1120,6 +1197,8 @@ namespace BattleChess.Rules
                 mouths.Add((MathF.Abs(along.X * offset.Y - along.Y * offset.X), mouth, far, front));
             }
 
+            PlanningProfile.Tally(PlanningProfile.Step.GapMouths, mouths.Count);
+
             if (mouths.Count == 0) return null;
 
             mouths.Sort((x, y) => x.Off.CompareTo(y.Off));
@@ -1134,9 +1213,13 @@ namespace BattleChess.Rules
                 // full-length scans up to it and away from it. The three are a
                 // conjunction of pure tests, so the order cannot change which
                 // mouths are taken, only what is spent finding out.
+                PlanningProfile.Tally(PlanningProfile.Step.GapMouthsTried);
+
                 if (!IsClearLine(battle, unit, mouth, far, front, leaving: true)) continue;
                 if (!IsClearLeg(battle, unit, unit.Position, mouth, unit.Facing)) continue;
                 if (!IsClearLeg(battle, unit, far, destination, front)) continue;
+
+                PlanningProfile.Tally(PlanningProfile.Step.GapThreaded);
 
                 // Named on the leg it belongs to, as the drawn-line crab does:
                 // square to the corridor going through it, and back onto the
