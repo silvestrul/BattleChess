@@ -40,6 +40,7 @@ namespace BattleChess.Tests.Battle
     /// tables below say it should.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class TwoLegGateTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

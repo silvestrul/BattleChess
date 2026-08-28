@@ -27,6 +27,7 @@ namespace BattleChess.Tests.Battle
     /// could not have contributed to this route whatever it did.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class TheSidewaysMileTests
     {
         private readonly ITestOutputHelper _out;

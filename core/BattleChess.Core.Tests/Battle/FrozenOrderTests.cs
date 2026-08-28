@@ -20,6 +20,7 @@ namespace BattleChess.Tests.Battle
     /// The bench never showed this, so the bench is not the reproduction - it
     /// has eighty regiments on a smaller map and its routes are shorter.
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class FrozenOrderTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

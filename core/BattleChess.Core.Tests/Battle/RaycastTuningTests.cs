@@ -33,6 +33,7 @@ namespace BattleChess.Tests.Battle
     /// anything.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class RaycastTuningTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

@@ -294,17 +294,75 @@ namespace BattleChess.Rules
         /// <summary>How far the lattice may stray from the cheap route guiding it.</summary>
         internal static float CheapCorridorHalfWidthMetres = 45f;
 
+        /// <summary>
+        /// Whether the tangent graph is asked as a stage of its own, between
+        /// the grid and the lattice.
+        /// </summary>
+        /// <remarks>
+        /// Separate from whether the tangent search is reachable at all: the
+        /// plan it draws is still the terminal fallback at the bottom of this
+        /// cascade, and the local <c>Tangents()</c> draws it at most once an
+        /// order however many places below want it. Turning this off removes
+        /// the stage, not the search.
+        /// </remarks>
+        /// <remarks>
+        /// <b>Off, on the measurement.</b> From above the grid the stage won
+        /// <b>0 of 280</b> bench orders. Moved below the grid it is reached by
+        /// only 27 of them - 9, 0, 10 and 8 on the four fields - and wins
+        /// <b>0 of those too</b>. Turned off: <b>not one of the 280 routes
+        /// moves</b>, total marching time is identical to the tenth of a
+        /// second on every field, and no order falls through to the terminal
+        /// fallback, because the lattice answers every one the grid could not.
+        /// That is the whole case: the orders reaching this stage are exactly
+        /// the ones it was always going to refuse.
+        /// <b>What still draws the graph.</b> An attack order, which goes
+        /// straight to it and never enters the cascade; and the terminal
+        /// fallback, which has not fired on any bench field but is what stands
+        /// between a regiment and no route at all. Neither is removed by this,
+        /// which is why it is a lever on the stage and not a deletion of the
+        /// search.
+        /// </remarks>
+        internal static bool AskTangentStage;
+
+        /// <summary>
+        /// The cell size of the second, finer grid, as a multiple of a
+        /// regiment's own width. Nought turns the second tier off.
+        /// </summary>
+        /// <remarks>
+        /// <b>M87.</b> A cell holds a whole regiment, so the coarse grid cannot
+        /// express a way round narrower than one — and the orders it fails on
+        /// are exactly the ones that fell to the lattice at tens of milliseconds
+        /// each. Measured globally at a quarter, the grid answered <b>all</b>
+        /// thirty-two asked orders on the Crucible and Broken Country and the
+        /// lattice ran on none, with the routes coming out <b>13,9% and 9,2%
+        /// shorter in marching time</b> — the fine grid does not merely match
+        /// the lattice, it beats it. Globally it is still a loss, because a
+        /// quarter cell is sixteen times the cells and all thirty-two orders pay
+        /// for it. Hence two tiers: the coarse grid answers what it can, and
+        /// only what it cannot reaches the fine one, so the sixteen-fold field
+        /// is paid on nine or ten orders rather than on thirty-two.
+        /// </remarks>
+        internal static float[] FineSpacings = { 0.5f, 0.25f };
+
         /// <summary>Measurement counters: how many orders reach each stage.</summary>
         internal static int Staged, LadderClean, LadderBent, TangentClean, CornersClean, RingsClean,
             PoseAsked, PoseWon, PoseWidened, PoseTooDear, Pressed, GridClean, TangentTooDear,
             WayRoundTooDear, CrabTooLong;
 
+        /// <summary>
+        /// How many orders actually drew the tangent graph, as against how many
+        /// reached a stage that wanted it. The gap between those two numbers is
+        /// the whole of what M86 bought.
+        /// </summary>
+        internal static int TangentAsked;
+
         internal static void ResetCounters()
         {
             Staged = LadderClean = LadderBent = TangentClean = CornersClean = RingsClean =
                 PoseAsked = PoseWon = PoseWidened = PoseTooDear = Pressed = GridClean =
+                    SidewalkAsked = SidewalkTook = ArrivalAsked = ArrivalTook = SmoothingRefused =
                     TangentTooDear = WayRoundTooDear = CrabTooLong =
-                    BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
+                    TangentAsked = BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
             HybridPlanning.HybridAStarPlanner.RanOutOfTime = 0;
             GridPlanning.GridRoutePlanner.ResetCounters();
@@ -340,6 +398,27 @@ namespace BattleChess.Rules
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
             IBattleLog? log, IWayRound? wayRound, Facing? arriveOn)
         {
+            // The tangent graph, drawn at most once an order however many
+            // places below want it: the attack path above, the stage below the
+            // grid, the tube the lattice may be bounded to, and the terminal
+            // fallback. Four callers for one search, and until M86 it ran
+            // eagerly whether or not any of them was reached - which on the
+            // bench meant it ran 83 times and answered nothing.
+            Plan? drawn = null;
+
+            Plan Tangents()
+            {
+                if (drawn == null)
+                {
+                    TangentAsked++;
+
+                    drawn = RouteSearch.Find(
+                        battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
+                        RouteSearch.Shape.Tangents);
+                }
+
+                return drawn.Value;
+            }
 
             // Attacks have an approach planner and a moving target.  Their
             // repeated short plans are deliberately governed by OrderSystem's
@@ -349,9 +428,7 @@ namespace BattleChess.Rules
             // their own reservation-aware approach phase.
             if (unit.Order.Kind == OrderKind.Attack)
             {
-                return RouteSearch.Find(
-                    battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
-                    RouteSearch.Shape.Tangents);
+                return Tangents();
             }
 
             // An egress is only useful when it is a real staging manoeuvre:
@@ -390,31 +467,177 @@ namespace BattleChess.Rules
                 return ladder;
             }
 
-            // The tangent graph is expensive enough to earn its use.  It is
-            // asked only after the ladder failed to provide a clean route, or
-            // explicitly chose its press-through last resort.
-            Plan tangent = RouteSearch.Find(
-                battle, unit, destination, arriveOn ?? unit.OrderFacing, log, pathfinder,
-                RouteSearch.Shape.Tangents);
+            // ---- the regiment grid, M77 -------------------------------------
+            //
+            // Asked here because this is exactly where the cheap planners have
+            // run out and the dear one is about to be asked. A cell holds a
+            // whole regiment, so the search is over ground rather than over
+            // poses and costs a hex A* across a field of about 2 700 cells -
+            // three orders of magnitude under the lattice, whose worst case is
+            // set by the arrangement rather than by the map.
+            IReadOnlyList<Vec2>? gridRoute = null;
 
-            int badLeg = tangent.PressedThrough ? -1 : FirstBadLeg(battle, unit, tangent);
-
-            if (tangent.Path.Found && !tangent.PressedThrough && badLeg == 0)
+            if (GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Off)
             {
-                TangentClean++;
-                return tangent;
+                GridPlanning.GridRoutePlanner.Asked++;
+                gridRoute = GridPlanning.GridRoutePlanner.RouteFor(battle, unit, destination);
+
+                if (gridRoute != null) GridPlanning.GridRoutePlanner.Found++;
             }
 
-            if (tangent.PressedThrough) BadPressed++;
-            else if (badLeg < 0) BadNoRoute++;
-            else if (badLeg == 1) BadFirstLeg++;
-            else BadLaterLeg++;
+            // In Corridor the route is guidance and is deliberately not taken,
+            // which is what keeps that arrangement a clean test of the tube
+            // rather than a test of the tube and the route together.
+            bool takeIt =
+                GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Corridor;
 
-            // Tangents name only the legs that could lie on a shortest route,
-            // which is a pruning about cost and not about clearance - so a leg
-            // it declined to name can still be the one that walks.  The two
-            // richer graphs cost a fraction of a millisecond each and stand
-            // between an order and a lattice search costing tens.
+            if (takeIt && TookGridRoute(gridRoute, fine: false, out Plan overGrid))
+                return overGrid;
+
+            // ---- the fine tier, M87 -----------------------------------------
+            //
+            // Reached only where the coarse grid could not answer, which is the
+            // whole design: a quarter cell is sixteen times the field, and it is
+            // affordable precisely because nine or ten orders a field get here
+            // rather than thirty-two. What they would otherwise cost is the
+            // lattice, at tens of milliseconds each.
+            if (takeIt && GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Off)
+            {
+                // Finest last. A half cell is four times the field and a quarter
+                // is sixteen, so asking the cheaper one first costs a quarter of
+                // the dear one's field on the orders that need the dear one, and
+                // saves the whole of it on the orders that do not. Measured, the
+                // two fields want different tiers - the sideways mile is
+                // answered at a half and the Crucible needs a quarter - which is
+                // the argument for a ladder here rather than one number.
+                foreach (float finer in FineSpacings)
+                {
+                    if (finer <= 0f) continue;
+
+                    GridPlanning.GridRoutePlanner.FineAsked++;
+
+                    IReadOnlyList<Vec2>? fineRoute = GridPlanning.GridRoutePlanner.RouteFor(
+                        battle, unit, destination, finer);
+
+                    if (fineRoute != null) GridPlanning.GridRoutePlanner.FineFound++;
+
+                    if (TookGridRoute(fineRoute, fine: true, out Plan overFine)) return overFine;
+                }
+            }
+
+            // The body of that gate, written once and asked twice.
+            bool TookGridRoute(IReadOnlyList<Vec2>? route, bool fine, out Plan taken)
+            {
+                taken = default;
+
+                if (route == null) return false;
+
+                float gridLength = GridPlanning.GridRoutePlanner.Length(route);
+
+                var gridded = new Plan(
+                    PathResult.Success(
+                        route, Array.Empty<Coord>(), gridLength, gridLength,
+                        GridPlanning.RegimentGrid.LastCellsExplored),
+                    null, false);
+
+                // Straightened before it is judged, unlike every other stage
+                // here. A hex route is a chain of cell centres and zigzags by
+                // construction, so gating the raw line asks the swept
+                // rectangle to walk a staircase - and it refuses one, which is
+                // a verdict on the shape of the grid rather than on whether
+                // the regiment can get there. Measured: on the Crucible this
+                // is 42 routes held against 33, and on Broken Country 52
+                // against 49. PlanTo smooths again afterwards and that pass is
+                // then a no-op, which is the right kind of waste.
+                // M91. A grid route names places, never fronts, so every leg of
+                // it would otherwise be walked on the line of march whether or
+                // not the regiment can turn onto it. Asked before smoothing as
+                // well as after, because the fronts it settles are what the
+                // smoother then has to preserve.
+                gridded = Sidewalked(battle, unit, gridded);
+
+                // M94. Smoothing may shorten a route; it may not break one.
+                // It casts with `leaving: true` on the first leg unconditionally
+                // while the gate is stricter, so a long cast it believes clear
+                // can be one the executor refuses - and the route it replaced
+                // walked. Measured at the failing approach, the half-cell route
+                // walks in full and its smoothed form fails on leg one.
+                Plan straightened = Sidewalked(
+                    battle, unit, RouteSmoothing.Applied(battle, unit, gridded));
+
+                if (!RefuseSmoothingThatBreaks || WalksCleanly(battle, unit, straightened))
+                    gridded = straightened;
+                else SmoothingRefused++;
+
+                // The same gate every other route in this project has to pass.
+                // A grid cell is coarser than the swept rectangle, so a grid
+                // route is a claim about roughly where to go and not a promise
+                // that the regiment fits; this is where that claim is tested.
+                // Priced against the press it exists to avoid, exactly as the
+                // lattice's answer is. Without this the grid is the one stage
+                // that may hand back any detour at all provided it walks - and
+                // it promptly did: U19 on the frozen-orders fixture took a
+                // grid route costing 1 316 s against a 177 s straight line,
+                // 7,4x, which is the regiment-refuses-the-order failure M65
+                // exists to stop. A cheap search is not a licence to skip the
+                // ceiling; it is only a licence to reach it sooner.
+                bool tooDear =
+                    WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough &&
+                    CostsMoreThan(battle, unit, gridded, ladder, WayRoundCostCeiling);
+
+                if (tooDear || !WalksCleanly(battle, unit, gridded)) return false;
+
+                GridClean++;
+
+                if (fine) GridPlanning.GridRoutePlanner.FineHeld++;
+                else GridPlanning.GridRoutePlanner.Held++;
+
+                log?.Record(new BattleLogEntry(
+                    LogLevel.Decision, "Path",
+                    $"{unit.Def.DisplayName} took a {(fine ? "fine " : string.Empty)}grid " +
+                    $"route to {destination} " +
+                    $"({gridded.Path.Waypoints.Count} waypoints over " +
+                    $"{GridPlanning.RegimentGrid.LastCellsExplored} cells settled, " +
+                    $"{GridPlanning.RegimentGrid.LastBlockedCells} cells held by bodies) " +
+                    $"- the lattice was not asked.",
+                    unit.Id));
+
+                taken = gridded;
+                return true;
+            }
+
+            // ---- the tangent graph, M86 ------------------------------------
+            //
+            // Below the grid since M86, and drawn only if this line is reached.
+            // From above the grid it answered 0 of 280 bench orders while
+            // costing 731 us a call - 23,4 ms of a 128 ms field - sitting
+            // directly on top of a grid costing 219 us that answered 23 of
+            // them. Tangents name only the legs that could lie on a shortest
+            // route, which is a pruning about cost and not about clearance, so
+            // a leg it declined to name can still be the one that walks. That
+            // is why the grid, which reasons about ground rather than about
+            // shortest paths, answers what this refuses - and it is why the
+            // order between them was the wrong way round.
+            if (AskTangentStage)
+            {
+                Plan tangent = Tangents();
+
+                int badLeg = tangent.PressedThrough ? -1 : FirstBadLeg(battle, unit, tangent);
+
+                if (tangent.Path.Found && !tangent.PressedThrough && badLeg == 0)
+                {
+                    TangentClean++;
+                    return tangent;
+                }
+
+                if (tangent.PressedThrough) BadPressed++;
+                else if (badLeg < 0) BadNoRoute++;
+                else if (badLeg == 1) BadFirstLeg++;
+                else BadLaterLeg++;
+            }
+
+            // The two richer graphs cost a fraction of a millisecond each and
+            // stand between an order and a lattice search costing tens.
             if (AskCorners)
             {
                 Plan corners = RouteSearch.Find(
@@ -440,82 +663,6 @@ namespace BattleChess.Rules
                 {
                     RingsClean++;
                     return rings;
-                }
-            }
-
-            // ---- the regiment grid, M77 -------------------------------------
-            //
-            // Asked here because this is exactly where the cheap planners have
-            // run out and the dear one is about to be asked. A cell holds a
-            // whole regiment, so the search is over ground rather than over
-            // poses and costs a hex A* across a field of about 2 700 cells -
-            // three orders of magnitude under the lattice, whose worst case is
-            // set by the arrangement rather than by the map.
-            IReadOnlyList<Vec2>? gridRoute = null;
-
-            if (GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Off)
-            {
-                GridPlanning.GridRoutePlanner.Asked++;
-                gridRoute = GridPlanning.GridRoutePlanner.RouteFor(battle, unit, destination);
-
-                if (gridRoute != null) GridPlanning.GridRoutePlanner.Found++;
-            }
-
-            // In Corridor the route is guidance and is deliberately not taken,
-            // which is what keeps that arrangement a clean test of the tube
-            // rather than a test of the tube and the route together.
-            if (gridRoute != null && GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Corridor)
-            {
-                float gridLength = GridPlanning.GridRoutePlanner.Length(gridRoute);
-
-                var gridded = new Plan(
-                    PathResult.Success(
-                        gridRoute, Array.Empty<Coord>(), gridLength, gridLength,
-                        GridPlanning.RegimentGrid.LastCellsExplored),
-                    null, false);
-
-                // Straightened before it is judged, unlike every other stage
-                // here. A hex route is a chain of cell centres and zigzags by
-                // construction, so gating the raw line asks the swept
-                // rectangle to walk a staircase - and it refuses one, which is
-                // a verdict on the shape of the grid rather than on whether
-                // the regiment can get there. Measured: on the Crucible this
-                // is 42 routes held against 33, and on Broken Country 52
-                // against 49. PlanTo smooths again afterwards and that pass is
-                // then a no-op, which is the right kind of waste.
-                gridded = RouteSmoothing.Applied(battle, unit, gridded);
-
-                // The same gate every other route in this project has to pass.
-                // A grid cell is coarser than the swept rectangle, so a grid
-                // route is a claim about roughly where to go and not a promise
-                // that the regiment fits; this is where that claim is tested.
-                // Priced against the press it exists to avoid, exactly as the
-                // lattice's answer is. Without this the grid is the one stage
-                // that may hand back any detour at all provided it walks - and
-                // it promptly did: U19 on the frozen-orders fixture took a
-                // grid route costing 1 316 s against a 177 s straight line,
-                // 7,4x, which is the regiment-refuses-the-order failure M65
-                // exists to stop. A cheap search is not a licence to skip the
-                // ceiling; it is only a licence to reach it sooner.
-                bool tooDear =
-                    WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough &&
-                    CostsMoreThan(battle, unit, gridded, ladder, WayRoundCostCeiling);
-
-                if (!tooDear && WalksCleanly(battle, unit, gridded))
-                {
-                    GridClean++;
-                    GridPlanning.GridRoutePlanner.Held++;
-
-                    log?.Record(new BattleLogEntry(
-                        LogLevel.Decision, "Path",
-                        $"{unit.Def.DisplayName} took a grid route to {destination} " +
-                        $"({gridded.Path.Waypoints.Count} waypoints over " +
-                        $"{GridPlanning.RegimentGrid.LastCellsExplored} cells settled, " +
-                        $"{GridPlanning.RegimentGrid.LastBlockedCells} cells held by bodies) " +
-                        $"- the lattice was not asked.",
-                        unit.Id));
-
-                    return gridded;
                 }
             }
 
@@ -546,13 +693,20 @@ namespace BattleChess.Rules
                 // is the only thing it can express. That is the one defect
                 // this fixes, and the reason the tube is worth asking about
                 // again at all.
-                IReadOnlyList<Vec2>? tube =
-                    GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor && gridRoute != null && gridRoute.Count >= 2
-                        ? gridRoute
-                        : CorridorFromCheapRoute && tangent.Path.Found &&
-                          tangent.Path.Waypoints.Count >= 2
-                            ? tangent.Path.Waypoints
-                            : null;
+                IReadOnlyList<Vec2>? tube = null;
+
+                if (GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor &&
+                    gridRoute != null && gridRoute.Count >= 2)
+                {
+                    tube = gridRoute;
+                }
+                else if (CorridorFromCheapRoute)
+                {
+                    Plan cheap = Tangents();
+
+                    if (cheap.Path.Found && cheap.Path.Waypoints.Count >= 2)
+                        tube = cheap.Path.Waypoints;
+                }
 
                 // What the way round is allowed to cost, told to the search
                 // rather than applied to its answer. M65 was throwing away
@@ -650,19 +804,21 @@ namespace BattleChess.Rules
             // still handed back - a regiment with no route at all is worse than
             // one with a long one - but it is counted, so a detour of this kind
             // shows up in a recording instead of only in a screenshot.
-            if (tangent.Path.Found)
+            Plan lastResort = Tangents();
+
+            if (lastResort.Path.Found)
             {
                 if (StraightLineCostCeiling > 0f)
                 {
                     float straight = StraightSeconds(battle, unit, destination);
                     float around = Marching.SecondsToWalk(
-                        battle, unit, tangent.Path.Waypoints, tangent.Hold);
+                        battle, unit, lastResort.Path.Waypoints, lastResort.Hold);
 
                     if (straight > 1f && around > straight * StraightLineCostCeiling)
                         TangentTooDear++;
                 }
 
-                return tangent;
+                return lastResort;
             }
 
             return ladder;
@@ -722,6 +878,132 @@ namespace BattleChess.Rules
         internal static bool WalksCleanly(BattleState battle, UnitInstance unit, Plan plan) =>
             FirstBadLeg(battle, unit, plan) == 0;
 
+        /// <summary>Whether a leg that would not wheel was walked held instead.</summary>
+        internal static bool AllowSidewalk = true;
+
+        /// <summary>Legs asked to sidewalk, and legs that then walked.</summary>
+        internal static int SidewalkAsked, SidewalkTook;
+
+        /// <summary>Routes where smoothing produced something that would not walk - M94.</summary>
+        internal static int SmoothingRefused;
+
+        /// <summary>
+        /// Whether a smoothed route that will not walk is thrown away in favour
+        /// of the unsmoothed one. <b>Off</b> - see M94.
+        /// </summary>
+        internal static bool RefuseSmoothingThatBreaks;
+
+        /// <summary>
+        /// The same route with a front held on any leg that will not walk on the
+        /// line of march - <b>M91</b>.
+        /// </summary>
+        /// <remarks>
+        /// Written as a repair against <see cref="FirstBadLeg"/> rather than as
+        /// a second opinion about clearance, so that what decides a sidewalk is
+        /// the same code that decides whether the executor will walk it. Asked
+        /// only of legs the gate has already refused, which is what makes this
+        /// an ordering and not a comparison: a regiment that can face where it
+        /// is going does.
+        /// </remarks>
+        internal static Plan Sidewalked(BattleState battle, UnitInstance unit, Plan plan)
+        {
+            if (!AllowSidewalk || !plan.Path.Found) return plan;
+
+            IReadOnlyList<Vec2> points = plan.Path.Waypoints;
+            if (points.Count < 2) return plan;
+
+            Facing?[]? hold = plan.Hold;
+            Plan working = plan;
+
+            // One repair a leg at most, and the legs only go forwards, so this
+            // cannot turn round on itself however the gate answers.
+            for (int attempt = 1; attempt < points.Count; attempt++)
+            {
+                int bad = FirstBadLeg(battle, unit, working);
+
+                if (bad <= 0) break;
+                if (hold != null && bad < hold.Length && hold[bad].HasValue) break;
+
+                SidewalkAsked++;
+
+                hold = hold == null ? new Facing?[points.Count] : (Facing?[])hold.Clone();
+
+                Facing inHand = FrontInHandBefore(unit, points, hold, bad);
+
+                // M94. On the last leg the front is not only about walking the
+                // leg, it decides whether the regiment can stand where it is
+                // sent at all - and at a destination touching one of its own,
+                // very few fronts serve. The line of march is almost never one
+                // of them, so they are tried, nearest turn first.
+                Facing? arriving = bad == points.Count - 1
+                    ? FrontToArriveOn(battle, unit, points[bad], inHand)
+                    : null;
+
+                hold[bad] = arriving ?? inHand;
+
+                working = new Plan(working.Path, hold, working.PressedThrough, working.Effort);
+            }
+
+            if (ReferenceEquals(working.Hold, plan.Hold)) return plan;
+
+            if (FirstBadLeg(battle, unit, working) == 0) SidewalkTook++;
+
+            return working;
+        }
+
+        /// <summary>How finely the fronts a destination will accept are looked for.</summary>
+        internal static float ArrivalFrontStepDegrees = 15f;
+
+        /// <summary>
+        /// The front to walk the last leg on: whichever the destination will
+        /// accept that costs the least turning from the one already in hand.
+        /// </summary>
+        /// <remarks>
+        /// <b>M94.</b> Measured over twenty-four fronts at the failing approach,
+        /// a destination touching one of its own accepted <b>two</b> of them -
+        /// and <c>Marching.AlongTheLine</c> hands the last leg whichever its
+        /// direction implies, which is one of the other twenty-two nearly every
+        /// time. Nothing anywhere chose between them.
+        /// </remarks>
+        private static Facing? FrontToArriveOn(
+            BattleState battle, UnitInstance unit, Vec2 goal, Facing inHand)
+        {
+            if (CouldStandAt(battle, unit, goal, inHand)) return inHand;
+
+            float step = MathF.Max(1f, ArrivalFrontStepDegrees);
+
+            Facing? best = null;
+            float least = float.MaxValue;
+
+            for (float turn = 0f; turn < 360f; turn += step)
+            {
+                var front = Facing.FromDegrees(inHand.Degrees + turn);
+
+                if (!CouldStandAt(battle, unit, goal, front)) continue;
+
+                float cost = Facing.AbsoluteDelta(inHand, front);
+
+                if (cost >= least) continue;
+
+                least = cost;
+                best = front;
+            }
+
+            return best;
+        }
+
+        /// <summary>The front the regiment is on as it begins <paramref name="leg"/>.</summary>
+        private static Facing FrontInHandBefore(
+            UnitInstance unit, IReadOnlyList<Vec2> points, Facing?[]? hold, int leg)
+        {
+            if (leg <= 1) return unit.Facing;
+
+            if (hold != null && leg - 1 < hold.Length && hold[leg - 1].HasValue)
+                return hold[leg - 1]!.Value;
+
+            return Marching.AlongTheLine(points[leg - 2], points[leg - 1], unit.Facing);
+        }
+
         /// <summary>
         /// The first leg the executor would refuse, or nought if it would walk
         /// the whole route. Minus one where there is no route to walk.
@@ -739,10 +1021,33 @@ namespace BattleChess.Rules
 
                 bool startsInsideOwn = leg == 1 && StartsInsideOwn(battle, unit, front);
 
-                if (startsInsideOwn)
+                // M94. The mirror of the above, and only on the last leg: the
+                // destination is the order and cannot be moved, while every
+                // waypoint before it is the planner's own and it can choose
+                // again. Both may apply on a two-point route, and then both
+                // must pass.
+                // Only where the arrival pose is one the regiment could stand
+                // in. Contact is licensed; ending inside a body is not, and
+                // without this the backwards sweep would happily allow it,
+                // because it takes the arrival overlap as its baseline.
+                bool endsInsideOwn =
+                    LicenceOnArrival && leg == points.Count - 1 &&
+                    InsideOwnAt(battle, unit, points[leg], front) &&
+                    CouldStandAt(battle, unit, points[leg], front);
+
+                if (startsInsideOwn || endsInsideOwn)
                 {
-                    if (!EscapesWithoutDeepening(battle, unit, points[leg - 1], points[leg], front))
+                    if (endsInsideOwn) ArrivalAsked++;
+
+                    if (startsInsideOwn &&
+                        !EscapesWithoutDeepening(battle, unit, points[leg - 1], points[leg], front))
                         return leg;
+
+                    if (endsInsideOwn &&
+                        !ArrivesWithoutDeepening(battle, unit, points[leg - 1], points[leg], front))
+                        return leg;
+
+                    if (endsInsideOwn) ArrivalTook++;
                 }
                 else if (!Marching.IsClearLine(battle, unit, points[leg - 1], points[leg], front))
                 {
@@ -817,19 +1122,119 @@ namespace BattleChess.Rules
             return false;
         }
 
-        private static bool StartsInsideOwn(BattleState battle, UnitInstance unit, Facing front)
+        /// <summary>
+        /// Whether a regiment merely <b>touching</b> one of its own is granted
+        /// the first leg's leaving licence, as one overlapping it already is.
+        /// </summary>
+        /// <remarks>
+        /// <b>M92, and it is the third cause in open finding 24.</b>
+        /// <c>RouteSmoothing</c> asks the first leg with <c>leaving: true</c>
+        /// unconditionally; this gate grants that only where the regiment laps
+        /// one of its own by more than <c>AllowedContactFraction</c>. A regiment
+        /// shoulder to shoulder - which is what [M2] exists to permit, and what
+        /// a regiment under orders very often is - laps it by <b>less</b> than
+        /// that, so it got a route smoothed under one rule and refused under a
+        /// stricter one. Measured over the nineteen approach angles, the six
+        /// that fail lap body 0 by 0,0% to 4,4%, all under the 5% allowance, and
+        /// every one of them has a first leg that is clear with the licence and
+        /// blocked without it.
+        /// <para>
+        /// Extending the licence does not wave the leg through:
+        /// <see cref="EscapesWithoutDeepening"/> still refuses a leg that enters
+        /// a body it was clear of or deepens one it was lapping. It only stops
+        /// contact itself being the refusal.
+        /// </para>
+        /// </remarks>
+        internal static bool LicenceOnContact = true;
+
+        /// <summary>
+        /// Whether the <b>last</b> leg of a route may finish in contact with one
+        /// of its own, on the same terms as the first may begin in it.
+        /// </summary>
+        /// <remarks>
+        /// <b>M94, and it is the fourth cause in open finding 24.</b> There was
+        /// a licence to leave contact and none to arrive in it, and the
+        /// measurement of that is unusually clean: over twenty-four fronts at
+        /// the failing approach, the regiment can <b>stand</b> at its
+        /// destination on 2, the final leg walks on <b>0</b> - and the
+        /// <b>same leg walked backwards</b> clears on 7. Same rectangle, same
+        /// front, same bodies, same endpoints. The only thing direction changes
+        /// is which end the leaving licence lands on, and the contact is at the
+        /// end.
+        /// <para>
+        /// So a regiment that may stand touching one of its own, and may leave
+        /// contact, but may never enter it, is [M2] and [M89] contradicting each
+        /// other - and this is which way the contradiction is resolved. The last
+        /// leg only, because the destination is the order and cannot be moved,
+        /// while every waypoint before it is the planner's own choice and it can
+        /// choose again.
+        /// </para>
+        /// </remarks>
+        internal static bool LicenceOnArrival;
+
+        /// <summary>Last legs that needed the arriving licence, and that got it.</summary>
+        internal static int ArrivalAsked, ArrivalTook;
+
+        private static bool StartsInsideOwn(BattleState battle, UnitInstance unit, Facing front) =>
+            InsideOwnAt(battle, unit, unit.Position, front);
+
+        /// <summary>
+        /// Whether the regiment, stood at <paramref name="place"/> on
+        /// <paramref name="front"/>, is lapping or touching one of its own.
+        /// </summary>
+        private static bool InsideOwnAt(
+            BattleState battle, UnitInstance unit, Vec2 place, Facing front)
         {
-            var at = new OrientedRect(unit.Position, front, unit.Footprint);
+            var at = new OrientedRect(place, front, unit.Footprint);
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
                 if (other.Id == unit.Id || other.Owner != unit.Owner) continue;
                 if (OrientedRect.OverlapFraction(at, other.Shape) > AllowedContactFraction)
                     return true;
+
+                if (LicenceOnContact && OrientedRect.GapBetween(at, other.Shape) <= 0f)
+                    return true;
             }
 
             return false;
         }
+
+        /// <summary>
+        /// Whether the regiment could legally stand at <paramref name="place"/>
+        /// on <paramref name="front"/> - touching one of its own is allowed,
+        /// overlapping it is not.
+        /// </summary>
+        internal static bool CouldStandAt(
+            BattleState battle, UnitInstance unit, Vec2 place, Facing front)
+        {
+            var pose = new OrientedRect(place, front, unit.Footprint);
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id || other.Owner != unit.Owner) continue;
+                if (OrientedRect.OverlapFraction(pose, other.Shape) > AllowedContactFraction)
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether the last leg may finish in the contact it finishes in -
+        /// <b>M94</b>, and it is <see cref="EscapesWithoutDeepening"/> walked
+        /// backwards, which is exactly what it means.
+        /// </summary>
+        /// <remarks>
+        /// Bodies the regiment is lapping <b>where it arrives</b> may only be
+        /// less lapped the further back along the leg you look, and bodies it is
+        /// clear of at the destination may not be entered anywhere on the way
+        /// in. So it may finish touching what it is ordered to finish touching,
+        /// and may not barge through anything else to get there.
+        /// </remarks>
+        private static bool ArrivesWithoutDeepening(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing front) =>
+            EscapesWithoutDeepening(battle, unit, to, from, front);
 
         /// <summary>
         /// Sweeps a first leg in small steps.  Bodies already lapped may only

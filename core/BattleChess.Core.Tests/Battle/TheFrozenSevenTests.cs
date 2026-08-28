@@ -33,6 +33,7 @@ namespace BattleChess.Tests.Battle
     /// planner.
     /// </para>
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class TheFrozenSevenTests : IDisposable
     {
         private readonly ITestOutputHelper _out;

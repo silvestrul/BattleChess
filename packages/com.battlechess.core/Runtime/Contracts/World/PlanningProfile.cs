@@ -81,14 +81,41 @@ namespace BattleChess.Contracts
             /// <summary>The four-rung ladder, as the planner or as a second opinion.</summary>
             Ladder,
 
-            /// <summary>One of the older way-round strategies.</summary>
+            /// <summary>One of the older way-round strategies - the ladder's arch.</summary>
             WayRound,
+
+            /// <summary>
+            /// The ladder's other rung-two candidate: the same line taken
+            /// side-on, so a body twenty metres across instead of forty.
+            /// </summary>
+            /// <remarks>
+            /// Split from <see cref="Ladder"/> because rung two computes both
+            /// candidates and prices them against each other, and the crab is
+            /// worked out <i>even when the arch succeeded</i> - deliberately,
+            /// so that the cheaper of the two wins rather than the first one
+            /// found. Whether that deliberate extra is a rounding error or a
+            /// sixth of the ladder could not be read while both were one line.
+            /// </remarks>
+            Crab,
 
             /// <summary>Can this body travel this line without meeting anything.</summary>
             ClearLine,
 
             /// <summary>Walking every body on the field to see if it is in the way.</summary>
             BodyScan,
+
+            /// <summary>
+            /// Asking the spatial index which bodies lie near one line, inside
+            /// <see cref="BodyScan"/>.
+            /// </summary>
+            /// <remarks>
+            /// The same split, for the same reason. <see cref="BodyScan"/> is
+            /// the heaviest step in the whole planner on every field and every
+            /// planner but one, and "make it faster" means nothing until it is
+            /// known whether the time is in finding the candidates or in
+            /// testing them.
+            /// </remarks>
+            NearQuery,
 
             /// <summary>How deep a leg laps a body it started inside, sampled along the leg.</summary>
             GrazeAlong,
@@ -114,11 +141,49 @@ namespace BattleChess.Contracts
             /// <summary>String-pulling the hex route back into a few waypoints.</summary>
             PathSmooth,
 
+            /// <summary>
+            /// Raising the regiment-sized hex field — sizing the cells and
+            /// marking which of them a body holds.
+            /// </summary>
+            /// <remarks>
+            /// Separate from <see cref="HexSearch"/>, which is the terrain
+            /// pathfinder over 25 m cells. This is the grid sized to the mover's
+            /// own bounding circle, and the two answer different questions on
+            /// different cells; sharing a line would have made both unreadable.
+            /// </remarks>
+            GridField,
+
+            /// <summary>A* over that field, and the string-pull after it.</summary>
+            GridSearch,
+
             /// <summary>The whole hybrid lattice search — the top of its own tree.</summary>
             HybridSearch,
 
             /// <summary>Flood-filling the obstacle field the hybrid steers by.</summary>
             HybridField,
+
+            /// <summary>
+            /// Marking which of that field's cells a body holds, before the
+            /// fill runs over them.
+            /// </summary>
+            /// <remarks>
+            /// Split out from <see cref="HybridField"/> because the two halves
+            /// have different lifetimes and only one of them can be shared: the
+            /// raster depends on where the bodies are, which is the same for
+            /// every order given on one tick, while the fill counts seconds to
+            /// <i>this</i> order's goal. Whether sharing the raster is worth
+            /// building depends entirely on which half the time is in, and
+            /// nothing could answer that while they were one line.
+            /// </remarks>
+            /// <remarks>
+            /// It measures <see cref="HybridPlanning.HybridTurnField"/>'s
+            /// raster, not <c>HybridObstacleField</c>'s. That was worth finding
+            /// out: the obstacle field is built only when the turn-aware
+            /// heuristic is off or a corridor was asked for, so in the shipped
+            /// configuration it is never built at all and every millisecond
+            /// under <see cref="HybridField"/> belongs to the turn field.
+            /// </remarks>
+            HybridRaster,
 
             /// <summary>Working out which bodies are near, once per expansion.</summary>
             HybridStock,
@@ -146,6 +211,38 @@ namespace BattleChess.Contracts
 
             /// <summary>One rectangle against one rectangle, by separating axis. Counted only.</summary>
             HybridOverlap,
+
+            /// <summary>
+            /// One body handed back by the spatial index. Counted only, and
+            /// counted in bulk rather than one at a time.
+            /// </summary>
+            /// <remarks>
+            /// The question it exists to answer: the clearance path asks the
+            /// index once a leg and the hybrid asks once a node, so hoisting the
+            /// query to once an order is the obvious saving - but only if the
+            /// list it hands back does not grow faster than the queries shrink.
+            /// This is the numerator of that trade.
+            /// </remarks>
+            NearYield,
+
+            /// <summary>One call to the index that returned nothing at all. Counted only.</summary>
+            NearEmpty,
+
+            /// <summary>
+            /// A clearance check on a leg this order has already checked, on the
+            /// same front. Counted only.
+            /// </summary>
+            /// <remarks>
+            /// One order runs five hundred and fifty clearance checks on the
+            /// Crucible, and the cascade proves the same route more than once by
+            /// construction: the ladder's route is proved, the grid's route is
+            /// smoothed and proved, the lattice's route is proved, and then the
+            /// winner is smoothed and proved again. Whether that is most of the
+            /// five hundred and fifty or a rounding error on it decides whether
+            /// a per-order memo is the largest saving left or a waste of a
+            /// hash lookup.
+            /// </remarks>
+            ClearLineRepeat,
 
             /// <summary>Not a step. The number of them.</summary>
             Count,
@@ -213,11 +310,22 @@ namespace BattleChess.Contracts
         public static void Stop() => _mine = false;
 
         /// <summary>Records that a counted-only step happened once.</summary>
+        /// <summary>Whether this thread is measuring. For measurement-only bookkeeping.</summary>
+        public static bool Running => _anyone && _mine;
+
         public static void Tally(Step step)
         {
             if (!_anyone || !_mine) return;
 
             _calls![(int)step]++;
+        }
+
+        /// <summary>The same, by more than one at a time.</summary>
+        public static void Tally(Step step, int many)
+        {
+            if (!_anyone || !_mine) return;
+
+            _calls![(int)step] += many;
         }
 
         /// <summary>

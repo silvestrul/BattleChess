@@ -18,6 +18,7 @@ namespace BattleChess.Tests.Battle
     /// cascade smooths its own answer before offering it. So the picture is of
     /// a route no planner would ever return.
     /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class GridPreviewTests
     {
         private readonly ITestOutputHelper _out;

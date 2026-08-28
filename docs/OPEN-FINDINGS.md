@@ -1108,6 +1108,445 @@ for existing would be undone.
 
 ---
 
+## ~~21. Half the visibility graph is 25% of the planning bill~~ — SWITCHED ([M83](DECISIONS.md#m83))
+
+Raised by the full profile of 26 Aug 2026 ([M83](DECISIONS.md#m83)), not by a
+failure — nothing is broken, and that is why it needs writing down rather than
+fixing on the spot.
+
+`RouteSearch.MostPlaces` is 48. At **24**, measured in Release, least of three,
+on the planner a played battle actually uses:
+
+| field | ms/order | worst order | route seconds | unwalkable |
+|---|---|---|---|---|
+| crucible | 2,396 → **1,792** (−25%) | 17,5 → **14,2** | 57 527 → 57 527 | 0 → 0 |
+| longmarch | 0,337 → **0,302** (−10%) | 3,9 → **3,0** | 92 609 → 92 609 | 0 → 0 |
+| brokencountry | 1,947 → **1,391** (−29%) | 11,4 → **7,5** | 69 495 → 69 495 | 0 → 0 |
+| sidewaysmile | 1,128 → **0,842** (−25%) | 5,0 → **4,1** | 35 186 → 35 186 | 6 → 6 |
+
+Every quality figure identical on all four fields, and the tail — the number that
+decides whether a click drops a frame — falls further than the mean does.
+
+**Why it is not simply switched.** Identical *totals* are strong evidence and not
+proof: two routes changing in opposite directions would sum the same. The thing
+that settles it is `RouteFingerprintTests`, which compares routes one by one
+rather than in aggregate. Run that at 24 before moving the default.
+
+**Why it is plausible rather than surprising.** `BodyScan` — which bodies are near
+this line — is 33% to 72% of every planner's self time, and it is already indexed,
+so its bill is call count rather than per-call speed. Fewer candidate places means
+fewer legs means fewer clearance questions. If the graph at 48 is answering with
+places no route ever uses, halving it is free by construction.
+
+**Closed 26 Aug 2026.** `RouteFingerprintTests.HalvingTheGraphChangesNoRoute`
+plans all 280 orders on all four fields at both caps and compares them waypoint
+by waypoint. Identical. `MostPlaces` is now 24.
+
+**The comparison needed a non-vacuity guard, and finding out why raised
+finding 22.** Without one it passes at a cap of six, and at two — because the
+stage the cap governs never wins an order. The guard now asserts the search
+really did reach past 24 places, which it does on 51 of 280 orders.
+
+**The saving is not what it looked like.** It is not a graph half the size doing
+half the work: `Ledger.Reset` clears `places * places * 3` entries across five
+arrays before every search, so the cap is a quadratic tax paid whether or not
+the places exist — 6 912 slots an array at 48, 1 728 at 24.
+
+## ~~22. The tangent search wins nothing and is asked first~~ — FIXED ([M86](DECISIONS.md#m86))
+
+Raised by the profile of 26 Aug 2026 ([M83](DECISIONS.md#m83)) while working out
+why finding 21's comparison could not fail.
+
+`StagedRoutePlanner` asks `RouteSearch.Find` with `Shape.Tangents` before it asks
+the regiment grid or the lattice. Across all four bench fields, 280 orders:
+
+| field | tangent asked | tangent **won** | grid won | lattice won |
+|---|---|---|---|---|
+| crucible | 32 | **0** | 23 | 9 |
+| longmarch | 4 | **0** | 4 | 0 |
+| brokencountry | 32 | **0** | 22 | 10 |
+| sidewaysmile | 15 | **0** | 7 | 3 (5 pressed) |
+
+Why every one was refused:
+
+| refused because | count |
+|---|---|
+| the search pressed through, which the staged planner will not accept | **66** |
+| a later leg will not walk | 14 |
+| the first leg will not walk | 3 |
+| no route at all | 0 |
+
+**What it costs.** About **2,5 ms a search** — `Hunt` inclusive, 81,2 ms over 32
+calls on the Crucible — against the regiment grid's **0,16 to 0,39 ms**. So the
+cascade spends roughly sixteen times the grid's cost on a stage that has not
+answered a single bench order, immediately before asking the grid, which answers
+56 of them.
+
+**Why it cannot simply be deleted.** The same `tangent` plan is the last-resort
+fallback at the bottom of the cascade (`StagedRoutePlanner.cs`, the
+`if (tangent.Path.Found)` return). Something has to answer when the grid and the
+lattice both fail.
+
+**The obvious move is reordering, not removal** — ask the grid first, and compute
+the tangent search only where it is still needed. That is a change to the shape of
+the cascade rather than a lever, so it wants deciding rather than doing:
+[W4](DECISIONS.md#w4).
+
+**What would close this entry.** Either the stages reordered, with the fingerprint
+tests showing the routes unchanged and the bench showing what it saved; or a field
+recorded here on which the tangent stage does win, which would say the bench is
+what is unrepresentative rather than the ordering.
+
+### Closed 27 Aug 2026 — reordered, and then the stage removed
+
+The grid was moved above the whole tangents/corners/rings block and the tangent
+plan put behind a local `Tangents()` that draws it at most once an order and only
+if a caller is reached. That much was what this entry asked for. The measurement
+that followed went further than the entry expected:
+
+| | tangent graph drawn | stage answered |
+|---|---|---|
+| asked before the grid | 83 of 280 orders | **0** |
+| asked after the grid | **27** of 280 | **0** |
+| stage off | **0** | — |
+
+The Long March stopped reaching the stage entirely. With the stage off, **not one
+of the 280 routes moves**, marching seconds are identical to the tenth on every
+field, and **no order falls through to the terminal fallback** — the lattice
+answers every order the grid could not. So the orders reaching the stage were
+exactly the ones it was always going to refuse, which is the sharper form of what
+this entry suspected.
+
+`AskTangentStage` therefore ships at **off**. The search is not deleted: an attack
+order goes straight to it, and its plan is still the terminal fallback, which has
+not fired on any bench field but is what stands between a regiment and no route at
+all.
+
+**What it saved**, paired across four alternating builds, least of four — the
+Crucible **-17,3%**, the Long March **-20,9%**, the sideways mile **-29,2%**,
+Broken Country **-31,7%**, winning all sixteen paired field-runs. The 13% estimated
+above was low because it priced the search alone and not the ledger reset and
+clearance work hung off it.
+
+## 23. The clearance path asks the index once a leg; the hybrid asks once a node
+
+Raised by [M84](DECISIONS.md#m84). `BodyScan` is the heaviest step in the planner
+on every field and for five of six planners — 33% to 72% of self time — and
+roughly **half of it is the index query itself**:
+
+| field | BodyScan self | NearQuery self | query's share |
+|---|---|---|---|
+| crucible | 28,8 ms | 24,4 ms | 46% |
+| longmarch | 7,3 ms | 8,0 ms | 52% |
+| brokencountry | 29,0 ms | 25,9 ms | 47% |
+| sidewaysmile | 4,2 ms | 7,5 ms | 64% |
+
+M84 made each query about 12% cheaper and that moved the total inside noise,
+because the query is only 15 to 28% of the bill. **The remaining move is to ask
+fewer times, and the hybrid already does it.**
+
+`HybridAStarPlanner.TakeStock` asks which bodies are near **once per expansion**
+and reuses that set across every motion primitive tried from the node: 25 503
+stock calls serving 172 021 clearance tests on the Crucible, a **6,7 to 1**
+reuse. `Marching`'s clearance path asks once per leg — 76 379 queries for 76 379
+tests, **1 to 1**.
+
+**Why the reuse should exist.** A search prices many legs between the same small
+set of candidate places, and legs sharing an endpoint share almost all of their
+neighbourhood. A set gathered once for a place, with a radius covering every leg
+that leaves it, would serve all of them.
+
+**What makes it non-trivial.** The set has to be keyed by something that is
+genuinely the same — a place and a radius — and invalidated when a body moves,
+which inside one plan it does not. `RouteSearch.Ledger` already lives for exactly
+one search and already carries per-place scratch, so it is the natural home.
+
+### Rewritten 28 Aug 2026 — the ratio was the wrong number to lead with
+
+The entry above argues from **1:1 against 6,7:1**, and that comparison does not
+decide anything. A ratio says how often a set is reused; it does not say whether
+gathering the set was worth doing. Measuring the yield says what does.
+
+`UnitIndex.Near` hands back **14,1 bodies a query** on average, and filtering one
+body down to the ones that actually matter to a leg costs **0,041 µs**. So the
+arithmetic that decides this entry is not the reuse ratio at all:
+
+| | |
+|---|---|
+| bodies a query returns today | **14,1** |
+| cost of filtering one | **0,041 µs** |
+| what one hoisted query must return to break even | **about 27** |
+
+A per-order corridor gathered once and filtered per leg only pays if the corridor
+returns **fewer than about 27 bodies**. Above that, the filtering the hoist adds
+costs more than the queries it removes — and a corridor sized to cover every leg
+of an order is a long thin box across most of the field, which on the Crucible
+and Broken Country is very unlikely to stay under 27.
+
+**The halo is the reason the number is that large.** `UnitIndex.BucketMetres` is
+128 m and the halo the clearance path asks with is reach + widest reach + half a
+bucket diagonal, about **346 m** — against a body reach of roughly 128. So the
+query is already returning most of a wing before anything is filtered, and the
+first move on this entry is **not** hoisting: it is asking a smaller question.
+
+**What would close this entry now.** Either the halo brought down to something
+near the reach actually needed, with the profile showing what `NearQuery` became
+and `RouteFingerprintTests` showing no route moved; or a measured corridor on the
+Crucible showing it returns under 27 bodies, which would make the hoist worth
+building after all. The reuse ratio is not evidence for either and should not be
+quoted again.
+
+## 24. Six approach angles, three causes, and only one of them left
+
+Raised by the designer: *"do 08"* — the oldest open defect, and the gate the whole
+*(place, front)* redesign was written for.
+`ApproachAngleTests.EveryApproachAngleFindsAWayThroughTheGap` has stood at **6 of
+19 failing** since the count came down from 12, with no explanation attached to
+the six. It has one now, and it is three separate faults rather than one.
+
+The six are **0°, 5°, 15°, 20°, 25° and 30°**, all `pressed through`, all about
+19 s against 60 s for a clear route at the angles either side.
+
+**It is not the price.** The obvious reading is that
+[M88](DECISIONS.md#m88)'s ceiling refuses a way round costing 3,2 times the
+press. Swept at 3 / 3,5 / 4 / 6 / 100 and off, the same six fail at every one
+— `ApproachAngleTests.WhatTheCeilingCostsTheGap`. Nothing is being refused on
+price; nothing clear is being found.
+
+**And it is not the stages.** Counters per angle
+(`WhichStageAnswersEachAngle`) show the grid **asked once, found a route, and
+held none** at every angle from 0° to 55°, with the lattice asked once and
+winning none. The routes exist and every one of them fails `WalksCleanly`.
+
+Opening one up leg by leg (`OneFailingAngleLegByLeg`) found three faults:
+
+**(a) The route jumped from the regiment to a node a cell and a half away.**
+`Reconstruct` replaced both end cells with the true start and destination, so the
+first leg ran from wherever the regiment stood straight to the *second* cell's
+node, cutting the corner of the cell between — and a regiment ordered to move is
+usually standing against the body it has been told to get round, so that corner
+is that body. The grid never checked the leg, because it is not a grid edge.
+**Fixed** by [M90](DECISIONS.md#m90); it is free to slightly faster, and 50° and
+55° now hold a grid route where they did not.
+
+**(b) The finer the cells, the worse the grid did.** The regiment starts inside
+the halo of the body it touches, and A* refused every held cell, so the search
+was walled in at the start and again at the destination. At a regiment's width
+one 45 m step happens to clear the halo; at a quarter of it no chain of 11 m
+steps ever does, and **the fine tier returned no route at all on exactly the
+arrangements it was added for**. **Fixed** by [M90](DECISIONS.md#m90): held
+ground is priced at 60× an open step rather than refused, which is
+[M89](DECISIONS.md#m89) — a regiment that legally stands somewhere must be able
+to leave it. The quarter grid now walks legs 1 to 22 of 23 at 0° where it
+previously found nothing.
+
+**(c) The last leg wheels 93° for a six-metre leg — the rule is now [M91](DECISIONS.md#m91), and it is not enough.** What now
+fails at 0° is the final stitch, `(1045,4 , 493,8) → (1045,0 , 500,0)`: 6,2 m
+long, and `AlongTheLine` gives it a front of 93,3°, at which the regiment's
+40 m width swings across body 1. Held at its existing front the same leg is
+clear. A grid route comes back with `Hold` **null**, so every leg is costed and
+checked on the line of march and holding a front is never on the menu — which is
+[M4a](DECISIONS.md#moving)'s open item showing up as a routing failure.
+
+**The rule was named and built.** [M91](DECISIONS.md#m91): the line of march is
+tried on every leg, always, and the front already in hand is asked about only on a
+leg that will not walk wheeled — [M14](DECISIONS.md#moving) said per leg, priced
+by the crab pricing that already existed. Built as a repair against `FirstBadLeg`
+itself, so plan and gate cannot drift apart.
+
+**It fires zero times on the bench and does not close the gate.** The sideways
+walk was measured at **0 legs on all four bench fields**, because grid routes that
+reach the gate there already walk. And at 0° the leg it would rescue — the final
+6,2 m stitch — turns out to be **blocked at every front tried, including the one
+in hand**. So the front was never the whole story either.
+
+**(d) There is a licence to leave contact and none to arrive in it. — OPEN, and
+it is the one left.** At 0° the regiment must finish at `(1045,0 , 500,0)`, which
+is **touching** body 1. Swept properly — twenty-four fronts, not the three the
+first note used — `ApproachAngleTests.WhatTheArrivalWillAccept`:
+
+| | at the 0° approach | at the 20° approach |
+|---|---|---|
+| fronts it could **stand** on at the goal | **2** of 24 | **2** of 24 |
+| fronts the final leg **walks** on | **0** of 24 | **0** of 24 |
+| fronts the **same leg walked backwards** clears | **7** of 24 | **9** of 24 |
+
+**That asymmetry is the whole finding.** The same rectangle, the same front, the
+same bodies, the same two endpoints — clear one way and blocked the other. The
+only thing direction changes is which end gets the leaving licence:
+`IsClearLine(leaving: true)` forgives contact the regiment **starts** in, and the
+contact here is at the **end**. Walk the leg backwards and the licence lands on
+the touching end, and it clears.
+
+So this is not the route approaching from a wrong side, and it is not the
+destination being unreachable: the regiment **can stand there**, on two fronts,
+and the ground is legal. It is that nothing in the cascade will let it *arrive* in
+a contact it is permitted to *stand* in — [M92](DECISIONS.md#m92) at the other end
+of the route.
+
+**The second half, which is real but not the blocker.** Only **2 of 24** fronts
+are standable at that goal, and nothing chooses between them:
+`Marching.AlongTheLine` gives the last leg whatever front its direction implies,
+which is one of the other twenty-two almost every time. That wants
+[M4](DECISIONS.md#m4) applied where the order drew no bearing — but on its own it
+would not fix 0°, because at 0° both standable fronts are blocked forwards too.
+
+**Tried, and it is not enough on its own.** [M94](DECISIONS.md#m94) built exactly
+that licence and it **loosens the gate**: turned on alone it takes three of seven
+sampled angles to `walks through somebody`, and 10° from clear to a 68 s route
+that clips. It ships off. The two pieces built alongside it - refusing smoothing
+that breaks a route, and dropping a node the body cannot stand at - are **inert**
+on this arrangement and ship off with it.
+
+**What would close this entry.** The arriving licence with a tolerance that
+matches `Marching.IsClearLine` rather than `AllowedContactFraction`, so it forgives
+*ending* in contact without also forgiving passing through something on the way in
+- see [M94](DECISIONS.md#m94). It is the mirror of
+[M92](DECISIONS.md#m92) and of `EscapesWithoutDeepening`: a leg may finish in
+contact with one of its own provided it neither enters a body it was clear of nor
+deepens one it was already lapping. That follows from rules already pinned —
+[M2](DECISIONS.md#moving) permits a line standing shoulder to shoulder, and
+[M89](DECISIONS.md#m89) says a body that fits, fits — and it is what the reversed
+column above is measuring. Then the arrival front chosen rather than inherited.
+With all nineteen angles clear, the bench showing what it cost, and the
+fingerprint tests showing which routes moved.
+
+## ~~25. Two test classes were never serialised, and it was read as a wall-clock fault~~ — FIXED ([M92](DECISIONS.md#m92), [M93](DECISIONS.md#m93))
+
+Raised, mis-diagnosed and corrected on 28 Aug 2026. **The correction is the
+useful part of this entry**, so the wrong reading is kept above the right one.
+
+**The gap that started it.** `OrderSystem` asks `MayPlan` before the *placement*
+search as well as before the plan — deliberately, and the comment says why. But
+`Marching.PlanTo` is what charges `Spent`, and the branch where
+`TryFindPlacement` finds nowhere to stand **returns without ever reaching the
+planner**, so on that path a permission was granted, real geometry ran, and the
+ration was never touched.
+
+**Two attempts, and what each really proved.**
+
+| charged as | `OneClickPlansTheSameRoutes` | what it actually meant |
+|---|---|---|
+| a route slot | failed **every** run, in isolation too | **correct** — spending a route on a route that does not exist changes where a batch runs out |
+| milliseconds only | passed in isolation, failed **1 run in 3** in the suite | **not the charge at all** |
+
+**The wrong conclusion.** It was written up here as: the millisecond cap is a
+stopwatch, so which regiments get planned depends on machine speed, and this test
+sits close enough to the edge to tip. That is a plausible story, the cap really is
+a stopwatch — and it was **not the cause**.
+
+**The actual cause.** `WingOrderTests` and `ApproachAngleTests` carried **no
+`[Collection(PlannerLevers.Name)]`**, while thirteen other classes that move
+planner levers do. So they ran in parallel with classes flipping
+`StagedRoutePlanner` and `RegimentGrid` statics underneath them. `WingOrderTests`
+plans one field twice and compares the two — a lever moved between the halves
+reads there as a threading fault, **which is the one thing that class exists to
+detect and the one thing it must not invent**. Both are now in the collection, and
+with them in it the placement charge is clean: **10 failures across four runs**,
+the standing set exactly.
+
+**What this cost, and the rule it earns.** An hour spent on a hypothesis about
+wall clock, and an entry written asserting it. The tell was there and was walked
+past: the charge **passed when the test was run alone** and failed only in the
+suite. *A failure that appears only in the whole suite is a claim about the suite,
+not about the change* — and this repository already knew that, which is why
+`PlannerLevers` exists at all. Membership of it is not optional decoration; a
+class that reads a lever anything else writes belongs in it, and nothing checks
+that.
+
+**Still true, but now unevidenced.** `MayPlan` refuses on
+`MillisecondsThisFrame >= _maxMilliseconds`, which is a stopwatch, so the route
+count is deterministic and the millisecond cap is not, and they are ORed together.
+That remains a real property of the code and a fair thing to decide about — it is
+simply not something this test ever demonstrated. Recorded as an observation, not
+a finding, and it wants a replay across two machines before anybody acts on it.
+
+## 26. The Input Manager migration cannot be done or checked outside Unity — sized, 28 Aug 2026
+
+Decision 13, tried and stopped at the survey, which is the useful part of it.
+
+| | |
+|---|---|
+| call sites | **33** |
+| files | **2** — `BattlefieldController.cs` (22), `CameraRig.cs` (11) |
+| `com.unity.inputsystem` in `Packages/manifest.json` | **absent** |
+| `ProjectSettings.asset` → `activeInputHandler` | **0** — old Input Manager only |
+
+So this is not a rewrite of 33 lines. It is: add the package, set
+`activeInputHandler` to 2 (both) so nothing breaks while the sites move, let
+Unity regenerate, rewrite the sites, then set it to 1. Steps two and three
+**cannot be verified from outside the editor** — the package resolve and the
+`ENABLE_INPUT_SYSTEM` define both happen on Unity’s side, and the two files
+involved are the ones that drive the whole game. Editing them blind, unable to
+compile, against an API that is not yet present, is how a working build becomes a
+broken one with no test able to say so.
+
+**What would close this entry.** The package added and the handler set to *both*
+from inside Unity — which is a two-minute job for whoever has the editor open and
+is not a two-minute job for anyone else — after which the 33 sites can be moved
+and checked here. Until then this stays deferred, and it is deferred because of
+where it has to be done, not because of its size. Nothing is broken today: Unity
+marks the old system for deprecation, it has not removed it.
+
+## ~~27. The same build answers the same order two different ways~~ — WITHDRAWN, it was two builds
+
+Raised and withdrawn on 28 Aug 2026. **It is kept because the reason it was wrong
+is worth more than the entry ever was.**
+
+**The claim.** Two tests asking the same question about the same nineteen
+approach angles, each run in its own isolated session on what was believed to be
+one build, answered 0° differently — *pressed through* at 19 s from one call
+site, a 56 s way round that walks through somebody from the other. The only
+visible difference was that one swept every planner before judging the default.
+It was written up as shared state making the planner a function of its history,
+and it was used to cast doubt on every bench number taken this session.
+
+**The reproduction was written and it went green.** Plan one order, then plan it
+again on a freshly built identical battlefield with every other planner having run
+in between; assert the routes are byte-identical. It passed. Written a second
+time with the [M94](DECISIONS.md#m94) levers forced on, it passed again.
+
+**Then both call patterns were run back to back inside one process**, which is what
+should have been done first —
+`ApproachAngleTests.TheTwoCallPatternsSideBySide`. Cold and after a full sweep of
+every planner over every angle: **byte-identical, at every angle, in every lever
+configuration**. There is no order dependence. A planner is a function of its
+arrangement, exactly as it should be.
+
+**What actually happened.** The two readings came from **two different builds**.
+The bisect that produced them edited levers in source and rebuilt between cases;
+its last line restored the levers *in source* and did **not** rebuild, and the
+next command ran `dotnet test --no-build`. So the "all levers on" gate reading was
+taken from the binary of the previous case.
+
+**[W11](DECISIONS.md#w11), for the fourth time**, and in a new disguise — not a
+silenced build ([M86](DECISIONS.md#m86)), not the wrong compiler
+([M64](DECISIONS.md#m64)), not a stale Release DLL ([M82](DECISIONS.md#m82)), but
+**a source edit with no build behind it followed by `--no-build`**. The tell was
+in plain sight and was read as a discovery instead of an error: two isolated runs
+of one binary cannot disagree, so the premise — that it was one binary — was the
+thing to doubt.
+
+**What follows from the withdrawal.** [M87](DECISIONS.md#m87)'s and
+[M90](DECISIONS.md#m90)'s bench tables, and every A/B taken this session, are
+**not** undermined; the doubt cast on them was cast by this entry and goes with
+it. The determinism reproduction is kept as
+`ApproachAngleTests.ThePlannerAnswersTheSameArrangementTheSameWay`, green, with a
+non-vacuity guard — it costs nothing and it is the check that would have settled
+this in one run.
+
+**And what it did establish**, once measured properly with the levers moved at
+runtime rather than by rebuilding:
+
+| turned on alone | what changes on the seven angles sampled |
+|---|---|
+| smoothing refused when it breaks a route | **nothing** — identical to baseline |
+| nodes the body cannot stand at dropped | **nothing** — identical to baseline |
+| **the arriving licence** | **three angles become `walks through somebody`**, and 10° goes from **clear** to a 68 s route that clips |
+
+That is the real reason [M94](DECISIONS.md#m94) ships off, and it convicts one of
+its four pieces rather than all of them.
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

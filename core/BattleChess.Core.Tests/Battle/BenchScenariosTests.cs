@@ -64,7 +64,7 @@ namespace BattleChess.Tests.Battle
         };
 
         /// <summary>How many regiments the battle file asks for.</summary>
-        private static int Authored(string key)
+        internal static int Authored(string key)
         {
             int deployments = 0;
 
@@ -334,7 +334,7 @@ namespace BattleChess.Tests.Battle
                 double total = sorted[0];
 
                 _out.WriteLine(
-                    $"{planner.Name,-38} {total,10:0.0} ms   {total / 80d,8:0.00} ms an order   " +
+                    $"{planner.Name,-38} {total,10:0.0} ms   {total / Authored(key),8:0.00} ms an order   " +
                     $"{bare.Found} routed, {bare.Pressed} pressed");
 
                 _out.WriteLine($"{string.Empty,-38} {Spread(runs)}");
@@ -371,7 +371,7 @@ namespace BattleChess.Tests.Battle
             return $"{step} {(total > 0d ? self / total : 0d),6:0.0%}";
         }
 
-        private readonly struct Tally
+        internal readonly struct Tally
         {
             public Tally(int orders, int found, int failed, int pressed,
                 long places, long legs, long states, long expanded, long bodies, long standChecks,
@@ -433,7 +433,7 @@ namespace BattleChess.Tests.Battle
         /// apart. Sorting is for choosing the median, not for the page.
         /// </para>
         /// </remarks>
-        private static double OnePass(string key, IRoutePlanner? planner, out Tally tally)
+        internal static double OnePass(string key, IRoutePlanner? planner, out Tally tally)
         {
             BattleState plain = Load(key);
 
@@ -461,7 +461,7 @@ namespace BattleChess.Tests.Battle
         /// name="most"/> passes; the dear ones get <paramref name="fewest"/> and
         /// the report says how many, so a thin number is visibly thin.
         /// </remarks>
-        private static List<double> Passes(
+        internal static List<double> Passes(
             string key, IRoutePlanner? planner, out Tally tally,
             int fewest = 3, int most = 9, double budgetMs = 4000d)
         {
@@ -492,7 +492,7 @@ namespace BattleChess.Tests.Battle
         /// it because "is this faster" and "does this hold a frame" are
         /// different questions and only the first one is answered by a floor.
         /// </remarks>
-        private static string Spread(IReadOnlyList<double> runs)
+        internal static string Spread(IReadOnlyList<double> runs)
         {
             var sorted = new List<double>(runs);
             sorted.Sort();
@@ -509,7 +509,7 @@ namespace BattleChess.Tests.Battle
                    $"({(most - least) / Math.Max(0.001, least),0:0.0%} apart)   as they ran: {order}";
         }
 
-        private static Tally OrderEverybody(BattleState battle, IRoutePlanner? planner)
+        internal static Tally OrderEverybody(BattleState battle, IRoutePlanner? planner)
         {
             IPathfinder pathfinder = new DirectPathfinder(
                 battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);

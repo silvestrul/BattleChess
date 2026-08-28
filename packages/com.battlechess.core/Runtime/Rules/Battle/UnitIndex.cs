@@ -117,26 +117,87 @@ namespace BattleChess.Rules
             Build(units);
 
             Marks marks = MarksForThisThread();
+            marks.Sweep++;
 
-            // Everything within this of some sample point along the line is
-            // caught, and the samples are close enough together that no point on
-            // the line is further than half a bucket from one of them.
-            float halo = reach + _widestReach + BucketMetres * 0.5f;
+            // The corridor this query is really asking about: everything whose
+            // own reach can touch the line.
+            float corridor = reach + _widestReach;
 
             Vec2 travel = to - from;
             float length = travel.Length;
 
-            int samples = length <= 0f
-                ? 1
-                : 1 + (int)MathF.Ceiling(length / (BucketMetres * 0.5f));
-
-            marks.Sweep++;
-
-            for (int s = 0; s < samples; s++)
+            if (length <= 0f)
             {
-                Vec2 at = samples == 1 ? from : Vec2.Lerp(from, to, s / (float)(samples - 1));
-                Gather(at, halo, into, marks);
+                Gather(from, corridor, into, marks);
+                return;
             }
+
+            // M84. One pass over the buckets the corridor covers, rather than a
+            // square of buckets gathered at each of a line of sample points.
+            //
+            // The old shape sampled every half bucket and gathered a square of
+            // side twice the halo at each — and the halo carried half a bucket
+            // of its own so that no point on the line fell between samples. At
+            // 128 m buckets and a regiment's 45 m reach that is a four-by-four
+            // square taken eight times down a 400 m leg: **128 bucket visits to
+            // cover about fourteen distinct buckets**. The marks array made the
+            // repeats cheap rather than wrong, so nothing was ever incorrect —
+            // it just did nine times the bounds arithmetic it needed to.
+            //
+            // The single pass is also *tighter*: a bucket is taken only if its
+            // own square can reach the corridor, where the old halo carried the
+            // sampling slack whether or not the geometry needed it. So this
+            // hands back a smaller set as well as building it in one sweep, and
+            // every body the old one could return is still in it.
+            float half = BucketMetres * 0.5f;
+            float diagonal = half * 1.41421356f;
+            float span = corridor + diagonal;
+
+            int lowColumn = Column(MathF.Min(from.X, to.X) - span);
+            int highColumn = Column(MathF.Max(from.X, to.X) + span);
+            int lowRow = Row(MathF.Min(from.Y, to.Y) - span);
+            int highRow = Row(MathF.Max(from.Y, to.Y) + span);
+
+            Vec2 along = travel / length;
+            float reachSquared = span * span;
+
+            for (int row = lowRow; row <= highRow; row++)
+            for (int column = lowColumn; column <= highColumn; column++)
+            {
+                int bucket = row * _columns + column;
+
+                if (marks.Visited[bucket] == marks.Sweep) continue;
+
+                // The bucket's own square is what has to reach the corridor,
+                // so its centre is allowed to sit a half-diagonal further off.
+                var centre = new Vec2(
+                    _origin.X + (column + 0.5f) * BucketMetres,
+                    _origin.Y + (row + 0.5f) * BucketMetres);
+
+                if (FarFromSegment(centre, from, along, length) > reachSquared) continue;
+
+                marks.Visited[bucket] = marks.Sweep;
+
+                List<UnitInstance> held = _buckets[bucket];
+                for (int i = 0; i < held.Count; i++)
+                    into.Add(held[i]);
+            }
+        }
+
+        /// <summary>How far a point lies off a segment, squared.</summary>
+        private static float FarFromSegment(Vec2 point, Vec2 from, Vec2 along, float length)
+        {
+            Vec2 offset = point - from;
+
+            float onto = offset.X * along.X + offset.Y * along.Y;
+
+            if (onto < 0f) onto = 0f;
+            else if (onto > length) onto = length;
+
+            float dx = offset.X - along.X * onto;
+            float dy = offset.Y - along.Y * onto;
+
+            return dx * dx + dy * dy;
         }
 
         /// <summary>Every body that could reach within <paramref name="reach"/> of a point.</summary>

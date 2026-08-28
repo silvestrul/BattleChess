@@ -155,6 +155,78 @@ namespace BattleChess.Rules.GridPlanning
         /// <summary>Cells one search may settle before it gives up.</summary>
         internal static int CellBudget = 40_000;
 
+        /// <summary>
+        /// Whether the route keeps the node of the cell it starts in and the
+        /// node of the cell it ends in, rather than jumping straight from the
+        /// regiment's own position to the second cell on the path.
+        /// </summary>
+        /// <remarks>
+        /// <b>M90.</b> <c>Reconstruct</c> used to replace both end cells with
+        /// the true start and destination, which reads as tidy and is a hole:
+        /// the resulting first leg runs from wherever the regiment stands to a
+        /// node <b>two cells away</b>, cutting the corner of the cell in
+        /// between - and that corner is very often the body the route was drawn
+        /// to avoid, because a regiment ordered to move is usually standing
+        /// right beside one. The grid never checked that leg, because it is not
+        /// a grid edge. It is what refused every grid route on six of the
+        /// nineteen approach angles, at both tiers, at every ceiling.
+        /// <para>
+        /// Keeping the end nodes makes every consecutive pair of route points
+        /// at most one cell apart, so the only hops the grid does not vouch for
+        /// are the two sub-cell ones onto and off the path - which are
+        /// unavoidable, since the regiment is where it is. Smoothing then takes
+        /// the extra points back out wherever the sweep can see past them, so
+        /// the cost is a pass over two more waypoints and not a longer route.
+        /// </para>
+        /// </remarks>
+        internal static bool KeepEndCells = true;
+
+        /// <summary>
+        /// What a step into a cell held by a body costs, as a multiple of the
+        /// same step over open ground. Nought refuses such cells outright,
+        /// which is what the grid did before <b>M90</b>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A regiment ordered to move is usually standing <b>touching</b> the
+        /// body it has been told to get round, so its own cell is held and so
+        /// is every cell within the halo - which reaches
+        /// <see cref="ClearanceFraction"/> of its circumscribed radius plus
+        /// <see cref="MarginMetres"/>, twenty-one metres for a forty by twenty
+        /// regiment. Refusing every held cell therefore walls the search in at
+        /// the start and again at the destination, and it does so <b>worse the
+        /// finer the cells are</b>: at a regiment's width one step of forty-five
+        /// metres happens to clear the halo, at a quarter of it no chain of
+        /// eleven-metre steps ever does, and the fine tier returns no route at
+        /// all on exactly the arrangements it was added for.
+        /// </para>
+        /// <para>
+        /// <b>M89</b> says the question is whether the body fits the space, so a
+        /// regiment that legally stands somewhere must be able to leave it. A
+        /// price rather than a refusal says that: the search crosses held ground
+        /// only where there is nothing else, which is the escape and the
+        /// approach, and never as a short cut, because at this multiple a single
+        /// held step costs more than going round nearly always does.
+        /// </para>
+        /// </remarks>
+        /// <remarks>
+        /// <b>Sixty on the measurement, because that is where it stops
+        /// mattering.</b> Swept at 0 / 8 / 25 / 40 / 60 / 80 / 120 / 200 on the
+        /// four bench fields: at eight the search cuts <b>through</b> bodies for
+        /// a short cut, the coarse grid holds not one route on the Crucible or
+        /// Broken Country, the lattice runs eighteen times on each and the pass
+        /// costs 285 and 254 ms - which is
+        /// <see cref="ClearanceFraction"/>'s warning about an optimistic grid,
+        /// exactly. From sixty upward <b>not one route moves</b>: 57 632,6 and
+        /// 71 664,1 s of marching at 60, 80, 120 and 200 alike. So sixty is
+        /// where held ground has stopped being a short cut and become only an
+        /// escape, and paying more buys nothing. It also leaves the coarse grid
+        /// answering <b>more</b> orders than refusal did - 25 and 26 against 23
+        /// and 22 - so the fine tier is asked eleven and ten times rather than
+        /// fifteen and eighteen, for 0,7% and 1,9% more marching.
+        /// </remarks>
+        internal static float BlockedStepPenalty = 60f;
+
         /// <summary>Cells settled by the last search on this thread.</summary>
         [ThreadStatic] public static int LastCellsExplored;
 
@@ -208,10 +280,13 @@ namespace BattleChess.Rules.GridPlanning
         /// returns the view of it that belongs to this mover.
         /// </summary>
         public static RegimentGrid For(
-            BattleState battle, UnitInstance mover, Facing? travellingOn = null)
+            BattleState battle, UnitInstance mover, Facing? travellingOn = null,
+            float? spacingMultiple = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (mover == null) throw new ArgumentNullException(nameof(mover));
+
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GridField);
 
             Footprint print = mover.Shape.Footprint;
             float fraction = Math.Clamp(ClearanceFraction, 0f, 1f);
@@ -219,7 +294,11 @@ namespace BattleChess.Rules.GridPlanning
                 print.HalfDepth + (print.BoundingRadius - print.HalfDepth) * fraction +
                 MathF.Max(0f, MarginMetres);
 
-            float spacing = MathF.Max(1f, print.BoundingRadius * 2f * SpacingMultiple);
+            // Named by the caller for the fine tier of M87, and the static
+            // otherwise. The field cache is keyed by the spacing, so the two
+            // tiers keep separate grids and neither evicts the other.
+            float spacing = MathF.Max(
+                1f, print.BoundingRadius * 2f * (spacingMultiple ?? SpacingMultiple));
             int samples = SubSamples >= 19 ? 19 : SubSamples >= 7 ? 7 : 1;
 
             OrientedRect? moving =
@@ -475,6 +554,8 @@ namespace BattleChess.Rules.GridPlanning
         /// </remarks>
         public bool TryRoute(Vec2 from, Vec2 to, out List<Vec2> waypoints)
         {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.GridSearch);
+
             waypoints = null!;
             LastCellsExplored = 0;
             LastRawWaypoints = 0;
@@ -531,9 +612,18 @@ namespace BattleChess.Rules.GridPlanning
                         : _field.GoingAt(next);
 
                     if (going <= 0f) continue;
-                    if (next != goal && IsBlocked(next)) continue;
 
-                    float tentative = cost + _field.Spacing / going;
+                    // Held ground is priced rather than refused - M90. The goal
+                    // cell is enterable whatever is on it, as it always was.
+                    float penalty = 1f;
+
+                    if (next != goal && IsBlocked(next))
+                    {
+                        if (BlockedStepPenalty <= 0f) continue;
+                        penalty = BlockedStepPenalty;
+                    }
+
+                    float tentative = cost + _field.Spacing / going * penalty;
 
                     if (bestCost.TryGetValue(next, out float known) && tentative >= known) continue;
 
@@ -564,13 +654,25 @@ namespace BattleChess.Rules.GridPlanning
             cells.Add(start);
             cells.Reverse();
 
-            // The true ends rather than the cells that hold them, and in
-            // between, the free part of each cell rather than its middle.
-            var points = new List<Vec2>(cells.Count) { from };
+            // The true ends, and in between, the free part of each cell rather
+            // than its middle. Whether the two end cells contribute a node of
+            // their own is M90's question - see KeepEndCells.
+            var points = new List<Vec2>(cells.Count + 2) { from };
 
-            for (int i = 1; i < cells.Count - 1; i++) points.Add(NodeAt(cells[i]));
+            int first = KeepEndCells ? 0 : 1;
+            int last = KeepEndCells ? cells.Count - 1 : cells.Count - 2;
 
-            points.Add(to);
+            for (int i = first; i <= last; i++)
+            {
+                Vec2 node = NodeAt(cells[i]);
+
+                // A node that lands on the point already there is not a leg,
+                // and a zero-length leg has no front to hold.
+                if (Vec2.Distance(points[points.Count - 1], node) > 0.01f) points.Add(node);
+            }
+
+            if (Vec2.Distance(points[points.Count - 1], to) > 0.01f) points.Add(to);
+
             return points;
         }
     }

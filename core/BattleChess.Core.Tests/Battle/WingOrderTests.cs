@@ -33,6 +33,13 @@ namespace BattleChess.Tests.Battle
     /// two of them did.
     /// </para>
     /// </remarks>
+    /// <remarks>
+    /// <b>Serialised with every other class that moves a planner lever.</b>
+    /// It plans one field twice and compares, so a lever moved by another class
+    /// between the two halves reads here as a threading fault - which is the one
+    /// thing this class exists to detect, and the one thing it must not invent.
+    /// </remarks>
+    [Collection(PlannerLevers.Name)]
     public sealed class WingOrderTests
     {
         private readonly ITestOutputHelper _out;
