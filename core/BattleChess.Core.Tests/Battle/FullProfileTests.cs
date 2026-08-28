@@ -1201,6 +1201,261 @@ namespace BattleChess.Tests.Battle
                 $"cheaper on {holdWins}; the first leg is under a tenth of the route on {firstLegTiny}.");
         }
 
+        /// <summary>
+        /// What taking the front from the march rather than the first waypoint
+        /// changes: every route, every opening wheel, and the bill.
+        /// </summary>
+        /// <remarks>
+        /// <b>M99, measured both ways in one process.</b> The claim that has to
+        /// be checked is not that the wheel comes down - that is arithmetic -
+        /// but that <b>no waypoint moves</b>. The front is an argument to
+        /// <c>Marching.IsClearLine</c>, so a pass that touched fronts could
+        /// quietly change which routes exist, and that is exactly what the
+        /// rejected 90-degree cap would have done.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is the sweep " +
+                     "M99 chose its threshold from, and it plans every order on every bench " +
+                     "field eleven times over.")]
+        public void WhatTakingTheFrontFromTheMarchChanges()
+        {
+            bool was = RouteFronts.FrontFromTheMarch;
+            float bodies = RouteFronts.StubLegBodies;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-15}{"stub is",12}{"metres",8}{"fronts",8}{"over90",8}" +
+                    $"{"turned",9}{"vs off",8}{"march s",10}{"vs off",8}{"crabbed m",11}");
+                _out.WriteLine(new string('-', 97));
+
+                float[] sweepBodies = { 0f, 1f, 2f, 4f, 8f, 1000f };
+
+                foreach (string field in Fields)
+                {
+                    float turnedOff = 0f, secondsOff = 0f;
+
+                    foreach (float many in sweepBodies)
+                    {
+                        RouteFronts.FrontFromTheMarch = 0f < many;
+                        RouteFronts.StubLegBodies = many;
+
+                        List<(IReadOnlyList<Vec2> points, float wheel, float route,
+                              float turned, float seconds, float crabbed)> orders = Opening(field);
+
+                        int moved = 0, ninety = 0;
+                        float turned = 0f, seconds = 0f, crabbed = 0f, stubMetres = 0f;
+
+                        foreach ((IReadOnlyList<Vec2> points, float wheel, float route,
+                                  float legTurned, float legSeconds, float legCrabbed) in orders)
+                        {
+                            turned += legTurned;
+                            seconds += legSeconds;
+                            crabbed += legCrabbed;
+
+                            if (90f < wheel) ninety++;
+
+                            stubMetres = MathF.Max(stubMetres, 0f);
+                        }
+
+                        if (many <= 0f)
+                        {
+                            turnedOff = turned;
+                            secondsOff = seconds;
+                        }
+
+                        // How long a leg this setting actually calls a stub, on
+                        // the deepest body on the field - the reader wants
+                        // metres, not multiples.
+                        float deepest = 0f;
+                        foreach (UnitInstance u in BenchScenariosTests.Load(field).UnitsOnField())
+                            deepest = MathF.Max(deepest, u.Footprint.Depth);
+
+                        stubMetres = many >= 1000f ? -1f : deepest * many;
+
+                        moved = FrontsThatMoved(field, many);
+
+                        _out.WriteLine(
+                            $"{field,-15}" +
+                            $"{(many <= 0f ? "off" : many >= 1000f ? "a tenth of route" : $"{many:0} body"),12}" +
+                            $"{(stubMetres < 0f ? "" : $"{stubMetres:0}"),8}{moved,8}{ninety,8}" +
+                            $"{turned,9:0}{(turned - turnedOff) / MathF.Max(1f, turnedOff),8:+0.0%;-0.0%;0.0%}" +
+                            $"{seconds,10:0}" +
+                            $"{(seconds - secondsOff) / MathF.Max(1f, secondsOff),8:+0.0%;-0.0%;0.0%}" +
+                            $"{crabbed,11:0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                RouteFronts.FrontFromTheMarch = was;
+                RouteFronts.StubLegBodies = bodies;
+            }
+        }
+
+        /// <summary>
+        /// How many opening fronts this setting moves against the pass off.
+        /// </summary>
+        private static int FrontsThatMoved(string field, float many)
+        {
+            if (many <= 0f) return 0;
+
+            RouteFronts.FrontFromTheMarch = false;
+            List<(IReadOnlyList<Vec2> points, float wheel, float route,
+                  float turned, float seconds, float crabbed)> off = Opening(field);
+
+            RouteFronts.FrontFromTheMarch = true;
+            RouteFronts.StubLegBodies = many;
+            List<(IReadOnlyList<Vec2> points, float wheel, float route,
+                  float turned, float seconds, float crabbed)> on = Opening(field);
+
+            int moved = 0;
+
+            for (int i = 0; i < off.Count && i < on.Count; i++)
+            {
+                Assert.Equal(off[i].points.Count, on[i].points.Count);
+
+                if (0.01f < MathF.Abs(off[i].wheel - on[i].wheel)) moved++;
+            }
+
+            return moved;
+        }
+
+        /// <summary>Every order on a field, with the front it opens on.</summary>
+        private static List<(IReadOnlyList<Vec2> points, float wheel, float route,
+                             float turned, float seconds, float crabbed)>
+            Opening(string field)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            var opened = new List<(IReadOnlyList<Vec2>, float, float, float, float, float)>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Vec2 to = BenchScenariosTests.OrderFor(battle, unit);
+                Plan plan = Marching.PlanTo(battle, unit, pathfinder, to);
+
+                IReadOnlyList<Vec2> points = plan.Path.Waypoints;
+                if (!plan.Path.Found || points.Count < 2) continue;
+
+                Facing first = plan.Hold != null && 1 < plan.Hold.Length && plan.Hold[1].HasValue
+                    ? plan.Hold[1]!.Value
+                    : Marching.AlongTheLine(points[0], points[1], unit.Facing);
+
+                // Every degree the regiment turns walking this route, opening
+                // wheel included, and what the walk costs at those fronts.
+                float turned = 0f;
+                float crabbed = 0f;
+                Facing on = unit.Facing;
+
+                for (int leg = 1; leg < points.Count; leg++)
+                {
+                    Facing front = plan.Hold != null && leg < plan.Hold.Length && plan.Hold[leg].HasValue
+                        ? plan.Hold[leg]!.Value
+                        : Marching.AlongTheLine(points[leg - 1], points[leg], on);
+
+                    turned += Facing.AbsoluteDelta(on, front) * 180f / MathF.PI;
+                    on = front;
+
+                    // Ground covered with the front well off the way it is
+                    // going. This is the column the eye reads: a regiment
+                    // sliding sideways is what the designer called weird, and
+                    // it is the price of not wheeling.
+                    Facing along = Marching.AlongTheLine(points[leg - 1], points[leg], front);
+
+                    if (45f < Facing.AbsoluteDelta(front, along) * 180f / MathF.PI)
+                        crabbed += Vec2.Distance(points[leg - 1], points[leg]);
+                }
+
+                opened.Add((points, Facing.AbsoluteDelta(unit.Facing, first) * 180f / MathF.PI,
+                            GridRoutePlanner.Length(points), turned,
+                            Marching.SecondsToWalk(battle, unit, points, plan.Hold), crabbed));
+            }
+
+            return opened;
+        }
+
+        private static bool SamePoints(IReadOnlyList<Vec2> a, IReadOnlyList<Vec2> b)
+        {
+            if (a.Count != b.Count) return false;
+
+            for (int i = 0; i < a.Count; i++)
+                if (0.01f < Vec2.Distance(a[i], b[i])) return false;
+
+            return true;
+        }
+
+        /// <summary>What the M99 front pass costs on the clock it runs on.</summary>
+        /// <remarks>
+        /// Least of three uninstrumented passes each way, after a whole warm
+        /// round that is thrown away - the pass adds one
+        /// <c>Marching.IsClearLine</c> per stub leg, and <c>ClearLine</c> is
+        /// 9,3% of the Crucible, so it is not obviously free.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is what M99 " +
+                     "was costed against, and it orders every bench field eight times.")]
+        public void WhatTheMarchFrontPassCosts()
+        {
+            bool was = RouteFronts.FrontFromTheMarch;
+
+            try
+            {
+                // A discard round, warming both settings before a single figure
+                // is written down. Without it the first row reads dear and the
+                // table says the wrong thing about the first field in it.
+                foreach (string field in Fields)
+                {
+                    foreach (bool on in new[] { false, true })
+                    {
+                        RouteFronts.FrontFromTheMarch = on;
+                        BenchScenariosTests.OrderEverybody(BenchScenariosTests.Load(field), null);
+                    }
+                }
+
+                _out.WriteLine($"{"field",-16}{"off ms",10}{"on ms",10}{"change",10}");
+                _out.WriteLine(new string('-', 46));
+
+                foreach (string field in Fields)
+                {
+                    RouteFronts.FrontFromTheMarch = false;
+                    float off = Least(field, passes: 3);
+
+                    RouteFronts.FrontFromTheMarch = true;
+                    float on = Least(field, passes: 3);
+
+                    _out.WriteLine(
+                        $"{field,-16}{off,10:0.00}{on,10:0.00}" +
+                        $"{(on - off) / MathF.Max(0.001f, off),10:+0.0%;-0.0%;0.0%}");
+                }
+            }
+            finally
+            {
+                RouteFronts.FrontFromTheMarch = was;
+            }
+        }
+
+        /// <summary>The least of several uninstrumented passes over a field.</summary>
+        private static float Least(string field, int passes)
+        {
+            float least = float.MaxValue;
+
+            for (int pass = 0; pass < passes; pass++)
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+
+                var watch = Stopwatch.StartNew();
+                BenchScenariosTests.OrderEverybody(battle, null);
+                watch.Stop();
+
+                least = MathF.Min(least, (float)watch.Elapsed.TotalMilliseconds);
+            }
+
+            return least;
+        }
+
         private void Report(string field, IRoutePlanner? planner, string name)
         {
             Row row = Measure(field, planner, passes: 3);

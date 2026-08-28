@@ -144,6 +144,7 @@ rule is right but the number, threshold or exact form is the designer's to move.
 | M97 | `DetourRoomFraction` stays at 0,5. The field it sizes is built on one bench field of four. <sup>[why](#m97)</sup> | Mandatory | ✅ measured, unchanged |
 | M88a | The way-round ceiling is **3,1x** a press. <sup>[why](#m88a)</sup> | Designer | ✅ shipped |
 | M98 | A press-through is a legitimate answer. What is a defect is walking through somebody **undeclared**. <sup>[why](#m98)</sup> | Designer | ✅ shipped — the approach-angle gate is green |
+| M99 | A regiment faces **the direction it moves in the most**. A leg shorter than two of its own body-lengths is a shuffle, not a march, and does not get to name a front. <sup>[why](#m99)</sup> | Designer | ✅ shipped |
 
 ## Combat
 
@@ -756,6 +757,30 @@ Swept 2,0 to 4,0 on all four fields, both order patterns, with `WhereTheCeilingS
 **It has teeth, and this is the part that matters.** Left there it would pass if the planner pressed all nineteen — a worse planner and a green test, which is exactly the failure mode this repository keeps finding in its own checks. So there are two more assertions: fewer than nineteen presses, and **every press re-asked with the ceiling lifted entirely**. A press stands only where the uncapped pass finds no clean way round *at any price*, or one dearer than the ceiling allows. All six stand on the first of those.
 
 **What this closes.** [Finding 24](OPEN-FINDINGS.md), entirely — four causes, three fixed in code and the fourth measured to be inert, and the six that remained were never a fault at all. It is the oldest open defect in the file.
+
+<a id="m99"></a>
+**M99** — The designer, on the 179-degree opening wheel: *"it would be weird for an army to move sideways facing the opposite way it's going towards like it should flip to the other face"*, and *"the face should face the direction it moves in the most even if it has to turn back after"*.
+
+**`Marching.AlongTheLine` was never wrong about facing the way it travels. It was wrong about where it reads that from** — the first waypoint, whatever that waypoint happens to be. Measured over 280 orders on the four bench fields: **62 open with a wheel over 90°** and 40 over 150°, and on nineteen of the twenty where the wheel is plainly wasted the regiment is *already* within 1° to 26° of where the march is going overall. The worst is a **107° wheel to walk one metre**, on a march of 1494 m whose bearing is 2° off the front it was standing on. Then it turns back.
+
+**The stub is not removed, because it is a real waypoint.** A one-metre sidestep exists precisely because the straight line is refused, so [`RouteSmoothing`](../packages/com.battlechess.core/Runtime/Rules/Battle/RouteSmoothing.cs)'s long cast fails and correctly keeps the point. The route is right and only the front on it is wrong. `RouteFronts.Applied` therefore **moves no waypoint whatsoever**, and that is asserted rather than asserted-in-prose: 0 routes moved on all four fields.
+
+**The 90-degree cap was proposed and dropped, by the designer and by the code both.** A cap makes a regiment walk with its frontage across the line of march, and [M24](#m24) records that arrangement as the one that broke routing outright — held broadside a body sweeps its full width, rung one and rung two both failed, and it shouldered through its own. The front is an argument to `Marching.IsClearLine`, so a cap would have changed *which routes exist*. This changes none.
+
+**Where the threshold sits, and there is no free lunch in it.** Every degree not turned is walked crabwise instead, at `MovementSystem.AlignmentPenalty`. Sized by share of route alone the pass caught legs of 39 m to 120 m — stubs by share and nothing like stubs on the ground — and bought a 13–30% cut in turning for **+1,0% to +1,6% on the march clock**. Trading walking time for turning time is not what this is for, and a hundred-metre sidestep held square is the same thing the designer called weird. So the measure is the regiment itself:
+
+| stub is | turning | march clock | crabbed metres |
+|---|---|---|---|
+| 1 body (35 m) | −3,5% to −4,7% | free | 23–62 |
+| **2 bodies (70 m)** | **−10% to −17%** | **+0,2%** | **713–834** |
+| 4 bodies (141 m) | −20% to −25% | +0,8% to +1,5% | 1522–2216 |
+| a tenth of the route | −13% to −30% | +1,0% to +1,6% | 1507–2409 |
+
+One body is nearly free and nearly nothing — it leaves 23 of the Crucible's 23 opening wheels over 90° exactly where they were. Four crabs twenty to twenty-eight metres an order, which is a regiment visibly sliding. **Two is the knee**: a third to a half of the available turning for two tenths of one per cent, and about nine metres of crabbing per order — well under a body length, so not something the eye picks out. It also states cleanly, which a tuned fraction never does: *a leg shorter than two regiments end to end is a shuffle, not a march.*
+
+**What it costs to run: nothing measurable.** One extra `Marching.IsClearLine` per stub leg, against a step that is 9,3% of the Crucible. Least of three, three separate runs: −3,1%/−0,5%/−3,7% on the Crucible, +1,6%/−0,9%/+2,1% on Broken Country. **The sign flips per field between runs**, so it is inside the noise and no claim is made either way.
+
+**And the halt-and-turn the designer also asked for was already there.** `MovementSystem.PivotBonusWhileHalted` prices a halted pivot at 1,6× the walking rate, and [M30](#m30) holds the ground and keeps turning on the step that would have hit. Nothing was needed for it.
 
 **And it is off, because the licence itself loosens the gate.** The gate stayed at **13 of 19** either way. Bisected properly — the three levers moved **at runtime**, in one process, rather than by rebuilding between cases, which is how [finding 27](OPEN-FINDINGS.md) came to be got wrong the first time:
 

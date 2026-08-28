@@ -478,9 +478,21 @@ namespace BattleChess.Rules
             // Straightening must never turn a route the executor would walk
             // into one it refuses. It is proved against the same gate the
             // route itself had to pass, and the wound route stands if it fails.
-            if (ReferenceEquals(chosen.Path.Waypoints, straightened.Path.Waypoints)) return chosen;
+            if (!ReferenceEquals(chosen.Path.Waypoints, straightened.Path.Waypoints) &&
+                !WalksCleanly(battle, unit, straightened))
+                straightened = chosen;
 
-            return WalksCleanly(battle, unit, straightened) ? straightened : chosen;
+            // M99. The fronts, last, and on whichever route survived - the
+            // question "which way is this regiment going" can only be asked of
+            // the legs it is actually going to walk. Same guard as above and
+            // for the same reason: this pass moves no waypoint, but it does
+            // change the shape the sweep is taken at, so it has to answer to
+            // the gate the route already passed.
+            Plan facing = RouteFronts.Applied(battle, unit, straightened);
+
+            if (ReferenceEquals(straightened.Hold, facing.Hold)) return straightened;
+
+            return WalksCleanly(battle, unit, facing) ? facing : straightened;
         }
 
         private static Plan Choose(
