@@ -324,6 +324,32 @@ namespace BattleChess.Rules
         internal static float GapWidthCeiling = 2f;
 
         /// <summary>
+        /// How many spaces either side of the blocking body to read off before
+        /// giving up. Zero is no limit.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The remarks on <c>ThreadAGap</c> have always described this and
+        /// the code has never done it:</b> "the bodies are projected onto the
+        /// axis across the march, sorted, and the spaces between them read
+        /// off". Sorted and read off is a sweep - a formed line of ten bodies
+        /// has nine spaces in it. What was written instead paired <i>every</i>
+        /// body with every other, which on the same ten is forty-five, and most
+        /// of them name no space at all because the two bodies have three
+        /// others standing between them.
+        /// </para>
+        /// <para>
+        /// The designer, on where to start and when to stop: <i>"if 8 is
+        /// between 7 and 9 then verify 1-8 and 8-9 then 6-7 9-10 so on ... and
+        /// after a number you just stop"</i>. So the walk begins at the body
+        /// that actually blocks the line and works outward in both directions,
+        /// which orders the spaces by how likely they are to be the answer -
+        /// and then it stops, which is what turns a quadratic into a constant.
+        /// </para>
+        /// </remarks>
+        internal static int GapSpacesEitherSide = 4;
+
+        /// <summary>
         /// How long one plan may search before it settles for what it can
         /// already prove.
         /// </summary>
@@ -1130,14 +1156,70 @@ namespace BattleChess.Rules
             // and only on the rung the common march never reaches.
             var mouths = new List<(float Off, Vec2 Mouth, Vec2 Far, Facing Front)>();
 
-            PlanningProfile.Tally(
-                PlanningProfile.Step.GapPairs, near.Count * (near.Count - 1) / 2);
+            // Across the march, so that consecutive bodies are the two a space
+            // actually lies between. Signed, because the sort has to put the
+            // left flank at one end and the right at the other; an absolute
+            // offset interleaves them and makes neighbours of bodies standing
+            // on opposite sides of the line.
+            var across = new float[near.Count];
+            UnitInstance[] order = near.ToArray();
 
-            for (int i = 0; i < near.Count; i++)
-            for (int j = i + 1; j < near.Count; j++)
+            for (int i = 0; i < order.Length; i++)
             {
-                UnitInstance a = near[i];
-                UnitInstance b = near[j];
+                Vec2 offset = order[i].Position - unit.Position;
+                across[i] = along.X * offset.Y - along.Y * offset.X;
+            }
+
+            Array.Sort(across, order);
+
+            // Where the walk starts: the body that actually stops the straight
+            // line. Without one - the caller can reach here for other reasons -
+            // the body nearest the drawn line stands in for it, which is the
+            // same thing M4 would choose.
+            UnitInstance? blocker = InTheWay(battle, unit, destination);
+
+            int at = 0;
+            float nearest = float.MaxValue;
+
+            for (int i = 0; i < order.Length; i++)
+            {
+                if (blocker != null)
+                {
+                    if (order[i].Id == blocker.Id) { at = i; break; }
+                    continue;
+                }
+
+                float off = MathF.Abs(across[i]);
+                if (off >= nearest) continue;
+
+                nearest = off;
+                at = i;
+            }
+
+            // The spaces either side of it, outward, alternating: the one to its
+            // left, the one to its right, then the next out on each side. A
+            // space is numbered by the body on its left, so the blocker at `at`
+            // touches spaces `at - 1` and `at`.
+            int spaces = order.Length - 1;
+            int outward = GapSpacesEitherSide > 0 ? GapSpacesEitherSide : spaces;
+
+            var walk = new List<int>(Math.Min(spaces, outward * 2 + 2));
+
+            for (int out_ = 0; out_ <= outward && walk.Count < spaces; out_++)
+            {
+                int left = at - 1 - out_;
+                int right = at + out_;
+
+                if (0 <= left && left < spaces) walk.Add(left);
+                if (right != left && 0 <= right && right < spaces) walk.Add(right);
+            }
+
+            PlanningProfile.Tally(PlanningProfile.Step.GapPairs, walk.Count);
+
+            foreach (int space in walk)
+            {
+                UnitInstance a = order[space];
+                UnitInstance b = order[space + 1];
 
                 Vec2 between = b.Position - a.Position;
                 float apart = between.Length;
