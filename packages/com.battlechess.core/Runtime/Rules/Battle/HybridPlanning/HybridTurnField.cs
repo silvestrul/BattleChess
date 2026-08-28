@@ -101,6 +101,16 @@ namespace BattleChess.Rules.HybridPlanning
         /// estimate, and the estimate is what keeps the lattice's expansions
         /// down - which is why it has to be measured on the clock and not
         /// argued from the geometry.
+        /// <para>
+        /// <b>Measured again after M87, and closed - [M97].</b> The lattice is
+        /// not reached at all on three bench fields of four, so this sizes a
+        /// field that is never built; on the fourth it is <b>under a
+        /// millisecond</b> and no route moves anywhere between 0,5 and 0,2. It
+        /// stays at a half, because a smaller fraction is a narrower box and a
+        /// narrower box cannot make a route worse but can make it absent - and
+        /// <c>moved 0</c> on four fields says those four want no wide detour,
+        /// not that none does.
+        /// </para>
         /// </remarks>
         internal static float DetourRoomFraction = 0.5f;
 

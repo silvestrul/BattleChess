@@ -1296,7 +1296,32 @@ Crucible showing it returns under 27 bodies, which would make the hoist worth
 building after all. The reuse ratio is not evidence for either and should not be
 quoted again.
 
-## 24. Six approach angles, three causes, and only one of them left
+### Halo branch closed 28 Aug 2026 — narrowing it costs more than it saves
+
+Done as asked, and the answer is the other way round. `UnitIndex.BucketMetres` is
+a lever now, with a `NearBuckets` counter under it, and it was swept from 32 m to
+768 — a twenty-four-fold range — on all four fields. See
+[M95](DECISIONS.md#m95) for the table.
+
+**A bucket is dearer than the bodies the slack lets in.** Halving the width cuts
+the bodies a query returns by about a quarter and multiplies the buckets it opens
+by four; `NearQuery` **doubles by 32 m** while `BodyScan` falls only a quarter
+over the same range. Everything between 128 and 512 is one flat basin with no
+ms-an-order reading outside the noise on any field, and both ends are worse. The
+shipping 128 m is already inside it.
+
+**The 27-body break-even in this entry is also unsafe and should not be quoted.**
+It assumes a query costs what a query costs. It does not: at 512 m a query
+already hands back **29,8** bodies and the combined `BodyScan + NearQuery` bill
+is no worse than at 128. Query cost falls as yield rises, so there is no fixed
+number a corridor has to beat.
+
+**What is left of this entry.** Only the hoist itself, and it now has to be
+argued on measured corridor sizes rather than on either the reuse ratio or the
+break-even — both of which this entry has now had to withdraw. `BodyScan` is
+still the heaviest step in the planner; nothing found so far makes it cheaper.
+
+## 24. Six approach angles, four causes, and the fourth turned out not to be one
 
 Raised by the designer: *"do 08"* — the oldest open defect, and the gate the whole
 *(place, front)* redesign was written for.
@@ -1397,6 +1422,43 @@ sampled angles to `walks through somebody`, and 10° from clear to a 68 s route
 that clips. It ships off. The two pieces built alongside it - refusing smoothing
 that breaks a route, and dropping a node the body cannot stand at - are **inert**
 on this arrangement and ship off with it.
+
+### Closed 28 Aug 2026 — the fourth cause is not a cause
+
+Two things were wrong with the licence and both are fixed
+([M94a](DECISIONS.md#m94a), [M94b](DECISIONS.md#m94b)): it inherited a five per
+cent allowance from the leaving sweep where `IsClearLine` allows none, and it was
+consulted as a first resort rather than a last. With the tolerance at zero, the
+subordination in place and the ceiling applying, the licence is safe — and it
+**changes nothing here**.
+
+`WhereTheArrivingLicenceLetsItThrough` sweeps all nineteen angles three ways:
+licence withheld, granted, and granted **with the ceiling lifted entirely**.
+
+| the six | licensed pass, no ceiling at all | |
+|---|---|---|
+| 0°, 5°, 20°, 25° | **finds nothing** — presses exactly as before | the arrival was never what stopped them |
+| 15° | a way round at **3,51×** the press | over [M88](DECISIONS.md#m88)'s three |
+| 30° | a way round at **4,09×** the press | over [M88](DECISIONS.md#m88)'s three |
+
+So four of the six have no way round **at any price**, and the other two have one
+the designer's own ceiling refuses. That ceiling is a rule about what a
+press-through is worth — *"it's better because its not dependent on speed"* — and
+not a number to be tuned until a test passes.
+
+**What this leaves the entry as.** Three causes found and fixed
+([M90](DECISIONS.md#m90)a, [M90](DECISIONS.md#m90)b, [M92](DECISIONS.md#m92)), a
+fourth built, corrected and measured to be inert. **The six remaining failures are
+now explained rather than open**: they are presses, and the gate counts a press as
+a failure.
+
+**Which is the question left, and it is a rule, not a defect.** Is `pressed
+through` a failure? The gate was written when a press was an unpriced escape
+hatch; since [M88](DECISIONS.md#m88) it is an answer with a price, chosen over a
+way round costing more than three times as much. If a press is a legitimate answer
+then this test should say so and the count is 19 of 19 with six of them pressing;
+if it is not, then [M88](DECISIONS.md#m88)'s ceiling is what wants revisiting, not
+the arrival. **Nothing else in this entry moves until that is decided.**
 
 **What would close this entry.** The arriving licence with a tolerance that
 matches `Marching.IsClearLine` rather than `AllowedContactFraction`, so it forgives

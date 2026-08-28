@@ -885,6 +885,205 @@ namespace BattleChess.Tests.Battle
         /// One planner on one field: warm, several uninstrumented passes for the
         /// headline, then one instrumented pass for the table.
         /// </summary>
+        /// <summary>
+        /// What the arriving licence costs on the bench, and how often it
+        /// actually fires.
+        /// </summary>
+        /// <remarks>
+        /// <b>M94b.</b> The licence is withheld on the first ask and only a
+        /// second pass may have it, so an order that already answers pays
+        /// nothing and an order that presses or fails is planned twice. This is
+        /// what that second pass costs where it really happens, against how
+        /// many orders keep its answer.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - what M94b's "  +
+                     "second pass costs, and it drives global levers while it runs.")]
+        public void WhatTheArrivingLicenceCosts()
+        {
+            bool was = StagedRoutePlanner.LicenceOnArrival;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"licence",-10}{"ms/order",10}{"total ms",10}{"worst ms",10}" +
+                    $"{"pressed",9}{"unwalk",8}{"route s",10}{"2nd pass",10}{"kept",7}");
+                _out.WriteLine(new string('-', 100));
+
+                foreach (string field in Fields)
+                {
+                    foreach (bool granted in new[] { false, true })
+                    {
+                        StagedRoutePlanner.LicenceOnArrival = granted;
+
+                        Row row = Measure(field, planner: null, passes: 3);
+
+                        // The counters describe one more uninstrumented pass,
+                        // because Measure's timed passes reset them per run.
+                        StagedRoutePlanner.ResetCounters();
+                        BenchScenariosTests.OrderEverybody(BenchScenariosTests.Load(field), null);
+
+                        _out.WriteLine(
+                            $"{field,-16}{(granted ? "granted" : "withheld"),-10}" +
+                            $"{row.MsPerOrder,10:0.000}{row.Total,10:0.0}{row.Worst,10:0.0}" +
+                            $"{row.Pressed,9}{row.Unwalkable,8}{row.Seconds,10:0}" +
+                            $"{StagedRoutePlanner.ArrivalAsked,10}{StagedRoutePlanner.ArrivalTook,7}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                StagedRoutePlanner.LicenceOnArrival = was;
+            }
+        }
+
+        /// <summary>
+        /// The spatial index at five bucket widths: what a query costs, what it
+        /// hands back, and what the whole order costs.
+        /// </summary>
+        /// <remarks>
+        /// <b>Open finding 23.</b> The halo the clearance path asks with is
+        /// <c>reach + widest reach + half a bucket diagonal</c>, and a body may
+        /// then sit half a diagonal outside the bucket it was found in - so at
+        /// 128 m buckets there is <b>181 m of pure slack</b> around a reach of
+        /// about ninety. That is why a query hands back 14,1 bodies. Narrowing
+        /// it is not free: fewer bodies come at the price of more buckets, and
+        /// which of the two dominates is what this asks.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is what closed " +
+                     "the halo half of open finding 23, and it rebuilds the spatial index at " +
+                     "five widths while it runs.")]
+        public void WhatTheIndexCostsAtEachBucketWidth()
+        {
+            float was = UnitIndex.BucketMetres;
+
+            try
+            {
+                // A whole discard round first. The first row otherwise pays JIT
+                // for everything the sweep touches and reads four times dear -
+                // which matters more than usual here, because the first row is
+                // the shipping width and every other row is read against it.
+                foreach (string warm in Fields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"field",-16}{"bucket",8}{"ms/order",10}{"BodyScan",10}{"NearQuery",11}" +
+                    $"{"queries",10}{"bodies",10}{"per query",11}{"buckets",10}{"per query",11}");
+                _out.WriteLine(new string('-', 107));
+
+                foreach (string field in Fields)
+                {
+                    foreach (float bucket in new[] { 512f, 256f, 128f, 64f, 32f })
+                    {
+                        UnitIndex.BucketMetres = bucket;
+
+                        Row row = Measure(field, planner: null, passes: 3);
+
+                        // The counters and the step times come from one more
+                        // pass, instrumented; the millisecond column above is
+                        // the least of three uninstrumented ones.
+                        BattleState probed = BenchScenariosTests.Load(field);
+                        PlanningProfile.Start();
+                        BenchScenariosTests.OrderEverybody(probed, null);
+                        PlanningProfile.Stop();
+
+                        long queries = PlanningProfile.CallsTo(PlanningProfile.Step.NearQuery);
+                        long bodies = PlanningProfile.CallsTo(PlanningProfile.Step.NearYield);
+                        long buckets = PlanningProfile.CallsTo(PlanningProfile.Step.NearBuckets);
+
+                        _out.WriteLine(
+                            $"{field,-16}{bucket,8:0}{row.MsPerOrder,10:0.000}" +
+                            $"{PlanningProfile.SelfMilliseconds(PlanningProfile.Step.BodyScan),10:0.0}" +
+                            $"{PlanningProfile.SelfMilliseconds(PlanningProfile.Step.NearQuery),11:0.0}" +
+                            $"{queries,10}{bodies,10}{bodies / (double)Math.Max(1, queries),11:0.0}" +
+                            $"{buckets,10}{buckets / (double)Math.Max(1, queries),11:0.0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                UnitIndex.BucketMetres = was;
+            }
+        }
+
+        /// <summary>
+        /// How much of the lattice is left to save on, after M87.
+        /// </summary>
+        /// <remarks>
+        /// Todo 04 proposes building the mover's two boxes lazily, on the
+        /// strength of 221 127 poses producing 203 611 overlap tests. That
+        /// count was taken when the lattice answered orders. It mostly does not
+        /// any more, so the first question is how big the numerator still is -
+        /// asked of the cascade as it ships and of the lattice asked directly.
+        /// <para>
+        /// <b>Answered — [M96].</b> The cascade reaches the lattice on one
+        /// field of four and spends 124 poses there, so todo 04 is worth
+        /// nothing where the game actually plans. Asked directly it is worth
+        /// <b>2% to 9%</b>, winning eleven of twelve paired readings, with
+        /// poses and overlaps identical to the digit.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it sized todo 04 " +
+                     "and then weighed it, and it drives a global lever while it runs.")]
+        public void HowMuchLatticeIsLeft()
+        {
+            bool was = HybridAStarPlanner.LazyBoxes;
+
+            try
+            {
+                // Both planners warmed, not just the lattice. Warming only one
+                // of them leaves the other's first row paying for its JIT, and
+                // that row read 60% dear.
+                foreach (string warm in Fields)
+                {
+                    Measure(warm, new HybridAStarRoutePlanner(), passes: 1);
+                    Measure(warm, planner: null, passes: 1);
+                }
+
+                _out.WriteLine(
+                    $"{"field",-16}{"asked",-14}{"boxes",-10}{"ms/order",10}{"poses",10}" +
+                    $"{"overlaps",10}{"per pose",10}{"stock ms",10}{"worst ms",10}");
+                _out.WriteLine(new string('-', 100));
+
+                foreach (string field in Fields)
+                {
+                    foreach (bool lattice in new[] { false, true })
+                    foreach (bool lazily in new[] { false, true })
+                    {
+                        HybridAStarPlanner.LazyBoxes = lazily;
+
+                        IRoutePlanner? planner = lattice ? new HybridAStarRoutePlanner() : null;
+
+                        Row row = Measure(field, planner, passes: 3);
+
+                        BattleState probed = BenchScenariosTests.Load(field);
+                        PlanningProfile.Start();
+                        BenchScenariosTests.OrderEverybody(probed, planner);
+                        PlanningProfile.Stop();
+
+                        long poses = PlanningProfile.CallsTo(PlanningProfile.Step.HybridPose);
+                        long overlaps = PlanningProfile.CallsTo(PlanningProfile.Step.HybridOverlap);
+
+                        _out.WriteLine(
+                            $"{field,-16}{(lattice ? "the lattice" : "the cascade"),-14}" +
+                            $"{(lazily ? "lazy" : "both"),-10}{row.MsPerOrder,10:0.000}" +
+                            $"{poses,10}{overlaps,10}" +
+                            $"{overlaps / (double)Math.Max(1, poses),10:0.00}" +
+                            $"{PlanningProfile.SelfMilliseconds(PlanningProfile.Step.HybridStock),10:0.0}" +
+                            $"{row.Worst,10:0.0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                HybridAStarPlanner.LazyBoxes = was;
+            }
+        }
+
         private void Report(string field, IRoutePlanner? planner, string name)
         {
             Row row = Measure(field, planner, passes: 3);

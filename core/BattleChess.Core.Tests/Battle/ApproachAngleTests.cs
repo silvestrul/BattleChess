@@ -873,6 +873,124 @@ namespace BattleChess.Tests.Battle
             return (verdict, Marching.SecondsToWalk(field.State, mover, plan.Path.Waypoints, plan.Hold));
         }
 
+        /// <summary>
+        /// Every angle with the arriving licence withheld, granted, and granted
+        /// with the ceiling lifted - which is what says the fourth cause is not
+        /// a cause.
+        /// </summary>
+        /// <remarks>
+        /// <b>The measurement that closed the fourth cause in open finding
+        /// 24.</b> Read the third column: at <b>0°, 5°, 20° and 25° the
+        /// licensed pass finds nothing at any price</b> and presses exactly as
+        /// the withheld one does, so the arrival was never what stopped them.
+        /// At <b>15° and 30°</b> it does find a way round, and it costs
+        /// <b>3,51x and 4,09x</b> the press - over the ceiling [M88] fixes at
+        /// three, and the ceiling is a rule about what a press is worth rather
+        /// than a number to be tuned until a test passes.
+        /// <para>
+        /// It also drives global planner levers while it runs, which is the
+        /// other reason it is skipped.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is what says " +
+                     "the arriving licence is not what the six remaining approach angles are " +
+                     "waiting on, and it moves global levers while it runs.")]
+        public void WhereTheArrivingLicenceLetsItThrough()
+        {
+            bool was = StagedRoutePlanner.LicenceOnArrival;
+
+            try
+            {
+                float ceiling = StagedRoutePlanner.WayRoundCostCeiling;
+
+                try
+                {
+                    _out.WriteLine(
+                        $"{"angle",6}   {"licence withheld",-46}{"granted, ceiling 3",-46}" +
+                        $"{"granted, no ceiling",-46}");
+                    _out.WriteLine(new string('-', 146));
+
+                    for (int degrees = 0; degrees <= 90; degrees += 5)
+                    {
+                        StagedRoutePlanner.WayRoundCostCeiling = ceiling;
+
+                        StagedRoutePlanner.LicenceOnArrival = false;
+                        string off = OneAngle(degrees, out float offSeconds);
+
+                        StagedRoutePlanner.LicenceOnArrival = true;
+                        string on = OneAngle(degrees, out float _);
+
+                        // What the licensed pass actually found, before the
+                        // ceiling and the no-dearer rule had their say.
+                        StagedRoutePlanner.WayRoundCostCeiling = 1000f;
+                        string free = OneAngle(degrees, out float freeSeconds);
+
+                        string ratio = offSeconds > 1f
+                            ? System.FormattableString.Invariant($"{freeSeconds / offSeconds:0.00}x")
+                            : "-";
+
+                        string mark = off == on ? " " : "*";
+
+                        _out.WriteLine($"{degrees,5}° {mark} {off,-46}{on,-46}{free,-40}{ratio}");
+                    }
+                }
+                finally
+                {
+                    StagedRoutePlanner.WayRoundCostCeiling = ceiling;
+                }
+            }
+            finally
+            {
+                StagedRoutePlanner.LicenceOnArrival = was;
+            }
+        }
+
+        /// <summary>One angle planned, described in a line.</summary>
+        private string OneAngle(int degrees, out float seconds)
+        {
+            Battlefield field = TheGapAt(degrees, out UnitInstance mover, out Vec2 destination);
+
+            Plan plan = Marching.PlanTo(
+                field.State, mover, field.Pathfinder, destination, planner: RoutePlanners.Default);
+
+
+
+            string verdict = !plan.Found ? "no route"
+                : plan.PressedThrough ? "pressed"
+                : !EveryLegIsClear(field, mover, plan.Path.Waypoints, plan.Hold) ? "WALKS THROUGH"
+                : "clear";
+
+            // Where it ends up, and how deep into anybody, which is the whole
+            // of what the licence is about.
+            float ending = 0f;
+
+            if (plan.Found && plan.Path.Waypoints.Count >= 2)
+            {
+                IReadOnlyList<Vec2> pts = plan.Path.Waypoints;
+                int last = pts.Count - 1;
+
+                Facing front = plan.Hold != null && last < plan.Hold.Length && plan.Hold[last].HasValue
+                    ? plan.Hold[last]!.Value
+                    : Marching.AlongTheLine(pts[last - 1], pts[last], mover.Facing);
+
+                var pose = new OrientedRect(pts[last], front, mover.Footprint);
+
+                foreach (UnitInstance other in field.State.UnitsOnField())
+                {
+                    if (other.Id == mover.Id) continue;
+                    float lap = OrientedRect.OverlapFraction(pose, other.Shape);
+                    if (lap > ending) ending = lap;
+                }
+            }
+
+            seconds = plan.Found
+                ? Marching.SecondsToWalk(field.State, mover, plan.Path.Waypoints, plan.Hold)
+                : 0f;
+
+            return System.FormattableString.Invariant(
+                $"{verdict,-14} {plan.Path.Waypoints.Count,2} wpts {seconds,5:0} s  ends {ending:0.000}   ");
+        }
+
         private List<string> Sweep(IRoutePlanner planner)
         {
             var failed = new List<string>();

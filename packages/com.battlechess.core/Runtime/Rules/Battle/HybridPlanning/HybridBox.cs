@@ -61,6 +61,33 @@ namespace BattleChess.Rules.HybridPlanning
             _circumradius = MathF.Sqrt(halfWidth * halfWidth + halfDepth * halfDepth);
         }
 
+        /// <summary>The same pose, its edges pushed out all round.</summary>
+        /// <remarks>
+        /// <b>M96.</b> The two boxes a pose needs share a centre and a heading
+        /// and differ only in their half-extents, so the second one's cosine
+        /// and sine are the first one's, already computed. This is the cheap
+        /// half of the change: one square root instead of a cosine, a sine and
+        /// a square root.
+        /// </remarks>
+        public HybridBox Grown(float clearance) =>
+            new HybridBox(
+                Centre, Heading, _forward, _right,
+                HalfWidth + clearance, HalfDepth + clearance);
+
+        /// <summary>The box that already knows which way it points.</summary>
+        private HybridBox(
+            Vec2 centre, Facing heading, Vec2 forward, Vec2 right, float halfWidth, float halfDepth)
+        {
+            Centre = centre;
+            Heading = heading;
+            HalfWidth = halfWidth;
+            HalfDepth = halfDepth;
+
+            _forward = forward;
+            _right = right;
+            _circumradius = MathF.Sqrt(halfWidth * halfWidth + halfDepth * halfDepth);
+        }
+
         /// <summary>Radius of the circle that fully contains this box.</summary>
         public float Circumradius => _circumradius;
 

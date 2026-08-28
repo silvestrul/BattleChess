@@ -137,6 +137,11 @@ rule is right but the number, threshold or exact form is the designer's to move.
 | M92 | A regiment touching one of its own may set off, on the same licence as one overlapping it. <sup>[why](#m92)</sup> | Mandatory | ✅ shipped |
 | M93 | A search that spends the frame’s time charges the frame, whether or not it produced a route. <sup>[why](#m93)</sup> | Mandatory | ✅ shipped |
 | M94 | A regiment may arrive in the contact it is allowed to stand in. <sup>[why](#m94)</sup> | Designer | ⚠️ built, ships **off** — it loosens the gate |
+| M94a | The arriving licence forgives ending in contact and nothing else. <sup>[why](#m94a)</sup> | Mandatory | ✅ shipped |
+| M94b | The licence is a last resort, it may not escape the ceiling, and it may never make an answer dearer. <sup>[why](#m94b)</sup> | Mandatory | ✅ shipped — and it is why the fourth cause is closed |
+| M95 | The index's halo stays at 128 m: buckets cost more than the bodies the slack lets in. <sup>[why](#m95)</sup> | Mandatory | ✅ measured, unchanged |
+| M96 | A pose builds the box it turns out to need, not both of them. <sup>[why](#m96)</sup> | Mandatory | ✅ shipped |
+| M97 | `DetourRoomFraction` stays at 0,5. The field it sizes is built on one bench field of four. <sup>[why](#m97)</sup> | Mandatory | ✅ measured, unchanged |
 
 ## Combat
 
@@ -657,6 +662,67 @@ Extending the licence to contact does **not** wave the leg through: `EscapesWith
 | smoothing broke walkable routes | it casts with the leaving licence unconditionally while the gate is stricter, so a cast it believes clear can be one the executor refuses |
 
 **It worked, on the thing it was built for.** With all four in, the half-cell route at 0° came back `bad leg 0` — walking in full, every leg, for the first time.
+
+<a id="m94a"></a>
+**M94a** — Todo 01, and it is the half of the diagnosis that was right. `ArrivesWithoutDeepening` inherited `EscapesWithoutDeepening`'s allowance, `AllowedContactFraction` — five per cent of a body. But a leg *without* a licence is judged by `Marching.IsClearLine`, which refuses on `Sweep.Touches`, which is **any overlap whatever**. So granting the licence moved the last leg from the stricter test to the looser one, and the looser one let it barge five per cent into somebody on the way in. Measured before the fix: three of seven sampled angles went to *walks through somebody*, and one went from clear to a 68 s route that clipped.
+
+**The two ends are not symmetrical, and that is the whole entry.** Where a regiment **starts**, the contact is ground it already occupies and nobody chose; where it **stops**, the contact is a place the planner picked. So the leaving licence keeps its allowance and the arriving one gets none — `ArrivalContactFraction` is **0**. A body lapped at the destination may only be less lapped the further back you look; a body clear at the destination may not be entered anywhere on the way in. All the licence now forgives is the contact **at the destination itself**, which is the one thing it was built to forgive. Verified: after the fix the only contact anywhere on those legs is at the final waypoint, 1,1% to 4,3% deep, and never earlier.
+
+<a id="m94b"></a>
+**M94b** — The other half, and M94a alone made the gate **worse** — 10 of 19 against 6 — which is what said the diagnosis was incomplete. Three rules, and all three are the designer's own [M88](#m88) and crabbing rules read onto the arrival:
+
+| | |
+|---|---|
+| **last resort** | the licence is withheld on the first ask; only an order that presses or finds nothing is planned a second time with it — *"always verify if a non-sidewalk option is possible and do it, otherwise sidewalk can be done"* |
+| **no escaping the ceiling** | a way round that exists only because the arrival was licensed is still a way round, and still costs at most [M88](#m88)'s three times the press |
+| **no dearer** | against anything that is not a press it has to win on the clock, because the pass that found it was the pass that could not find anything better |
+
+**The flag is `[ThreadStatic]`**, not global. Orders are planned several at once, and a flag one order sets while it retries would otherwise decide what a different order on another thread may do — the same fault `UnitIndex.Marks` was built to avoid, which produced routes that differed depending on how many orders were given together.
+
+**And with all of it in, the licence earns nothing anywhere it has been asked**, which is the finding. Over the nineteen approach angles it changes **not one route**: at 0°, 5°, 20° and 25° the licensed pass finds nothing *with the ceiling lifted entirely*, and at 15° and 30° it finds a way round costing **3,51× and 4,09×** the press. On the bench it fires **twice in four fields, keeps neither**, and costs sidewaysmile **+22% to +49%** for it — crucible, longmarch and Broken Country never reach it at all, and total marching seconds are identical to the digit on every field.
+
+**So the fourth cause is not a cause.** The six approach angles that remain are not waiting on the arrival; they are presses that no way round beats at the price [M88](#m88) sets, and four of them have no way round at any price. The lever stays, off, with its price written down.
+
+<a id="m95"></a>
+**M95** — Todo 02, and [finding 23](OPEN-FINDINGS.md)'s halo branch, closed against its own prediction. The complaint was arithmetically true: a clearance query widens by `reach + widest reach`, takes any bucket whose centre lies within half a diagonal of that, and a body may then sit half a diagonal outside the bucket it was filed in — **181 m of slack around a reach of about ninety**, which is why a query hands back 14,1 bodies. The finding concluded that the first move was to ask a smaller question. Measured over a **twenty-four-fold** range of bucket widths, it is the wrong move.
+
+| bucket | bodies a query | buckets a query | `NearQuery` | `BodyScan` |
+|---|---|---|---|---|
+| 768 m | 37,2 | 1,9 | 19,5 | 31,8 |
+| 512 | 29,8 | 2,7 | 18,3 | 26,7 |
+| 256 | 20,3 | 4,4 | 17,7 | 24,8 |
+| **128 — shipped** | **13,6** | **8,5** | **21,6** | **21,4** |
+| 64 | 9,7 | 20,5 | 28,6 | 16,3 |
+| 32 | 7,9 | 58,8 | 52,7 | 14,3 |
+
+*(the Crucible; the other three fields have the same shape)*
+
+**A bucket is dearer than the bodies the slack lets in.** Halving the width cuts the bodies by about a quarter and multiplies the buckets by four, and `NearQuery` **doubles by 32 m** while `BodyScan` falls only a quarter over the same range. Everything from 128 to 512 is one flat basin with no ms-an-order reading outside the noise on any field; both ends are worse. So 128 stays, now for a measured reason rather than a plausible one, and it is a lever with a counter (`NearBuckets`) under it.
+
+**And it half-answers the hoist too.** Finding 23 computed a break-even of "about 27 bodies" for a hoisted per-order query, on the assumption that a query costs what it costs. It does not: at 512 m a query already returns 29,8 bodies and the whole `BodyScan + NearQuery` bill is no worse than at 128. The break-even is not a fixed number, and quoting it as one would repeat the mistake the finding was rewritten to correct.
+
+<a id="m96"></a>
+**M96** — Todo 04. `TakeStock` and `PoseIsClear` each built the mover's true-sized box *and* its margined box at every pose, and a box is a cosine, a sine and a square root. Two things were wrong with that: the two boxes share a centre and a heading, so the second one's trigonometry is the first one's; and most poses do not need both.
+
+**Sized before it was built**, which is the part worth keeping. Under the cascade as it ships the lattice is reached on **one field of four**, for **124 poses and 0,0 ms** — so this is worth *nothing* where the game actually plans, and saying so is the honest headline. Asked directly the lattice runs 123 637 to 2 223 777 poses at **0,69 to 1,05 overlap tests a pose**, so about a third of poses take no branch at all and paid for two boxes to decide it.
+
+**Built as a lever so both could be weighed in one process** — [W11](#w11), and it is the reason this reading can be trusted at all. Lazy is faster in **eleven of twelve paired readings**: least of three, **−7,0%** on the Crucible, **−8,8%** on the Long March, **−2,2%** on Broken Country, **−8,3%** on sidewaysmile. Poses and overlap tests are **identical to the digit** on every field, which is what says nothing about the search moved.
+
+<a id="m97"></a>
+**M97** — Todo 03, and register decision 05: *re-measure `DetourRoomFraction`, then decide it or drop it*. Lowering it from 0,5 to 0,3 once roughly halved the turn field build, and the suspicion was that [M87](#m87) had eaten the saving. It has, and by more than suspected.
+
+`TheTurnFieldsOwnGeometry`, swept 0,5 → 0,2:
+
+| field | expansions | turn field | routes moved |
+|---|---|---|---|
+| crucible | **0** | 0,0 ms | 0 |
+| longmarch | **0** | 0,0 ms | 0 |
+| brokencountry | **0** | 0,0 ms | 0 |
+| sidewaysmile | 124 | 0,4–0,7 ms | 0 |
+
+**The lattice is not reached at all on three fields of four**, so the number governs a field that is never built; where it is built it is **under a millisecond**, and no route moves at any setting. There is nothing to win.
+
+**And a reason not to lower it anyway.** The fraction is the margin around the straight line the field is drawn over, so a smaller one is a narrower box — which cannot make a route worse but can make it *absent*, on an arrangement wanting a wide detour. `moved 0` says these four fields do not want one; it does not say none does. Trading a route that exists for a tenth of a millisecond on one field is the wrong side of [W10](#w10). Left at 0,5, and the entry is closed rather than carried.
 
 **And it is off, because the licence itself loosens the gate.** The gate stayed at **13 of 19** either way. Bisected properly — the three levers moved **at runtime**, in one process, rather than by rebuilding between cases, which is how [finding 27](OPEN-FINDINGS.md) came to be got wrong the first time:
 

@@ -46,13 +46,38 @@ namespace BattleChess.Rules
         /// that a two-kilometre field is a few hundred buckets rather than
         /// hundreds of thousands. The structure is rebuilt whenever anything
         /// moves, so a fine grid would cost more to fill than it saves.
+        /// <para>
+        /// <b>A lever, and measured — [M95].</b> The obvious complaint about
+        /// this number is that it makes the halo enormous: a query widens by
+        /// <c>reach + widest reach</c>, takes a bucket whose centre is within
+        /// half a diagonal of that, and a body may then sit half a diagonal
+        /// outside the bucket it was filed in — <b>181 m of slack around a
+        /// reach of about ninety</b>. That is true and it is not a cost. Swept
+        /// from 32 m to 768, the bodies a query hands back fall from 37 to 8
+        /// while the buckets it opens rise from 2 to 59, and the second is the
+        /// dearer of the two: <c>NearQuery</c> is flat from 512 down to 128 and
+        /// then <b>doubles</b> by 32, while <c>BodyScan</c> falls only a
+        /// quarter over the same range. Everything between 128 and 512 is one
+        /// flat basin with no reading outside the noise; both ends are worse.
+        /// So this stays where it is, now for a measured reason.
+        /// </para>
         /// </remarks>
-        private const float BucketMetres = 128f;
+        internal static float BucketMetres = 128f;
 
         private readonly List<UnitInstance>[] _buckets;
         private readonly int _columns;
         private readonly int _rows;
         private readonly Vec2 _origin;
+
+        /// <summary>
+        /// The bucket width this index was actually built at.
+        /// </summary>
+        /// <remarks>
+        /// Read once, in the constructor. <see cref="BucketMetres"/> is a lever
+        /// and a lever moved between two queries of one index would have the
+        /// second query walk the first one's grid with the wrong arithmetic.
+        /// </remarks>
+        private readonly float _bucketMetres;
 
         private float _widestReach;
         private volatile bool _built;
@@ -85,11 +110,12 @@ namespace BattleChess.Rules
         public UnitIndex(MapBounds bounds)
         {
             _origin = bounds.Min;
+            _bucketMetres = MathF.Max(1f, BucketMetres);
 
             Vec2 span = bounds.Max - bounds.Min;
 
-            _columns = Math.Max(1, (int)MathF.Ceiling(span.X / BucketMetres));
-            _rows = Math.Max(1, (int)MathF.Ceiling(span.Y / BucketMetres));
+            _columns = Math.Max(1, (int)MathF.Ceiling(span.X / _bucketMetres));
+            _rows = Math.Max(1, (int)MathF.Ceiling(span.Y / _bucketMetres));
 
             _buckets = new List<UnitInstance>[_columns * _rows];
             for (int i = 0; i < _buckets.Length; i++)
@@ -149,7 +175,7 @@ namespace BattleChess.Rules
             // sampling slack whether or not the geometry needed it. So this
             // hands back a smaller set as well as building it in one sweep, and
             // every body the old one could return is still in it.
-            float half = BucketMetres * 0.5f;
+            float half = _bucketMetres * 0.5f;
             float diagonal = half * 1.41421356f;
             float span = corridor + diagonal;
 
@@ -171,12 +197,13 @@ namespace BattleChess.Rules
                 // The bucket's own square is what has to reach the corridor,
                 // so its centre is allowed to sit a half-diagonal further off.
                 var centre = new Vec2(
-                    _origin.X + (column + 0.5f) * BucketMetres,
-                    _origin.Y + (row + 0.5f) * BucketMetres);
+                    _origin.X + (column + 0.5f) * _bucketMetres,
+                    _origin.Y + (row + 0.5f) * _bucketMetres);
 
                 if (FarFromSegment(centre, from, along, length) > reachSquared) continue;
 
                 marks.Visited[bucket] = marks.Sweep;
+                PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
 
                 List<UnitInstance> held = _buckets[bucket];
                 for (int i = 0; i < held.Count; i++)
@@ -238,6 +265,7 @@ namespace BattleChess.Rules
                 // answer has nothing new to say.
                 if (marks.Visited[bucket] == marks.Sweep) continue;
                 marks.Visited[bucket] = marks.Sweep;
+                PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
 
                 List<UnitInstance> held = _buckets[bucket];
                 for (int i = 0; i < held.Count; i++)
@@ -290,9 +318,9 @@ namespace BattleChess.Rules
         }
 
         private int Column(float x) =>
-            Math.Clamp((int)MathF.Floor((x - _origin.X) / BucketMetres), 0, _columns - 1);
+            Math.Clamp((int)MathF.Floor((x - _origin.X) / _bucketMetres), 0, _columns - 1);
 
         private int Row(float y) =>
-            Math.Clamp((int)MathF.Floor((y - _origin.Y) / BucketMetres), 0, _rows - 1);
+            Math.Clamp((int)MathF.Floor((y - _origin.Y) / _bucketMetres), 0, _rows - 1);
     }
 }

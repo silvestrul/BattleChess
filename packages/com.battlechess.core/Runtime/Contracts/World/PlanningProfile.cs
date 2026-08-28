@@ -229,6 +229,17 @@ namespace BattleChess.Contracts
             NearEmpty,
 
             /// <summary>
+            /// One bucket the index opened to answer a query. Counted only.
+            /// </summary>
+            /// <remarks>
+            /// The denominator to <see cref="NearYield"/>'s numerator. A query
+            /// costs bounds arithmetic per bucket and a comparison per body, so
+            /// which of the two dominates decides whether the grid wants to be
+            /// finer or coarser - and nothing had ever counted the buckets.
+            /// </remarks>
+            NearBuckets,
+
+            /// <summary>
             /// A clearance check on a leg this order has already checked, on the
             /// same front. Counted only.
             /// </summary>

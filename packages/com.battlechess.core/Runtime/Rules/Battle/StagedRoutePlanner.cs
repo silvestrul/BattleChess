@@ -378,11 +378,77 @@ namespace BattleChess.Rules
             if (unit == null) throw new ArgumentNullException(nameof(unit));
             if (pathfinder == null) throw new ArgumentNullException(nameof(pathfinder));
 
-            // Every route this planner hands out is cast ahead and straightened,
-            // whichever search produced it. A ladder route that walks left, up
-            // and left again to a destination one diagonal away is the same
-            // defect as a lattice route with 154 sample points in it, and the
-            // fix cannot belong to one of them.
+            // The licence to finish in contact is withheld on the first ask -
+            // M94a, and it is the designer's own rule for crabbing applied to the
+            // arrival: always verify whether the option that needs no licence
+            // is possible, take it if it is, and only then price the one that
+            // does. Measured over the nineteen approach angles, granting it
+            // outright cost three angles a clean arrival and bought two others
+            // a route four times dearer than the press it replaced.
+            Plan withheld = Cast(battle, unit, pathfinder, destination, log, wayRound, arriveOn);
+
+            if (!LicenceOnArrival) return withheld;
+
+            // Anything that already answers without the licence keeps its
+            // answer, whatever the licence might have found instead.
+            if (withheld.Path.Found && !withheld.PressedThrough &&
+                WalksCleanly(battle, unit, withheld))
+                return withheld;
+
+            ArrivalAsked++;
+
+            Plan licensed;
+            bool walks;
+
+            _arrivalLicensed = true;
+
+            try
+            {
+                licensed = Cast(battle, unit, pathfinder, destination, log, wayRound, arriveOn);
+
+                // Asked while the licence is in force, because the licence is
+                // precisely what makes the last leg legal.
+                walks = licensed.Path.Found && !licensed.PressedThrough &&
+                        WalksCleanly(battle, unit, licensed);
+            }
+            finally
+            {
+                _arrivalLicensed = false;
+            }
+
+            if (!walks) return withheld;
+
+            // And it does not escape the ceiling, nor may it make an answer
+            // already in hand dearer. A press-through is a real answer priced
+            // at [M88]'s multiple, and a way round that exists only because the
+            // arrival was licensed is still a way round; against anything else
+            // the licence has to actually win on the clock, because the pass
+            // that found it was the pass that could not find anything better.
+            if (withheld.Path.Found &&
+                CostsMoreThan(
+                    battle, unit, licensed, withheld,
+                    withheld.PressedThrough ? WayRoundCostCeiling : 1f))
+                return withheld;
+
+            ArrivalTook++;
+
+            return licensed;
+        }
+
+        /// <summary>
+        /// One pass of the cascade, cast ahead and straightened.
+        /// </summary>
+        /// <remarks>
+        /// Every route this planner hands out is straightened, whichever search
+        /// produced it. A ladder route that walks left, up and left again to a
+        /// destination one diagonal away is the same defect as a lattice route
+        /// with 154 sample points in it, and the fix cannot belong to one of
+        /// them.
+        /// </remarks>
+        private static Plan Cast(
+            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+            IBattleLog? log, IWayRound? wayRound, Facing? arriveOn)
+        {
             Plan chosen = Choose(battle, unit, pathfinder, destination, log, wayRound, arriveOn);
             Plan straightened = RouteSmoothing.Applied(battle, unit, chosen);
 
@@ -1031,14 +1097,12 @@ namespace BattleChess.Rules
                 // without this the backwards sweep would happily allow it,
                 // because it takes the arrival overlap as its baseline.
                 bool endsInsideOwn =
-                    LicenceOnArrival && leg == points.Count - 1 &&
+                    _arrivalLicensed && leg == points.Count - 1 &&
                     InsideOwnAt(battle, unit, points[leg], front) &&
                     CouldStandAt(battle, unit, points[leg], front);
 
                 if (startsInsideOwn || endsInsideOwn)
                 {
-                    if (endsInsideOwn) ArrivalAsked++;
-
                     if (startsInsideOwn &&
                         !EscapesWithoutDeepening(battle, unit, points[leg - 1], points[leg], front))
                         return leg;
@@ -1046,8 +1110,6 @@ namespace BattleChess.Rules
                     if (endsInsideOwn &&
                         !ArrivesWithoutDeepening(battle, unit, points[leg - 1], points[leg], front))
                         return leg;
-
-                    if (endsInsideOwn) ArrivalTook++;
                 }
                 else if (!Marching.IsClearLine(battle, unit, points[leg - 1], points[leg], front))
                 {
@@ -1170,9 +1232,35 @@ namespace BattleChess.Rules
         /// choose again.
         /// </para>
         /// </remarks>
+        /// <remarks>
+        /// <b>Shipped off, and M94b is why.</b> Built, corrected and made safe
+        /// - and then measured, and it earns nothing anywhere it has been
+        /// asked. Over the nineteen approach angles it changes not one route:
+        /// at 0°, 5°, 20° and 25° the licensed pass finds nothing <i>at any
+        /// price</i>, and at 15° and 30° it finds a way round costing 3,51x and
+        /// 4,09x the press, which is over the ceiling. On the bench it fires
+        /// twice in four fields, keeps neither, and costs sidewaysmile between
+        /// a fifth and a half again for it. So it stays here, off, as a lever
+        /// with its price written down rather than as a default nobody
+        /// measured.
+        /// </remarks>
         internal static bool LicenceOnArrival;
 
-        /// <summary>Last legs that needed the arriving licence, and that got it.</summary>
+        /// <summary>
+        /// Whether the pass running on this thread right now is the licensed
+        /// one.
+        /// </summary>
+        /// <remarks>
+        /// Per thread rather than global because orders are planned several at
+        /// once, and a flag one order sets while it retries would otherwise
+        /// decide what a different order on a different thread is allowed to
+        /// do. That is the same fault <c>UnitIndex.Marks</c> was built to avoid
+        /// and it produced routes that differed depending on how many orders
+        /// were given together.
+        /// </remarks>
+        [ThreadStatic] private static bool _arrivalLicensed;
+
+        /// <summary>Orders that ran the licensed second pass, and that kept it.</summary>
         internal static int ArrivalAsked, ArrivalTook;
 
         private static bool StartsInsideOwn(BattleState battle, UnitInstance unit, Facing front) =>
@@ -1234,15 +1322,50 @@ namespace BattleChess.Rules
         /// </remarks>
         private static bool ArrivesWithoutDeepening(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing front) =>
-            EscapesWithoutDeepening(battle, unit, to, from, front);
+            EscapesWithoutDeepening(battle, unit, to, from, front, ArrivalContactFraction);
+
+        /// <summary>
+        /// What the <b>arriving</b> licence forgives in a body the regiment is
+        /// clear of where it stops: nothing at all.
+        /// </summary>
+        /// <remarks>
+        /// <b>The tolerance is the whole of M94a.</b> M94 built the arriving
+        /// licence as <see cref="EscapesWithoutDeepening"/> walked backwards and
+        /// inherited its allowance with it, and that allowance is
+        /// <c>AllowedContactFraction</c> - five per cent of a body. But a leg
+        /// that is not granted a licence is judged by
+        /// <c>Marching.IsClearLine</c>, and that refuses on
+        /// <c>Sweep.Touches</c>, which is any overlap whatever. So granting the
+        /// licence moved the last leg from the stricter test to the looser one,
+        /// and the looser one let it barge five per cent into somebody on the
+        /// way in. Measured: turned on with the inherited allowance it took
+        /// three of seven sampled angles to <i>walks through somebody</i>, and
+        /// one angle from clear to a 68 s route that clipped.
+        /// <para>
+        /// The two ends are not symmetrical, and this is why. Where the
+        /// regiment <b>starts</b>, the contact is ground it already occupies and
+        /// nobody chose; where it <b>stops</b>, the contact is a place the
+        /// planner picked. So the leaving licence keeps its allowance and the
+        /// arriving one gets none: a body lapped at the destination may only be
+        /// less lapped the further back you look, and a body clear at the
+        /// destination may not be entered anywhere on the way in. That is
+        /// exactly what <c>IsClearLine</c> asks. All the licence now forgives is
+        /// the contact <b>at the destination itself</b>, which is the one thing
+        /// it was built to forgive.
+        /// </para>
+        /// </remarks>
+        private const float ArrivalContactFraction = 0f;
 
         /// <summary>
         /// Sweeps a first leg in small steps.  Bodies already lapped may only
         /// become less overlapped; bodies initially clear may never be entered.
         /// </summary>
         private static bool EscapesWithoutDeepening(
-            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing front)
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing front,
+            float? allowedContact = null)
         {
+            float allowed = allowedContact ?? AllowedContactFraction;
+
             Vec2 travel = to - from;
             float length = travel.Length;
             if (length <= Vec2.Epsilon) return false;
@@ -1272,11 +1395,11 @@ namespace BattleChess.Rules
                     float overlap = OrientedRect.OverlapFraction(pose, own[other].Shape);
                     float before = previousOverlap[other];
 
-                    if (before > AllowedContactFraction)
+                    if (before > allowed)
                     {
                         if (overlap > before + SeparationTolerance) return false;
                     }
-                    else if (overlap > AllowedContactFraction)
+                    else if (overlap > allowed)
                     {
                         return false;
                     }

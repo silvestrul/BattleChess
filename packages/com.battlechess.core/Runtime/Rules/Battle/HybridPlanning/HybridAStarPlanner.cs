@@ -1062,6 +1062,87 @@ namespace BattleChess.Rules.HybridPlanning
         /// </summary>
         private const float EscapeToleranceMetres = 1e-3f;
 
+        /// <summary>
+        /// Whether a pose builds the boxes it turns out to need, or both of
+        /// them whatever it needs.
+        /// </summary>
+        /// <remarks>
+        /// <b>M96, and it is todo 04.</b> Two boxes were built at every pose
+        /// and every stock-take, and a box is a cosine, a sine and a square
+        /// root. Measured on the lattice asked directly, <b>0,69 to 1,05</b>
+        /// overlap tests happen per pose - so a third of poses take no branch
+        /// at all and paid for two boxes to do it, and of those that do take
+        /// one, the branch wants one box and not two.
+        /// </remarks>
+        internal static bool LazyBoxes = true;
+
+        /// <summary>
+        /// The mover's two boxes at one pose, each built the first time
+        /// something asks for it.
+        /// </summary>
+        /// <remarks>
+        /// A struct, and passed by reference everywhere it is used, so that
+        /// building one box is seen by the next body round the loop. The
+        /// margined box is the true-sized one <see cref="HybridBox.Grown"/>,
+        /// which is where the shared trigonometry comes from.
+        /// </remarks>
+        private struct Boxes
+        {
+            private readonly Vec2 _at;
+            private readonly Facing _heading;
+            private readonly Footprint _footprint;
+
+            private HybridBox _trueSize, _withMargin;
+            private bool _haveTrue, _haveMargin;
+
+            public Boxes(Vec2 at, Facing heading, Footprint footprint)
+            {
+                _at = at;
+                _heading = heading;
+                _footprint = footprint;
+
+                _trueSize = default;
+                _withMargin = default;
+                _haveTrue = false;
+                _haveMargin = false;
+
+                if (LazyBoxes) return;
+
+                // The shape this replaced, kept switchable so the two can be
+                // weighed in one process rather than across two builds - W11.
+                _trueSize = HybridBox.For(at, heading, footprint);
+                _withMargin = HybridBox.For(at, heading, footprint, ClearanceMarginMetres);
+                _haveTrue = true;
+                _haveMargin = true;
+            }
+
+            public HybridBox TrueSize
+            {
+                get
+                {
+                    if (_haveTrue) return _trueSize;
+
+                    _trueSize = HybridBox.For(_at, _heading, _footprint);
+                    _haveTrue = true;
+
+                    return _trueSize;
+                }
+            }
+
+            public HybridBox WithMargin
+            {
+                get
+                {
+                    if (_haveMargin) return _withMargin;
+
+                    _withMargin = TrueSize.Grown(ClearanceMarginMetres);
+                    _haveMargin = true;
+
+                    return _withMargin;
+                }
+            }
+        }
+
         private static void TakeStock(
             Vec2 at, Facing heading, Footprint moverFootprint, IReadOnlyList<HybridBox> obstacles,
             float reach, Standing standing, Tally tally)
@@ -1070,8 +1151,7 @@ namespace BattleChess.Rules.HybridPlanning
 
             standing.Nearby.Clear();
 
-            HybridBox trueSize = HybridBox.For(at, heading, moverFootprint);
-            HybridBox withMargin = HybridBox.For(at, heading, moverFootprint, ClearanceMarginMetres);
+            var boxes = new Boxes(at, heading, moverFootprint);
 
             float mine = moverFootprint.BoundingRadius + ClearanceMarginMetres;
 
@@ -1093,7 +1173,7 @@ namespace BattleChess.Rules.HybridPlanning
                 standing.Nearby.Add(i);
 
                 tally.OverlapTests++;
-                float separation = HybridBox.Separation(trueSize, body);
+                float separation = HybridBox.Separation(boxes.TrueSize, body);
                 standing.Depth[i] = separation;
 
                 if (separation < 0f)
@@ -1103,7 +1183,7 @@ namespace BattleChess.Rules.HybridPlanning
                 }
 
                 tally.OverlapTests++;
-                standing.How[i] = HybridBox.Overlap(withMargin, body) ? Contact.Touching : Contact.Apart;
+                standing.How[i] = HybridBox.Overlap(boxes.WithMargin, body) ? Contact.Touching : Contact.Apart;
             }
         }
 
@@ -1217,8 +1297,7 @@ namespace BattleChess.Rules.HybridPlanning
 
             PlanningProfile.Tally(PlanningProfile.Step.HybridPose);
 
-            HybridBox trueSize = HybridBox.For(position, heading, moverFootprint);
-            HybridBox withMargin = HybridBox.For(position, heading, moverFootprint, ClearanceMarginMetres);
+            var boxes = new Boxes(position, heading, moverFootprint);
 
             // The mover's own circumscribed radius, which bounds every corner of
             // both boxes above however they point.
@@ -1262,16 +1341,16 @@ namespace BattleChess.Rules.HybridPlanning
                 switch (standing.How[i])
                 {
                     case Contact.Apart:
-                        if (HybridBox.Overlap(withMargin, body)) return false;
+                        if (HybridBox.Overlap(boxes.WithMargin, body)) return false;
                         break;
 
                     case Contact.Touching:
-                        if (HybridBox.Overlap(trueSize, body)) return false;
+                        if (HybridBox.Overlap(boxes.TrueSize, body)) return false;
                         break;
 
                     default:
                     {
-                        float separation = HybridBox.Separation(trueSize, body);
+                        float separation = HybridBox.Separation(boxes.TrueSize, body);
                         if (separation < standing.Behind[i] - EscapeToleranceMetres) return false;
                         standing.Behind[i] = separation;
                         break;
