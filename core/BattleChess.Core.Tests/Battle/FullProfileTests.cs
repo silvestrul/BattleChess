@@ -1084,6 +1084,123 @@ namespace BattleChess.Tests.Battle
             }
         }
 
+        /// <summary>
+        /// How far round a regiment has to wheel to start its march, and what
+        /// the alternative would cost.
+        /// </summary>
+        /// <remarks>
+        /// <b>The measurement the 179-degree question wants.</b>
+        /// <c>Marching.AlongTheLine</c> gives every leg the front its direction
+        /// implies, with no cap and no option to reverse - so an order to a
+        /// place behind the regiment is an about-face, and [T2] recorded twelve
+        /// in one game at 121 to 179 degrees with wheeling taking 54% of the
+        /// whole recording.
+        /// <para>
+        /// The movement model already prices the alternative:
+        /// <c>MovementSystem.AlignmentPenalty</c> is 1,00 on the line of march,
+        /// <b>0,40 at a right angle and 0,20 fully reversed</b>. So a regiment
+        /// <i>can</i> walk backwards; nothing ever asks it to. This counts how
+        /// often that matters and what each way costs.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is what the " +
+                     "opening-wheel question was decided against, and it plans every order on " +
+                     "every bench field.")]
+        public void HowFarRoundEveryOrderHasToWheel()
+        {
+            _out.WriteLine(
+                $"{"field",-16}{"orders",8}{"0-30",7}{"30-60",7}{"60-90",7}{"90-120",8}" +
+                $"{"120-150",9}{"150-180",9}{"mean",8}{"over 90",9}");
+            _out.WriteLine(new string('-', 90));
+
+            var overNinety = new List<(string, float, float, float, float, float, float)>();
+
+            foreach (string field in Fields)
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+                IPathfinder pathfinder = new DirectPathfinder(
+                    battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+                var bucket = new int[6];
+                float total = 0f;
+                int orders = 0;
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Vec2 to = BenchScenariosTests.OrderFor(battle, unit);
+                    Plan plan = Marching.PlanTo(battle, unit, pathfinder, to);
+
+                    IReadOnlyList<Vec2> points = plan.Path.Waypoints;
+                    if (!plan.Path.Found || points.Count < 2) continue;
+
+                    Facing first = plan.Hold != null && 1 < plan.Hold.Length && plan.Hold[1].HasValue
+                        ? plan.Hold[1]!.Value
+                        : Marching.AlongTheLine(points[0], points[1], unit.Facing);
+
+                    float wheel = Facing.AbsoluteDelta(unit.Facing, first) * 180f / MathF.PI;
+
+                    orders++;
+                    total += wheel;
+                    bucket[Math.Min(5, (int)(wheel / 30f))]++;
+
+                    if (wheel <= 90f) continue;
+
+                    // What the two answers cost on this leg: wheel onto it and
+                    // walk, against holding the front in hand and walking off
+                    // the line of march at the penalty that implies.
+                    float legMetres = Vec2.Distance(points[0], points[1]);
+                    float wholeRoute = GridRoutePlanner.Length(points);
+
+                    // And the front the whole march is going in, as against the
+                    // one the first leg implies - which is the designer's rule.
+                    Facing overall = Marching.AlongTheLine(points[0], points[points.Count - 1], unit.Facing);
+                    float toOverall = Facing.AbsoluteDelta(unit.Facing, overall) * 180f / MathF.PI;
+
+                    float turnSeconds = wheel / MathF.Max(0.1f, unit.Def.Get(UnitAttributes.TurnRate));
+                    float pace = MathF.Max(0.1f, unit.Def.Speed);
+
+                    float wheeling = turnSeconds + legMetres / pace;
+                    float holding = legMetres / (pace * MovementSystem.AlignmentPenalty(wheel));
+
+                    overNinety.Add((field, wheel, legMetres, wheeling, holding, wholeRoute, toOverall));
+                }
+
+                _out.WriteLine(
+                    $"{field,-16}{orders,8}{bucket[0],7}{bucket[1],7}{bucket[2],7}{bucket[3],8}" +
+                    $"{bucket[4],9}{bucket[5],9}{total / Math.Max(1, orders),8:0.0}" +
+                    $"{bucket[3] + bucket[4] + bucket[5],9}");
+            }
+
+            _out.WriteLine(string.Empty);
+            _out.WriteLine("every opening wheel over 90 degrees, and what each way of starting costs");
+            _out.WriteLine(
+                $"{"field",-16}{"wheel",7}{"leg m",8}{"route m",9}{"leg/route",11}" +
+                $"{"to overall",12}{"wheel+walk",12}{"hold front",12}{"cheaper",9}");
+            _out.WriteLine(new string('-', 96));
+
+            int holdWins = 0;
+            int firstLegTiny = 0;
+
+            foreach ((string field, float wheel, float leg, float wheeling, float holding,
+                      float route, float overall) in overNinety)
+            {
+                bool hold = holding < wheeling;
+                if (hold) holdWins++;
+
+                float share = leg / MathF.Max(1f, route);
+                if (share < 0.1f) firstLegTiny++;
+
+                _out.WriteLine(
+                    $"{field,-16}{wheel,7:0}{leg,8:0}{route,9:0}{share,11:0.00}{overall,12:0}" +
+                    $"{wheeling,12:0.0}{holding,12:0.0}{(hold ? "hold" : "wheel"),9}");
+            }
+
+            _out.WriteLine(string.Empty);
+            _out.WriteLine(
+                $"{overNinety.Count} opening wheels over 90 degrees; holding the front would be " +
+                $"cheaper on {holdWins}; the first leg is under a tenth of the route on {firstLegTiny}.");
+        }
+
         private void Report(string field, IRoutePlanner? planner, string name)
         {
             Row row = Measure(field, planner, passes: 3);
