@@ -308,7 +308,7 @@ namespace BattleChess.Tests.Battle
         /// comparison - stage against no stage, not search against no search.
         /// </para>
         /// </remarks>
-        [Fact(Skip = "A record of a measurement rather than a check on one. It is the one that says the tangent stage answers nothing from either side of the grid - M86.")]
+        [Fact(Skip = "A record of a measurement rather than a check on one - what M90's two corrections cost.")]
         public void DoWeNeedTheTangentStage()
         {
             bool wasStage = StagedRoutePlanner.AskTangentStage;
@@ -403,6 +403,480 @@ namespace BattleChess.Tests.Battle
                 $"{routes.Count - answered,6}{walked,11:0.0}{spent,10:0.0}");
 
             return routes;
+        }
+
+
+        /// <summary>
+        /// The turn field's own geometry against the clock: how much room it is
+        /// given beyond the straight line, and how many cells it is cut into.
+        /// </summary>
+        /// <remarks>
+        /// <c>DetourRoomFraction</c> was the largest number in the profile that
+        /// had never been swept - a <c>private const</c> with no remark, applied
+        /// on all four sides, so the field is about 2,9x the area of the tight
+        /// box round start and goal and the fill goes as the square of it.
+        /// Outside the field <c>SecondsFrom</c> hands back the caller's fallback
+        /// rather than failing, so a smaller field is not wrong, only worse
+        /// advised - and a worse-advised lattice expands more. Which way that
+        /// nets out cannot be argued from the geometry, only clocked.
+        /// </remarks>
+        [Fact]
+        public void TheTurnFieldsOwnGeometry()
+        {
+            float wasRoom = HybridTurnField.DetourRoomFraction;
+            float wasAcross = HybridTurnField.TargetCellsAcross;
+
+            try
+            {
+                foreach (string field in Fields)
+                {
+                    _out.WriteLine($"=== {field} ===");
+                    _out.WriteLine(
+                        $"{"room",6}{"across",8}{"ms",10}{"field ms",10}{"expanded",10}" +
+                        $"{"walk s",12}{"press",7}{"moved",7}");
+
+                    Dictionary<string, string>? baseline = null;
+
+                    foreach (float room in new[] { 0.5f, 0.4f, 0.3f, 0.2f })
+                    foreach (float across in new[] { 48f, 32f })
+                    {
+                        if (room != 0.5f && across != 48f) continue;
+
+                        HybridTurnField.DetourRoomFraction = room;
+                        HybridTurnField.TargetCellsAcross = across;
+
+                        Dictionary<string, string> routes = OneSetting(
+                            field, room, across, baseline, out _);
+
+                        baseline ??= routes;
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                HybridTurnField.DetourRoomFraction = wasRoom;
+                HybridTurnField.TargetCellsAcross = wasAcross;
+            }
+        }
+
+        /// <summary>One field at one setting: least of three, then the quality.</summary>
+        private Dictionary<string, string> OneSetting(
+            string field, float room, float across,
+            Dictionary<string, string>? baseline, out double least)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            var routes = new Dictionary<string, string>();
+            double walked = 0d;
+            int pressed = 0;
+
+            least = double.MaxValue;
+
+            // Warm, then three passes and the least of them. Noise on work like
+            // this is one-sided, so the least is the honest figure.
+            const int passes = 6;
+
+            for (int pass = 0; pass < passes; pass++)
+            {
+                routes.Clear();
+                walked = 0d;
+                pressed = 0;
+
+                long began = Stopwatch.GetTimestamp();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Plan plan = Marching.PlanTo(
+                        battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    // The quality is taken on the LAST pass, not the first.
+                    // Taken on the first it was cleared again by every pass
+                    // after it, and the table reported nought walked, nought
+                    // pressed and nought routes moved on every row - which read
+                    // exactly like a clean result and was an empty dictionary
+                    // compared with an empty dictionary.
+                    if (pass < passes - 1) continue;
+
+                    walked += Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold);
+                    if (plan.PressedThrough) pressed++;
+
+                    var line = new System.Text.StringBuilder();
+                    foreach (Vec2 at in plan.Path.Waypoints)
+                        line.Append(System.FormattableString.Invariant($"({at.X:0.00},{at.Y:0.00})"));
+
+                    routes[$"u{unit.Id.Value:D3}"] = line.ToString();
+                }
+
+                double spent = (Stopwatch.GetTimestamp() - began) * 1000d / Stopwatch.Frequency;
+
+                if (pass > 0 && spent < least) least = spent;
+
+                // Non-vacuity: a row whose routes were never captured would
+                // agree with any baseline perfectly and prove nothing.
+                if (pass == passes - 1 && routes.Count == 0)
+                    throw new InvalidOperationException("no routes captured on the measured pass");
+            }
+
+            // And one instrumented pass, for the field's own share.
+            BattleState probed = BenchScenariosTests.Load(field);
+            PlanningProfile.Start();
+            BenchScenariosTests.OrderEverybody(probed, null);
+            PlanningProfile.Stop();
+
+            double fieldMs = PlanningProfile.InclusiveMilliseconds(PlanningProfile.Step.HybridField);
+            long expanded = PlanningProfile.CallsTo(PlanningProfile.Step.HybridPose);
+
+            int moved = 0;
+
+            if (baseline != null)
+                foreach (KeyValuePair<string, string> pair in routes)
+                    if (baseline[pair.Key] != pair.Value)
+                        moved++;
+
+            _out.WriteLine(
+                $"{room,6:0.0}{across,8:0}{least,10:0.0}{fieldMs,10:0.0}{expanded,10:N0}" +
+                $"{walked,12:0.0}{pressed,7}{(baseline == null ? "-" : moved.ToString()),7}");
+
+            return routes;
+        }
+
+
+        /// <summary>
+        /// Whether the coarse route is there to seed the fine one: how often the
+        /// grid <i>found</i> a route that was then refused, on the orders the
+        /// lattice had to answer from nothing.
+        /// </summary>
+        /// <remarks>
+        /// The lattice runs unbounded on every order the grid could not settle,
+        /// rediscovering topology from scratch. If the grid <i>found</i> a route
+        /// on those orders and it was merely refused by the walk gate, that
+        /// route is still a true statement about which side of which body the
+        /// answer lies - and bounding the lattice to a tube round it is the one
+        /// version of the tube idea that has never been tried. The tube from the
+        /// tangent search failed because 74 of 94 cheap routes were
+        /// press-throughs; a grid route cannot be one.
+        /// </remarks>
+        [Fact]
+        public void IsThereACoarseRouteToSeedTheFineOne()
+        {
+            _out.WriteLine(
+                $"{"field",-16}{"orders",8}{"asked",7}{"found",7}{"held",6}" +
+                $"{"refused",9}{"lattice",9}{"seedable",10}");
+
+            foreach (string field in Fields)
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+
+                IPathfinder pathfinder = new DirectPathfinder(
+                    battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+                foreach (UnitInstance warm in battle.UnitsOnField())
+                    Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                StagedRoutePlanner.ResetCounters();
+
+                int orders = 0;
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Marching.PlanTo(battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+                    orders++;
+                }
+
+                int refused = GridRoutePlanner.Found - GridRoutePlanner.Held;
+
+                _out.WriteLine(
+                    $"{field,-16}{orders,8}{GridRoutePlanner.Asked,7}{GridRoutePlanner.Found,7}" +
+                    $"{GridRoutePlanner.Held,6}{refused,9}{StagedRoutePlanner.PoseWon,9}" +
+                    $"{Math.Min(refused, StagedRoutePlanner.PoseWon),10}");
+            }
+        }
+
+
+        /// <summary>
+        /// The grid at finer cells: does a smaller cell answer the orders the
+        /// regiment-sized one cannot, and take them off the lattice?
+        /// </summary>
+        /// <remarks>
+        /// The one live form of "coarse route seeds fine route". The seed
+        /// version is dead - measured, the grid <i>found</i> nothing at all on
+        /// every order the lattice had to answer on three of four fields, so
+        /// there is no coarse route to bound a tube around. What is left is the
+        /// other direction: the orders reaching the lattice are the ones a cell
+        /// the size of a regiment cannot express, and a cell half or a quarter
+        /// that size might. Each lattice order costs about 26 ms and each grid
+        /// order about 6, so moving even half of them is worth more than every
+        /// micro-optimisation in the profile put together.
+        /// </remarks>
+        [Fact]
+        public void TheGridAtFinerCells()
+        {
+            float was = RegimentGrid.SpacingMultiple;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"cells",7}{"asked",7}{"found",7}{"grid",6}{"lattice",9}" +
+                    $"{"press",7}{"ms",9}{"walk s",11}{"moved",7}");
+
+                foreach (string field in Fields)
+                {
+                    Dictionary<string, string>? baseline = null;
+
+                    foreach (float multiple in new[] { 1f, 0.5f, 0.25f })
+                    {
+                        RegimentGrid.SpacingMultiple = multiple;
+                        baseline = AtThisSpacing(field, multiple, baseline);
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                RegimentGrid.SpacingMultiple = was;
+            }
+        }
+
+        private Dictionary<string, string> AtThisSpacing(
+            string field, float multiple, Dictionary<string, string>? baseline)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            var routes = new Dictionary<string, string>();
+            double walked = 0d;
+            int pressed = 0;
+            double least = double.MaxValue;
+
+            const int passes = 4;
+
+            for (int pass = 0; pass < passes; pass++)
+            {
+                routes.Clear();
+                walked = 0d;
+                pressed = 0;
+
+                StagedRoutePlanner.ResetCounters();
+
+                long began = Stopwatch.GetTimestamp();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Plan plan = Marching.PlanTo(
+                        battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    if (pass < passes - 1) continue;
+
+                    walked += Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold);
+                    if (plan.PressedThrough) pressed++;
+
+                    var line = new System.Text.StringBuilder();
+                    foreach (Vec2 at in plan.Path.Waypoints)
+                        line.Append(System.FormattableString.Invariant($"({at.X:0.00},{at.Y:0.00})"));
+
+                    routes[$"u{unit.Id.Value:D3}"] = line.ToString();
+                }
+
+                double spent = (Stopwatch.GetTimestamp() - began) * 1000d / Stopwatch.Frequency;
+                if (spent < least) least = spent;
+            }
+
+            if (routes.Count == 0) throw new InvalidOperationException("no routes captured");
+
+            int moved = 0;
+
+            if (baseline != null)
+                foreach (KeyValuePair<string, string> pair in routes)
+                    if (baseline[pair.Key] != pair.Value) moved++;
+
+            _out.WriteLine(
+                $"{field,-16}{multiple,7:0.00}{GridRoutePlanner.Asked,7}{GridRoutePlanner.Found,7}" +
+                $"{StagedRoutePlanner.GridClean,6}{StagedRoutePlanner.PoseWon,9}{pressed,7}" +
+                $"{least,9:0.0}{walked,11:0.0}{(baseline == null ? "-" : moved.ToString()),7}");
+
+            return baseline ?? routes;
+        }
+
+
+        /// <summary>
+        /// The two-tier grid as it would ship: the coarse grid asked first, and
+        /// only the orders it cannot answer paying for a finer one.
+        /// </summary>
+        /// <remarks>
+        /// <b>M87.</b> <see cref="TheGridAtFinerCells"/> asked what one finer
+        /// spacing does when every order pays for it. This asks the shipping
+        /// question instead: coarse first, then the tiers in
+        /// <c>FineSpacings</c> only where the coarse grid found nothing, so the
+        /// sixteen-fold field is paid on the eight or ten orders a field that
+        /// reach it rather than on all thirty-two. The columns that decide it
+        /// are <c>press</c> and <c>walk s</c> together with <c>ms</c>: a field
+        /// may pay wall clock to buy press-throughs back, which
+        /// <see cref="StagedRoutePlanner.WayRoundCostCeiling"/> sanctions up to
+        /// three times the pressed route (<b>W12</b>).
+        /// </remarks>
+        [Fact]
+        public void TheTwoTierGridAsShipped()
+        {
+            float[] was = StagedRoutePlanner.FineSpacings;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"tiers",-16}{"coarse",8}{"fine ask",9}{"fine won",9}" +
+                    $"{"lattice",9}{"press",7}{"side",6}{"ms",9}{"walk s",11}{"moved",7}");
+                _out.WriteLine(new string('-', 108));
+
+                foreach (string field in Fields)
+                {
+                    Dictionary<string, string>? baseline = null;
+
+                    foreach ((string name, float[] tiers) in new[]
+                    {
+                        ("coarse only", Array.Empty<float>()),
+                        ("+ half", new[] { 0.5f }),
+                        ("+ half, quarter", new[] { 0.5f, 0.25f }),
+                        ("+ quarter", new[] { 0.25f }),
+                    })
+                    {
+                        StagedRoutePlanner.FineSpacings = tiers;
+                        baseline = AtTheseTiers(field, name, baseline);
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                StagedRoutePlanner.FineSpacings = was;
+            }
+        }
+
+        /// <summary>One field at one set of tiers: least of four, then the quality.</summary>
+        private Dictionary<string, string> AtTheseTiers(
+            string field, string name, Dictionary<string, string>? baseline)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            var routes = new Dictionary<string, string>();
+            double walked = 0d;
+            int pressed = 0;
+            double least = double.MaxValue;
+
+            const int passes = 4;
+
+            for (int pass = 0; pass < passes; pass++)
+            {
+                routes.Clear();
+                walked = 0d;
+                pressed = 0;
+
+                StagedRoutePlanner.ResetCounters();
+
+                long began = Stopwatch.GetTimestamp();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Plan plan = Marching.PlanTo(
+                        battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    if (pass < passes - 1) continue;
+
+                    walked += Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold);
+                    if (plan.PressedThrough) pressed++;
+
+                    var line = new System.Text.StringBuilder();
+                    foreach (Vec2 at in plan.Path.Waypoints)
+                        line.Append(System.FormattableString.Invariant($"({at.X:0.00},{at.Y:0.00})"));
+
+                    routes[$"u{unit.Id.Value:D3}"] = line.ToString();
+                }
+
+                double spent = (Stopwatch.GetTimestamp() - began) * 1000d / Stopwatch.Frequency;
+                if (spent < least) least = spent;
+            }
+
+            if (routes.Count == 0) throw new InvalidOperationException("no routes captured");
+
+            int moved = 0;
+
+            if (baseline != null)
+                foreach (KeyValuePair<string, string> pair in routes)
+                    if (baseline[pair.Key] != pair.Value) moved++;
+
+            _out.WriteLine(
+                $"{field,-16}{name,-16}{GridRoutePlanner.Held,8}{GridRoutePlanner.FineAsked,9}" +
+                $"{GridRoutePlanner.FineHeld,9}{StagedRoutePlanner.PoseWon,9}{pressed,7}" +
+                $"{StagedRoutePlanner.SidewalkTook,6}" +
+                $"{least,9:0.0}{walked,11:0.0}{(baseline == null ? "-" : moved.ToString()),7}");
+
+            return baseline ?? routes;
+        }
+
+
+        /// <summary>
+        /// The two holes M90 found in the grid, priced one at a time.
+        /// </summary>
+        /// <remarks>
+        /// <c>KeepEndCells</c> stops the route jumping from where the regiment
+        /// stands to a node a cell and a half away across ground nobody checked.
+        /// <c>BlockedStepPenalty</c> stops the search being walled in by the
+        /// halo of the body it is standing against. Both are corrections rather
+        /// than optimisations, so what this asks is only what they cost.
+        /// </remarks>
+        [Fact]
+        public void WhatTheTwoGridCorrectionsCost()
+        {
+            bool wasEnds = RegimentGrid.KeepEndCells;
+            float wasPenalty = RegimentGrid.BlockedStepPenalty;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"ends",-6}{"penalty",-9}{"coarse",8}{"fine ask",9}{"fine won",9}" +
+                    $"{"lattice",9}{"press",7}{"ms",9}{"walk s",11}{"moved",7}");
+                _out.WriteLine(new string('-', 102));
+
+                foreach (string field in Fields)
+                {
+                    Dictionary<string, string>? baseline = null;
+
+                    foreach ((bool ends, float penalty) in new[]
+                    {
+                        (false, 0f), (true, 0f), (true, 8f), (true, 25f), (true, 60f), (true, 200f),
+                    })
+                    {
+                        RegimentGrid.KeepEndCells = ends;
+                        RegimentGrid.BlockedStepPenalty = penalty;
+
+                        baseline = AtTheseTiers(
+                            field, $"{(ends ? "keep" : "drop"),-6}{penalty,-9:0}", baseline);
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                RegimentGrid.KeepEndCells = wasEnds;
+                RegimentGrid.BlockedStepPenalty = wasPenalty;
+            }
         }
 
         // ------------------------------------------------------------------ the work

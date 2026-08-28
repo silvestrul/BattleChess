@@ -81,8 +81,22 @@ namespace BattleChess.Contracts
             /// <summary>The four-rung ladder, as the planner or as a second opinion.</summary>
             Ladder,
 
-            /// <summary>One of the older way-round strategies.</summary>
+            /// <summary>One of the older way-round strategies - the ladder's arch.</summary>
             WayRound,
+
+            /// <summary>
+            /// The ladder's other rung-two candidate: the same line taken
+            /// side-on, so a body twenty metres across instead of forty.
+            /// </summary>
+            /// <remarks>
+            /// Split from <see cref="Ladder"/> because rung two computes both
+            /// candidates and prices them against each other, and the crab is
+            /// worked out <i>even when the arch succeeded</i> - deliberately,
+            /// so that the cheaper of the two wins rather than the first one
+            /// found. Whether that deliberate extra is a rounding error or a
+            /// sixth of the ladder could not be read while both were one line.
+            /// </remarks>
+            Crab,
 
             /// <summary>Can this body travel this line without meeting anything.</summary>
             ClearLine,
@@ -198,6 +212,38 @@ namespace BattleChess.Contracts
             /// <summary>One rectangle against one rectangle, by separating axis. Counted only.</summary>
             HybridOverlap,
 
+            /// <summary>
+            /// One body handed back by the spatial index. Counted only, and
+            /// counted in bulk rather than one at a time.
+            /// </summary>
+            /// <remarks>
+            /// The question it exists to answer: the clearance path asks the
+            /// index once a leg and the hybrid asks once a node, so hoisting the
+            /// query to once an order is the obvious saving - but only if the
+            /// list it hands back does not grow faster than the queries shrink.
+            /// This is the numerator of that trade.
+            /// </remarks>
+            NearYield,
+
+            /// <summary>One call to the index that returned nothing at all. Counted only.</summary>
+            NearEmpty,
+
+            /// <summary>
+            /// A clearance check on a leg this order has already checked, on the
+            /// same front. Counted only.
+            /// </summary>
+            /// <remarks>
+            /// One order runs five hundred and fifty clearance checks on the
+            /// Crucible, and the cascade proves the same route more than once by
+            /// construction: the ladder's route is proved, the grid's route is
+            /// smoothed and proved, the lattice's route is proved, and then the
+            /// winner is smoothed and proved again. Whether that is most of the
+            /// five hundred and fifty or a rounding error on it decides whether
+            /// a per-order memo is the largest saving left or a waste of a
+            /// hash lookup.
+            /// </remarks>
+            ClearLineRepeat,
+
             /// <summary>Not a step. The number of them.</summary>
             Count,
         }
@@ -264,11 +310,22 @@ namespace BattleChess.Contracts
         public static void Stop() => _mine = false;
 
         /// <summary>Records that a counted-only step happened once.</summary>
+        /// <summary>Whether this thread is measuring. For measurement-only bookkeeping.</summary>
+        public static bool Running => _anyone && _mine;
+
         public static void Tally(Step step)
         {
             if (!_anyone || !_mine) return;
 
             _calls![(int)step]++;
+        }
+
+        /// <summary>The same, by more than one at a time.</summary>
+        public static void Tally(Step step, int many)
+        {
+            if (!_anyone || !_mine) return;
+
+            _calls![(int)step] += many;
         }
 
         /// <summary>

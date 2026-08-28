@@ -229,6 +229,27 @@ namespace BattleChess.Rules
         /// cost. Call this whether the plan succeeded or failed — a route that
         /// could not be found cost the same search as one that could.
         /// </summary>
+        /// <summary>
+        /// Records time spent on planning work that produced no route — the
+        /// placement search that found nowhere to stand being the one case.
+        /// </summary>
+        /// <remarks>
+        /// <b>M93.</b> Charging this through <see cref="Spent"/> would be wrong
+        /// twice over: it would spend one of the frame's <i>routes</i> on a
+        /// route that does not exist, and it would mark the regiment as having
+        /// planned this frame when it has not. Only the milliseconds are real,
+        /// so only the milliseconds are charged.
+        /// </remarks>
+        public void SpentWithoutPlanning(long stopwatchTicks)
+        {
+            lock (_counting)
+            {
+                if (!_rationing) return;
+
+                _spentTicks += stopwatchTicks;
+            }
+        }
+
         public void Spent(UnitId unit, long stopwatchTicks)
         {
             lock (_counting)

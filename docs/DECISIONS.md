@@ -129,6 +129,14 @@ rule is right but the number, threshold or exact form is the designer's to move.
 | M84 | The index asked once a leg instead of once a sample, and the turn field at half the resolution. <sup>[why](#m84)</sup> | Mandatory | ✅ measured |
 | M85 | An order costs four microseconds or sixty milliseconds, and the mean describes neither. <sup>[why](#m85)</sup> | Mandatory | ✅ measured |
 | M86 | The grid is asked before the tangent search, and the tangent stage is off. <sup>[why](#m86)</sup> | Designer | ✅ shipped |
+| M87 | The grid answers at a regiment’s width first, and only the orders it cannot answer pay for a finer one. <sup>[why](#m87)</sup> | Designer | ✅ shipped |
+| M88 | A way round may cost up to **three times** the route that presses through — a multiple, never a number of seconds. <sup>[why](#m88)</sup> | Designer | ✅ pinned |
+| M89 | If there is room for the body, it fits. <sup>[why](#m89)</sup> | Designer | ⚠️ stated, being measured |
+| M90 | A grid route is walked from where the regiment stands, and held ground is priced rather than refused. <sup>[why](#m90)</sup> | Mandatory | ✅ shipped |
+| M91 | A leg is walked on the line of march if it can be, and sidewalked if it cannot — priced either way. <sup>[why](#m91)</sup> | Designer | ✅ shipped |
+| M92 | A regiment touching one of its own may set off, on the same licence as one overlapping it. <sup>[why](#m92)</sup> | Mandatory | ✅ shipped |
+| M93 | A search that spends the frame’s time charges the frame, whether or not it produced a route. <sup>[why](#m93)</sup> | Mandatory | ✅ shipped |
+| M94 | A regiment may arrive in the contact it is allowed to stand in. <sup>[why](#m94)</sup> | Designer | ⚠️ built, ships **off** — it loosens the gate |
 
 ## Combat
 
@@ -524,8 +532,152 @@ Twenty thousand is where quality stops being free: the Crucible and Broken Count
 
 M86 wins **every one of the sixteen paired field-runs**, and [finding 22](OPEN-FINDINGS.md)'s estimate of 13% was low because it priced only the search and not the ledger reset and clearance work hung off it. **Quality is not traded for any of it**: 280 routes byte-identical against the pre-reorder build, same routed, same refused, same five pressed through on the sideways mile, same marching seconds. **Two gates had to be repaired to stay honest.** `HalvingTheGraphChangesNoRoute` compared routes at 48 places against 24 through the shipping cascade — which after this reaches the tangent search on no field at all, and its own non-vacuity guard correctly reported that halving a cap nothing reaches proves nothing. It now turns the grid off and the stage on, so it exercises the search it names. And nothing anywhere wrote down what the *cascade* returns — the fingerprint theory runs the three planners singly, none of which is what a battle reaches — so a change to the order of its stages had no record to be checked against. `EveryShippingRouteWrittenOut` is that record, and it is what the byte-identical claim above rests on.
 
+<a id="m87"></a>
+**M87** — The designer, on the decision register: *"Do 01 two-tier grid (if it is purely to add benefit). sidewaysmile is slower but all the others are good"*. A grid cell holds a whole regiment, so the coarse grid **cannot express a way round narrower than one**, and the orders it fails on are exactly the ones that fell to the pose lattice at tens of milliseconds each. Asking a finer grid of *every* order is a loss, because a quarter cell is sixteen times the cells and all thirty-two orders pay for it. So the grid is asked in tiers: a regiment’s width, then half, then a quarter, and each tier is reached **only by the orders the one above could not answer**, so the sixteen-fold field is paid on the eight to fifteen orders a field that get there.
+
+Measured on the shipping arrangement rather than on one spacing applied globally — `FullProfileTests.TheTwoTierGridAsShipped`, four bench fields, 280 orders, least of four passes, three separate runs:
+
+| field | coarse only | + half, quarter | lattice | press | marching |
+|---|---|---|---|---|---|
+| the Crucible | 107,8–149,3 ms | **56,6–59,0 ms** | 9 → **0** | 0 → 0 | -0,2% |
+| Broken Country | 71,6–75,9 ms | **64,0–66,2 ms** | 10 → **0** | 0 → 0 | +1,3% |
+| the Long March | 15,9–16,4 ms | 15,7–16,9 ms | 0 → 0 | 0 → 0 | unchanged |
+| the sideways mile | 22,4–22,7 ms | 22,9–25,1 ms | 3 → 3 | **5 → 1** | +11,7% |
+
+**The pose lattice stops running altogether** on the two fields that were paying for it. Nothing gets dearer in wall clock: the sideways mile is flat inside this machine’s spread, and an earlier reading of it at +31% was a single unpaired draw against a bimodal baseline — [W11](#w11) again, in its milder form. What the sideways mile actually buys is **four of its five press-throughs removed**, for 4 122 s of extra marching, every one of those trades individually inside [M88](#m88)’s ceiling. Two tiers beat one: a quarter alone leaves a press on the sideways mile and runs 3–5 ms dearer on the other two fields, because a half-cell grid answers nine of the crucible’s fifteen for a quarter of the fill.
+
+**Re-taken after [M90](#m90)**, which changes what the grid finds and so re-bases every row — three runs, least of four:
+
+| field | coarse only | two tiers | lattice | press | marching |
+|---|---|---|---|---|---|
+| the Crucible | 127–177 ms | **74,8–78,0 ms** | 7 → **0** | 0 → 0 | +0,3% |
+| Broken Country | 83,4–89,4 ms | **73,7–80,4 ms** | 6 → **0** | 0 → 0 | +1,1% |
+| the Long March | 20,8–22,6 ms | 20,3–21,5 ms | 0 → 0 | 0 → 0 | unchanged |
+| the sideways mile | 27,9–29,7 ms | 28,0–31,2 ms | 3 → 3 | **4 → 1** | +8,6% |
+
+The shape holds — the Crucible −45%, Broken Country −12%, the lattice off both, the sideways mile flat in wall clock and buying presses. M90 costs some absolute time on every row, including the baselines, and its own accounting is at [M90](#m90).
+
+<a id="m88"></a>
+**M88** — The designer, asked what a press-through is worth: *"a press-through should be worth about 3x normal route (or 2.5 minimum). it’s better because it’s not dependent on speed"*. This settles what [W10](#w10) left open and what the register raised against [M87](#m87)’s sideways mile. `StagedRoutePlanner.WayRoundCostCeiling` already stood at **3**, so no code moves — what changes is that the number is now a decision with a reason instead of a default nobody had defended.
+
+**Why a multiple and not a number of seconds.** The alternative on the table was *"a press is worth up to N seconds of detour"*. It was refused because seconds are not comparable between regiments: the same detour is N seconds for cavalry and three times N for a foot column on the same ground, so a fixed budget would let horse round anything and pin infantry to shouldering through. A multiple of the regiment’s **own** pressed route is invariant to its pace, its ground and the length of the order, which is what makes one number govern the whole game.
+
+**The floor is 2,5.** Below that the ceiling starts refusing detours the game wants — a way round a single body is routinely twice the straight line. Anything from 2,5 to 3 is defensible; 3 ships. It applies only where the ladder actually pressed, so a route that was never going to shoulder through is not measured against this at all.
+
+<a id="m89"></a>
+**M89** — The designer, on the crab and on the grid’s halo in the same breath: *"if there is space for an unit to fit it should fit"*, and *"this should apply to every code which verifies a crab"*.
+
+**What it rules out.** Two ways of asking about clearance are now wrong by rule. The first is **enumerating poses to discover a fit**: if two bodies ahead are far enough apart to admit the mover’s width — not its length — and the way beyond them is clean, that is already a crab candidate, and the answer is arithmetic on the gap rather than a search over placements. Take a default pose and compute the rotation from the gap **only if one is needed at all**. The second is **inflating a body by a halo and calling the result blocked**: a cell whose halo is touched but whose ground is free is a cell the regiment can stand in, and refusing it is refusing a fit that exists.
+
+**What it does not say.** It does not say clearance is free to check, and it does not repeal [M12](#moving) — the rectangle is still what travels. It says the test is *does the body fit in the space*, asked of the body and the space, and never of a proxy for either.
+
+**Its consequences are measured, not assumed.** Dropping the grid’s halo makes cells passable that the router must then cross off-centre, which is a different search, not a cheaper one; the designer asked for a performance review of that specifically before it ships. Hence the status above.
+
+### The halo review, 28 Aug 2026
+
+*"Can’t you just leave it with no halo (so the hex is yellow instead of red) and just compute for the actual space?"* — asked, measured, and the answer is in three parts.
+
+**What the halo is.** `RegimentGrid` reserves `HalfDepth + (BoundingRadius − HalfDepth) × ClearanceFraction + MarginMetres` round every body — for a forty by twenty regiment, 10 + 12,4×0,75 + 2 = **21,3 m**. Two spearmen fifty metres apart therefore have their thirty metres of daylight **closed completely**, because 21,3 from each side overlaps in the middle.
+
+**Half of what was asked for is already there.** The cell is not simply red or not: seven samples measure how much of it is really covered, `FillToBlock` refuses it only once a third is gone, and `NodeAt` then enters the cell **at the middle of whatever of it is free rather than at its centre**. That is the *"go left-right"* half, and it was built for exactly this reason. Its limit, found this session, is that the centroid of the free samples is not necessarily a place the rectangle fits — sample coverage is a test on points, not on the body.
+
+**Removing the halo was already swept, and it loses.** At clearance fractions 1,00 / 0,75 / 0,50 / 0,25 / 0,00, routes **held** were 42/45/34/35/33, 52/55/54/50/47 and 73/73/73/58/43. Shrinking finds more routes and keeps fewer, because **A\* returns one route and not a menu**: an optimistic grid does not offer a route that might work, it commits to threading a gap the regiment cannot use, and the gate then refuses the whole thing. Pricing held ground at eight times an open step — nearly no halo, in effect — reproduces this exactly: the Crucible went to **285,7 ms** with the coarse grid holding **not one route**.
+
+**But the instinct behind the question was right, and it found a real bug.** The halo’s serious cost is not optimism, it is that a regiment **standing against a body is inside the halo and cannot get out** — and worse the finer the cells, which is what made the fine tier useless on the arrangements it was added for. The fix is not to remove the halo but to make it a price rather than a wall, which is what [M90](#m90) does. The halo stays; the regiment can now leave.
+
+<a id="m90"></a>
+**M90** — Two holes in the regiment grid, both found by taking [open finding 24](OPEN-FINDINGS.md) apart, both instances of [M89](#m89).
+
+**The route left from somewhere the regiment was not.** `Reconstruct` replaced the start and goal cells with the true start and destination, which reads as tidy: the ends of a route should be its real ends. What it actually produced was a first leg running from wherever the regiment stood to the node of the **second** cell, a cell and a half away, cutting the corner of the cell between — and a regiment under orders to move is usually standing against the very body it has been told to get round, so that corner is that body. The grid never checked the leg, because it is not a grid edge, and `WalksCleanly` then threw the whole route away. `KeepEndCells` keeps both end nodes, so every consecutive pair of points is at most one cell apart and the only hops the grid does not vouch for are two sub-cell ones, which are unavoidable. Measured on the bench it is **free to faster** — the Crucible 85,9 → 68,6 ms, because smoothing given more points to work with finds a shorter route than a re-search would — and every field's marching comes out slightly shorter.
+
+**And the finer the cells, the worse the grid got.** A regiment touching a body stands inside that body's halo, which reaches [ClearanceFraction](#m90) of its circumscribed radius plus the margin — 21 m for a forty by twenty regiment. A\* refused every held cell, so the search was walled in at the start and again at the destination, and it was walled in **worse the finer the cells were**: at a regiment's width one 45 m step happens to clear the halo, at a quarter of it no chain of 11 m steps ever does. So the fine tier that [M87](#m87) added returned **no route at all** on exactly the arrangements it exists for. `BlockedStepPenalty` prices a held step instead of refusing it, which is [M89](#m89) said as arithmetic: a regiment that legally stands somewhere must be able to leave it.
+
+**The price is sixty, because that is where it stops mattering.** Swept at 0 / 8 / 25 / 40 / 60 / 80 / 120 / 200:
+
+| penalty | Crucible | Broken Country | what happens |
+|---|---|---|---|
+| refuse | 85,9 ms | 72,3 ms | the fine tier finds nothing where it is needed |
+| 8 | **285,7 ms** | **254,2 ms** | cuts *through* bodies; the coarse grid holds **0**, the lattice runs 18 times |
+| 25 | 83,6 ms | 84,3 ms | held steps still taken as short cuts |
+| **60** | 77,2 ms | 63,7 ms | held ground used only to escape and to arrive |
+| 200 | 67,4 ms | 64,2 ms | **identical routes to 60** |
+
+From sixty upward not one route moves — 57 632,6 s and 71 664,1 s of marching at 60, 80, 120 and 200 alike — so sixty is where held ground has stopped being a short cut, and paying more buys nothing. Eight is [ClearanceFraction](#m90)'s warning about an optimistic grid arriving on schedule: *A\* returns one route and not a menu*, so a grid that thinks it fits threads a gap it cannot use and the gate refuses the whole thing. At sixty the coarse grid answers **more** orders than refusal did, 25 and 26 against 23 and 22, so the fine tier is asked eleven and ten times rather than fifteen and eighteen — for 0,7% and 1,9% more marching.
+
+**What it did not fix.** Four of the nineteen approach angles were already clear; two more hold a grid route now; the six that press through still do, on a third fault that needs a rule rather than a repair — [finding 24](OPEN-FINDINGS.md), part (c).
+
+<a id="m91"></a>
+**M91** — The designer, asked how short a leg has to be before a regiment holds its front instead of wheeling onto it, and refusing the question: *"if a shuffle (call it sidewalk) is like a crabbing, then it should be costed. just like with crabbing, its preferred to walk straight but if that’s not possible then it should be priced, just like with crabbing. so always verify if a non-sidewalk option is possible and do it, otherwise sidewalk can be done"*.
+
+**The name.** A **sidewalk** is a leg the regiment covers without turning to face it: it keeps the front already in hand and translates. A **wheel** is [M3](#m3)'s default, turning until the front points along the leg. Every leg of every route was a wheel until now, which is [finding 24](OPEN-FINDINGS.md) part (c) and is why six approach angles pressed through.
+
+**The rule is [M14](#moving) said per leg.** Full width first, crabbing second — so the line of march is tried on every leg, always, and the front in hand is only asked about on a leg that will not walk wheeled. It is an ordering and not a comparison, which is deliberate: a regiment that *can* face where it is going should, and the cheapest route is not the argument for turning it sideways.
+
+**Two proposals were refused to get here, and both were mine.** A **length threshold** — shorter than N metres, hold the front — needs a number nobody can defend, and cannot tell a 5° turn from a 93° one at the same length. A **cost comparison** — price it both ways and take the cheaper — would let a regiment turn sideways merely because it was faster, which is [M81](#m81)'s 404 m crab arriving 90° off its ordered front, invited back in through the front door. Preference with a price is neither.
+
+**The pricing already existed and needed nothing.** `Marching.SecondsToWalk` takes the per-leg `Hold` array and charges a held leg at `MovementSystem.AlignmentPenalty` of the angle between the front and the bearing — which is exactly how a crab has always been priced. `CostsMoreThan` already passes `Hold` through, so [M88](#m88)'s ceiling prices a sidewalk honestly against a press without a line changing. What was missing was never the cost model; it was that a grid route came back with `Hold` **null**, so no leg could ask.
+
+**Built as a repair against the gate itself**, rather than as a second opinion about clearance. The route is handed to `FirstBadLeg`, and the leg it names is given the front in hand and asked again — so what decides a sidewalk is the same code that decides whether the executor will walk it, and the two cannot drift apart, which is [W5](#w5) applied to a plan instead of a log line.
+
+<a id="m92"></a>
+**M92** — Two rules for one question, found in [finding 24](OPEN-FINDINGS.md). `RouteSmoothing` asks a route's first leg with the leaving licence unconditionally; `StagedRoutePlanner.FirstBadLeg` grants it only where the regiment laps one of its own by more than `AllowedContactFraction`. A regiment **shoulder to shoulder** laps it by *less* than that — which is exactly what [M2](#moving) exists to permit — so it got a route smoothed under one rule and refused under a stricter one, and a regiment under orders is very often shoulder to shoulder.
+
+Measured across the nineteen approach angles: the six that fail lap body 0 by **0,0% to 4,4%**, every one of them under the 5% allowance, and every one has a first leg that is **clear with the licence and blocked without it**.
+
+| approach | lap on body 0 | leg 1 with the licence | leg 1 without |
+|---|---|---|---|
+| 0° | 0,000 | clear | **blocked** |
+| 5° | 0,019 | clear | **blocked** |
+| 15° | 0,040 | clear | **blocked** |
+| 25° | 0,044 | clear | **blocked** |
+| 30° and beyond | 0,041 → 0 | clear | clear |
+
+Extending the licence to contact does **not** wave the leg through: `EscapesWithoutDeepening` still refuses a leg that enters a body it was clear of or deepens one it was lapping. It only stops contact *itself* being the refusal. On the bench the sideways mile's coarse grid holds **10 orders instead of 8** and the lattice runs **once instead of three times**; no other field moves and no route gets worse.
+
+**It does not close the approach-angle gate on its own**, and that is worth writing down: the six still fail, because the leg the grid draws at those angles genuinely moves *into* the body. The licence was a real inconsistency and a real fix; it was not this bug's cause.
+
+<a id="m93"></a>
+**M93** — Decision 14, closed. `OrderSystem` asks `MayPlan` before the placement search as well as before the plan, deliberately — *"that search is itself geometry this frame has no allowance left for"* — but only `Marching.PlanTo` charges `Spent`, and the branch where `TryFindPlacement` finds nowhere to stand returns without ever reaching the planner. A permission was granted, real geometry ran, and the ration was never touched.
+
+**Charged as milliseconds and not as a route**, because only the milliseconds are real: spending one of the frame's *routes* on a route that does not exist changes where a batch of orders runs out, and it fails `WingOrderTests` on every run — correctly. It would also mark the regiment as having planned this frame when it has not.
+
+**The first attempt at this was reverted on a mis-diagnosis**, which is written up in [finding 25](OPEN-FINDINGS.md) and is the more useful half of the episode: the failure appeared only in the whole suite and was read as a wall-clock fault, when the cause was two test classes missing from the `PlannerLevers` collection. *A failure that appears only in the whole suite is a claim about the suite, not about the change.* With them serialised, this charge is clean over four runs.
+
+<a id="m94"></a>
+**M94** — The designer, on the fourth cause of [finding 24](OPEN-FINDINGS.md): *"yes build the arriving license"*. Built as asked, in four pieces, and **it ships off**, which is the part of this entry worth reading.
+
+**The rule, and it is sound.** `ArrivesWithoutDeepening` is `EscapesWithoutDeepening` walked backwards from the destination — bodies lapped where the regiment arrives may only be less lapped the further back you look, and bodies clear at the destination may not be entered anywhere on the way in. It is gated on `CouldStandAt`, so it licenses **contact and never overlap**: without that gate the backwards sweep takes the arrival overlap as its baseline and would happily let a route finish a quarter of the way inside a regiment.
+
+**Three things had to come with it**, each a real defect found on the way:
+
+| | |
+|---|---|
+| the arrival front is never chosen | a destination touching one of its own accepts **2 of 24** fronts; `AlongTheLine` hands the last leg one of the other twenty-two |
+| a node the body does not fit | [M90](#m90)'s `KeepEndCells` kept `NodeAt`, which averages **free sample points** — and at the failing approach that average sat **inside body 0** |
+| smoothing broke walkable routes | it casts with the leaving licence unconditionally while the gate is stricter, so a cast it believes clear can be one the executor refuses |
+
+**It worked, on the thing it was built for.** With all four in, the half-cell route at 0° came back `bad leg 0` — walking in full, every leg, for the first time.
+
+**And it is off, because the licence itself loosens the gate.** The gate stayed at **13 of 19** either way. Bisected properly — the three levers moved **at runtime**, in one process, rather than by rebuilding between cases, which is how [finding 27](OPEN-FINDINGS.md) came to be got wrong the first time:
+
+| turned on alone | seven angles sampled |
+|---|---|
+| `RefuseSmoothingThatBreaks` | **nothing changes** — identical to baseline |
+| `DropUnstandableNodes` | **nothing changes** — identical to baseline |
+| **`LicenceOnArrival`** | **three angles become `walks through somebody`**, and 10° goes from **clear** to a 68 s route that clips |
+
+So two of the four pieces are inert on this arrangement and one is the fault. A declared press-through is honest; an undeclared clip is the original bug, and on a project whose whole premise is *"cavalry goes through units"* that is disqualifying.
+
+**Why it loosens.** `EscapesWithoutDeepening` tolerates overlap up to `AllowedContactFraction`, and `Marching.IsClearLine` tolerates less. Routing a leg through the licence therefore moves it from the stricter test to the looser one — which is what a licence is *for* at the first leg, where the regiment is genuinely already in the contact, and is not obviously right at the last, where the contact is a place the planner **chose**. Sampled finely, the routes it admits carry overlaps of 10% to 23%, well past the 5% [M2](#moving) permits.
+
+**What would make it shippable.** The arrival sweep asking `Marching.IsClearLine`'s tolerance rather than `AllowedContactFraction`, so the licence forgives *ending* in contact without also forgiving passing through anything on the way in. That touches `EscapesWithoutDeepening`'s shared body and so changes the first leg too, which is why it is not being done on the way past.
+
+**Levers**: `LicenceOnArrival`, `RefuseSmoothingThatBreaks`, `GridRoutePlanner.DropUnstandableNodes` all off; the arrival-front choice rides inside `AllowSidewalk`'s repair and is reached only on a last leg that has already failed.
+
 <a id="w11"></a>
 **W11** — A measurement that compares two builds must prove it built them. The first paired run for [M86](#m86) reverted only `StagedRoutePlanner.cs` to HEAD, which no longer compiled against tests referring to the new lever; `dotnet build` was writing to `/dev/null` inside the loop, `dotnet test --no-build` then ran the assembly still sitting in `bin`, and the table showed the two builds performing identically — which is exactly what it *should* show, because they were the same build. Third instance of one defect: [M64](#m64) measured with the wrong compiler, [M82](#m82) read a stale Release DLL, this read a stale test DLL. [W9](#w9) fixed it for the Unity check by discovering every input and self-testing; the same standard applies to any measurement loop. **In a loop that rebuilds, the build's exit status is a gate and its output is evidence — never silence it**, and revert whole working trees rather than single files, because a partial revert is a different program from either side being compared.
+
+**Fourth instance, 28 Aug 2026**, in a new disguise, so the rule wants widening. A lever bisect edited source and rebuilt between cases; its last line restored the levers **in source and did not rebuild**, and the next command ran `dotnet test --no-build`. The reading taken after it belonged to the previous case's binary. It was then written up as [open finding 27](OPEN-FINDINGS.md) — a claim that the planner depended on what had run before it, which would have invalidated every measurement in this area — and withdrawn only when both call patterns were finally run **inside one process**, where they proved byte-identical. So: **a source edit is not a change until something builds it**; `--no-build` is safe only on the line after a build that succeeded; and *two isolated runs of one binary cannot disagree — when they seem to, doubt the binary before doubting the program*. And where a lever can be moved at runtime, move it at runtime: a bisect that never rebuilds cannot make this mistake at all.
 
 | answered by | orders | median | worst | share of all planning |
 |---|---|---|---|---|

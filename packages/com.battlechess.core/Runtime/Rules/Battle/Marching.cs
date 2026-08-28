@@ -323,6 +323,10 @@ namespace BattleChess.Rules
 
             using var _profile = PlanningProfile.Measure(PlanningProfile.Step.Plan);
 
+            // Measurement only, and only while the profiler is on: which legs
+            // this order has already asked about. See Step.ClearLineRepeat.
+            if (PlanningProfile.Running) (_legsSeen ??= new HashSet<long>()).Clear();
+
             long began = System.Diagnostics.Stopwatch.GetTimestamp();
 
             try
@@ -404,12 +408,18 @@ namespace BattleChess.Rules
             // the two rules in charge of the same approach.
             if (unit.Order.Kind != OrderKind.Attack)
             {
-                IReadOnlyList<Vec2>? arch = (wayRound ?? WaysRound.Default).Round(battle, unit, destination);
+                IReadOnlyList<Vec2>? arch;
+
+                using (PlanningProfile.Measure(PlanningProfile.Step.WayRound))
+                    arch = (wayRound ?? WaysRound.Default).Round(battle, unit, destination);
 
                 // M14: full width first, side-on second. Same line, same ground,
                 // a body twenty metres across instead of forty.
-                IReadOnlyList<Vec2>? threaded =
-                    CrabThrough(battle, unit, destination, out Facing?[]? hold);
+                IReadOnlyList<Vec2>? threaded;
+                Facing?[]? hold;
+
+                using (PlanningProfile.Measure(PlanningProfile.Step.Crab))
+                    threaded = CrabThrough(battle, unit, destination, out hold);
 
                 // M22a. Both of these are rung two, and M18 has always said the
                 // cheaper of them wins — but the code took the arch whenever it
@@ -1213,6 +1223,20 @@ namespace BattleChess.Rules
         /// route — so the extra sweeps bought nothing.
         /// </para>
         /// </param>
+        /// <summary>Legs this order has already asked about. Measurement only.</summary>
+        [ThreadStatic] private static HashSet<long>? _legsSeen;
+
+        /// <summary>One leg, quantised, as a key. Measurement only.</summary>
+        private static long LegKey(Vec2 from, Vec2 to, Facing facing)
+        {
+            long a = (long)MathF.Round(from.X * 100f) * 73856093L
+                   ^ (long)MathF.Round(from.Y * 100f) * 19349663L;
+            long b = (long)MathF.Round(to.X * 100f) * 83492791L
+                   ^ (long)MathF.Round(to.Y * 100f) * 39916801L;
+
+            return a ^ (b << 1) ^ ((long)MathF.Round(facing.Radians * 1000f) * 2654435761L);
+        }
+
         public static bool IsClearLine(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing facing,
             out UnitInstance? blocker, bool leaving = false, bool leavingGrazeOnly = false)
@@ -1220,6 +1244,9 @@ namespace BattleChess.Rules
             blocker = null;
 
             using var _profile = PlanningProfile.Measure(PlanningProfile.Step.ClearLine);
+
+            if (PlanningProfile.Running && _legsSeen != null && !_legsSeen.Add(LegKey(from, to, facing)))
+                PlanningProfile.Tally(PlanningProfile.Step.ClearLineRepeat);
 
             Vec2 travel = to - from;
             float length = travel.Length;
@@ -1247,6 +1274,9 @@ namespace BattleChess.Rules
             {
                 using (PlanningProfile.Measure(PlanningProfile.Step.NearQuery))
                     battle.WhereEverybodyIs.Near(battle.AllUnits, from, to, reach, all);
+
+                PlanningProfile.Tally(PlanningProfile.Step.NearYield, all.Count);
+                if (all.Count == 0) PlanningProfile.Tally(PlanningProfile.Step.NearEmpty);
 
                 for (int u = 0; u < all.Count; u++)
                 {

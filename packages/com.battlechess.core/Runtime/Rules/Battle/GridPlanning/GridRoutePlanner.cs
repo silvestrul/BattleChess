@@ -59,7 +59,20 @@ namespace BattleChess.Rules.GridPlanning
         /// <remarks>Public for the same reason as <see cref="Use"/>: the host reads them.</remarks>
         public static int Asked, Found, Held;
 
-        internal static void ResetCounters() => Asked = Found = Held = 0;
+        /// <summary>The fine tier of M87: asked, found a route, and kept it.</summary>
+        public static int FineAsked, FineFound, FineHeld;
+
+        /// <summary>Nodes taken out because the regiment could not stand there - M94.</summary>
+        public static int NodesDropped;
+
+        /// <summary>
+        /// Whether a node the regiment could not stand at is taken out of the
+        /// route. <b>Off</b> - see M94: correct in itself and not shown safe.
+        /// </summary>
+        public static bool DropUnstandableNodes;
+
+        internal static void ResetCounters() =>
+            Asked = Found = Held = FineAsked = FineFound = FineHeld = NodesDropped = 0;
 
         /// <summary>
         /// Lays a grid, searches it, and hands back the route as a plan the
@@ -118,15 +131,54 @@ namespace BattleChess.Rules.GridPlanning
         /// rather than a plan - the lattice corridor being the one that does.
         /// </summary>
         public static IReadOnlyList<Vec2>? RouteFor(
-            BattleState battle, UnitInstance unit, Vec2 destination)
+            BattleState battle, UnitInstance unit, Vec2 destination,
+            float? spacingMultiple = null)
         {
             // The line it is about to walk, which is what M24 says every
             // question about clearance should be asked of. Ignored entirely
             // unless the halo is a rectangle.
             RegimentGrid grid = RegimentGrid.For(
-                battle, unit, Marching.AlongTheLine(unit.Position, destination, unit.Facing));
+                battle, unit, Marching.AlongTheLine(unit.Position, destination, unit.Facing),
+                spacingMultiple);
 
-            return grid.TryRoute(unit.Position, destination, out List<Vec2> points) ? points : null;
+            if (!grid.TryRoute(unit.Position, destination, out List<Vec2> points)) return null;
+
+            if (DropUnstandableNodes) DropNodesTheBodyDoesNotFit(battle, unit, points);
+
+            return points;
+        }
+
+        /// <summary>
+        /// Takes out any node the regiment could not actually stand at.
+        /// </summary>
+        /// <remarks>
+        /// <b>M94.</b> <see cref="RegimentGrid.NodeAt"/> names a cell's node as
+        /// the average of its <i>free sample points</i>, and the average of free
+        /// points is not necessarily a place the rectangle fits - a cell free
+        /// along one edge and covered along another has its centroid somewhere
+        /// in between. That was harmless while the end cells were thrown away,
+        /// and stopped being harmless when <b>M90</b> started keeping them,
+        /// because the cell a regiment stands in is precisely the one most
+        /// likely to be half covered. At the failing approach it put the first
+        /// waypoint <b>inside the body the route was drawn to avoid</b>, and the
+        /// gate then refused the whole route on its first leg.
+        /// <para>
+        /// The ends are never dropped: they are where the regiment is and where
+        /// it was sent, and neither is the grid's to revise.
+        /// </para>
+        /// </remarks>
+        private static void DropNodesTheBodyDoesNotFit(
+            BattleState battle, UnitInstance unit, List<Vec2> points)
+        {
+            for (int at = points.Count - 2; at >= 1; at--)
+            {
+                Facing front = Marching.AlongTheLine(points[at - 1], points[at], unit.Facing);
+
+                if (StagedRoutePlanner.CouldStandAt(battle, unit, points[at], front)) continue;
+
+                NodesDropped++;
+                points.RemoveAt(at);
+            }
         }
 
         internal static float Length(IReadOnlyList<Vec2> points)

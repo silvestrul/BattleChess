@@ -293,6 +293,16 @@ namespace BattleChess.Rules
             // no allowance left for.
             if (!battle.Planning.MayPlan(unit.Id)) return;
 
+            // M93. The permission has been given, so from here the frame owes
+            // itself an accounting whatever happens. Marching.PlanTo charges its
+            // own time, but the placement search below is geometry too, and the
+            // path where it finds nowhere to stand returns without ever reaching
+            // the planner - so on that path nothing was ever charged, and a
+            // regiment that could find no placement cost the frame real
+            // milliseconds while leaving the ration untouched. The milliseconds
+            // are charged and the route slot is not, because no route was made.
+            long began = System.Diagnostics.Stopwatch.GetTimestamp();
+
             unit.FailedReplans++;
 
             // Two different faults wear the same symptom, and they want
@@ -321,6 +331,9 @@ namespace BattleChess.Rules
             {
                 log.Blocked("Move",
                     $"{unit.Def.DisplayName} can find nowhere near that point to stand.", unit.Id);
+
+                battle.Planning.SpentWithoutPlanning(
+                    System.Diagnostics.Stopwatch.GetTimestamp() - began);
 
                 unit.Route = null;
                 return;

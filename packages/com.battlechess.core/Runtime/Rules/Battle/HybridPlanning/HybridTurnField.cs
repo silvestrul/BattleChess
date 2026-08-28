@@ -85,7 +85,24 @@ namespace BattleChess.Rules.HybridPlanning
         /// ask for the same field rather than two that differ by a metre.
         /// </summary>
         private const float RadiusStepMetres = 128f;
-        private const float DetourRoomFraction = 0.5f;
+
+        /// <summary>
+        /// How much room beyond the straight line the field is given, as a
+        /// fraction of it, on every side.
+        /// </summary>
+        /// <remarks>
+        /// The largest unswept number in the profile. It is applied on all four
+        /// sides, so the box is about <c>(0,71 + 2f)</c> times the straight line
+        /// across in each dimension and the cell count goes as the square of
+        /// that: at a half, a field is roughly <b>2,9x</b> the area of the tight
+        /// box round start and goal. Outside the field
+        /// <see cref="SecondsFrom"/> hands back the caller's fallback rather
+        /// than failing, so this trades a cheaper build against a worse
+        /// estimate, and the estimate is what keeps the lattice's expansions
+        /// down - which is why it has to be measured on the clock and not
+        /// argued from the geometry.
+        /// </remarks>
+        internal static float DetourRoomFraction = 0.5f;
 
         /// <summary>
         /// Whether the fill is ordered by a bucket queue rather than by a
