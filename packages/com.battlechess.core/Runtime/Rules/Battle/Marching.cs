@@ -270,6 +270,71 @@ namespace BattleChess.Rules
         [ThreadStatic] public static Func<bool>? GiveUpNow;
 
         /// <summary>
+        /// How long one plan may search before it settles for what it can
+        /// already prove.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>A ceiling on the tail, and the tail is the whole complaint.</b>
+        /// Measured in a played session: the median order was 1,5 ms and the
+        /// worst 287, and within a single wing of thirteen planned together the
+        /// spread was 2 868 to one. What is felt is not the median. It is the
+        /// one regiment in thirteen whose arrangement is pathological, and the
+        /// clock is held for all of them while it thinks.
+        /// </para>
+        /// <para>
+        /// <b>Running out of time is not a new outcome.</b> It stops the
+        /// frontier exactly where emptying it would have, so the cascade
+        /// carries on into the stage it would have reached anyway and, in the
+        /// last resort, declares a press-through - which <b>M98</b> already
+        /// says is a legitimate answer, the defect being an <i>undeclared</i>
+        /// one. Nothing here can produce a route nobody agreed to; it can only
+        /// produce a worse one, more loudly.
+        /// </para>
+        /// <para>
+        /// Zero switches it off entirely, which is what the benches and the
+        /// whole test suite want: a budget makes an answer depend on how fast
+        /// the machine was, and a bench that cannot reproduce its own numbers
+        /// is not a bench. It is set by the host that draws frames, the same
+        /// way <see cref="PlanningBudget"/> is.
+        /// </para>
+        /// </remarks>
+        public static float SearchBudgetMs;
+
+        /// <summary>
+        /// When the plan on this thread runs out of time, or zero for never.
+        /// </summary>
+        /// <remarks>
+        /// Per-thread, because a wing is planned across several and each is
+        /// answering for its own regiment against its own clock. A shared
+        /// deadline would give the wing one budget between them, so the
+        /// thirteenth regiment would be cut off for the sins of the first.
+        /// </remarks>
+        [ThreadStatic] private static long _deadline;
+
+        /// <summary>Opens this thread's allowance, from a stamp already taken.</summary>
+        private static void OpenBudget(long began)
+        {
+            float budget = SearchBudgetMs;
+
+            _deadline = budget > 0f
+                ? began + (long)(budget * System.Diagnostics.Stopwatch.Frequency / 1000d)
+                : 0L;
+        }
+
+        /// <summary>
+        /// Whether this plan has spent its allowance.
+        /// </summary>
+        /// <remarks>
+        /// Polled at loop heads rather than at every step, and the callers mask
+        /// it to one reading in sixty-four - a timestamp is tens of nanoseconds
+        /// and an expansion is not much more, so asking every time would be a
+        /// measurable share of the thing it is trying to bound.
+        /// </remarks>
+        internal static bool OutOfTime() =>
+            _deadline != 0L && System.Diagnostics.Stopwatch.GetTimestamp() > _deadline;
+
+        /// <summary>
         /// How finely the ground under a straight line is checked, in metres.
         /// </summary>
         /// <remarks>
@@ -329,6 +394,10 @@ namespace BattleChess.Rules
 
             long began = System.Diagnostics.Stopwatch.GetTimestamp();
 
+            // From the same stamp the charge is taken from, so the budget covers
+            // exactly what the clock reports and there is no window between them.
+            OpenBudget(began);
+
             try
             {
                 return (planner ?? RoutePlanners.Default).PlanTo(
@@ -336,6 +405,10 @@ namespace BattleChess.Rules
             }
             finally
             {
+                // Cleared, or a later plan on this pooled thread would inherit a
+                // deadline that expired before it began and give up at once.
+                _deadline = 0L;
+
                 long spent = System.Diagnostics.Stopwatch.GetTimestamp() - began;
 
                 System.Threading.Interlocked.Add(ref battle.RoutePlanningTicks, spent);

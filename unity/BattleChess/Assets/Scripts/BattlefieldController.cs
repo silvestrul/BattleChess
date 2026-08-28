@@ -76,6 +76,33 @@ namespace BattleChess.Unity
         [Tooltip("Milliseconds one frame may spend working out routes before the rest wait their turn.")]
         public float MillisecondsPerFrame = PlanningBudget.DefaultMillisecondsPerFrame;
 
+        [Tooltip("Milliseconds one plan may search before it settles for the ladder's answer. " +
+                 "Zero is no ceiling.")]
+        /// <summary>
+        /// What a single order may spend searching, here rather than in the rules.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Set by the host that draws frames, exactly as
+        /// <see cref="PlanningBudget"/> is, and for the same reason: the rules
+        /// default to no ceiling so the benches, the CLI and the whole test
+        /// suite keep giving the answer they always gave. A budget makes a
+        /// route depend on how fast the machine was, and a bench that cannot
+        /// reproduce its own numbers is not a bench.
+        /// </para>
+        /// <para>
+        /// <b>Ten, and it is a gameplay setting rather than a performance one.</b>
+        /// Measured on the bench it never fires at all - the dearest order
+        /// there is five or six milliseconds - so nothing in the test suite
+        /// changes. In a played session under Mono, with a wing planned across
+        /// twelve threads, the dearest order measured 287 ms, so here it will
+        /// fire and fire often. What it buys is a bounded freeze; what it costs
+        /// is that the hardest orders get the ladder's answer, which may be a
+        /// declared press-through instead of a way round.
+        /// </para>
+        /// </remarks>
+        public float SearchBudgetMs = 10f;
+
         private BattleState _battle;
         private BattleMapDefinition _map;
         private TerrainCatalogue _terrainCatalogue;
@@ -266,9 +293,19 @@ namespace BattleChess.Unity
         /// Two frames' worth at sixty. Below that nobody feels anything; above
         /// it, something stopped for long enough to see.
         /// </remarks>
-        private const float ASlowFrameMs = 33f;
+        private const float ASlowFrameMs = FrameRate.SlowMs;
 
         private readonly System.Diagnostics.Stopwatch _frame = new System.Diagnostics.Stopwatch();
+
+        /// <summary>
+        /// The on-screen counter, fed from the same stopwatch as the line above.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately the same source. A counter reading its own clock would
+        /// be a second answer to "what did that frame cost", and the first time
+        /// the two disagreed the investigation would be about the counter.
+        /// </remarks>
+        private readonly FrameRate _frameRate = new FrameRate();
 
         private int _collectionsLastFrame;
         private long _heapLastFrame;
@@ -325,7 +362,19 @@ namespace BattleChess.Unity
 
                 float ms = (float)_frame.Elapsed.TotalMilliseconds;
 
-                if (ms >= ASlowFrameMs)
+                // Every frame, not only the slow ones - an average over the
+                // frames that were bad enough to log is not a frame rate. The
+                // same four clocks the slow-frame line below reads, and read at
+                // the same point in the frame, so the counter and the recording
+                // cannot disagree about where a frame went either.
+                _frameRate.Record(
+                    ms,
+                    (float)_simClock.Elapsed.TotalMilliseconds,
+                    (float)_viewClock.Elapsed.TotalMilliseconds,
+                    (float)_trackClock.Elapsed.TotalMilliseconds,
+                    (float)_guiClock.Elapsed.TotalMilliseconds);
+
+                if (_options.Harness && ms >= ASlowFrameMs)
                 {
                     int marching = 0;
                     int onField = 0;
@@ -377,8 +426,14 @@ namespace BattleChess.Unity
             // wanted is what all of them together cost.
             _guiClock.Reset();
 
-            _collectionsLastFrame = System.GC.CollectionCount(0);
-            _heapLastFrame = System.GC.GetTotalMemory(forceFullCollection: false);
+            // Asking the runtime how big the heap is, twice a frame, is
+            // harness work like any other - and it is the only line here that
+            // walks anything.
+            if (_options.Harness)
+            {
+                _collectionsLastFrame = System.GC.CollectionCount(0);
+                _heapLastFrame = System.GC.GetTotalMemory(forceFullCollection: false);
+            }
             _planningTicksLastFrame = _battle.RoutePlanningTicks;
             _routesPlannedLastFrame = _battle.RoutesPlanned;
 
@@ -391,10 +446,23 @@ namespace BattleChess.Unity
             // share one allowance instead of taking one each.
             _battle.Planning.OpenFrame(RoutesPerFrame, MillisecondsPerFrame);
 
+            // Written every frame rather than once, so it can be turned in the
+            // inspector while the battle runs - which is the only way to judge
+            // a number whose whole effect is on how an order feels.
+            Marching.SearchBudgetMs = SearchBudgetMs;
+
             _frame.Restart();
 
             if (Input.GetKeyDown(KeyCode.F1))
                 _options.Visible = !_options.Visible;
+
+            if (Input.GetKeyDown(KeyCode.F2)) _options.Harness = !_options.Harness;
+
+            // Reconciled rather than acted on where it is flipped, because it
+            // is flipped in two places - F2 here and the checkbox at the top of
+            // the panel - and a switch with two doors must not have the tidying
+            // up behind only one of them.
+            ReconcileHarness();
 
             if (Input.GetKeyDown(KeyCode.B)) ToggleBond();
 
@@ -440,8 +508,15 @@ namespace BattleChess.Unity
             _trackClock.Restart();
             TrackMarker.Begin();
 
-            RefreshOverlayUnits();
-            RefreshRegimentGrid();
+            // The measured cost of the harness, and the whole reason F2
+            // exists. Both of these walk every regiment on the field every
+            // frame and neither is the game.
+            if (_options.Harness)
+            {
+                RefreshOverlayUnits();
+                RefreshRegimentGrid();
+            }
+
             ForgetAFinishedRoute();
 
             TrackSelection();
@@ -1131,7 +1206,9 @@ namespace BattleChess.Unity
         /// </remarks>
         private List<(Vector3, Vector3)> BuildSightLines()
         {
-            var lines = new List<(Vector3, Vector3)>();
+            List<(Vector3, Vector3)> lines = _overlaySightLines;
+            lines.Clear();
+
             if (!_options.ShowSightLines) return lines;
 
             foreach (UnitInstance watcher in _battle.UnitsOnField())
@@ -1595,10 +1672,19 @@ namespace BattleChess.Unity
         /// whole overlay exists to answer, and a static picture of the last
         /// order cannot answer it.
         /// </remarks>
+        // What the drawn grid route was last asked for. The overlay keeps the
+        // line itself; these only decide whether the question has changed.
+        private Vec2 _gridRouteTo;
+        private Vec2 _gridRouteFrom;
+        private bool _gridRouteFresh;
+
         private void RefreshRegimentGrid()
         {
-            if (_options == null || !_options.ShowRegimentGrid || _battle == null || Primary == null)
+            if (_options == null || !_options.Harness || !_options.ShowRegimentGrid ||
+                _battle == null || Primary == null)
             {
+                _gridRouteFresh = false;
+
                 if (_gridCells.Count > 0)
                 {
                     _gridCells.Clear();
@@ -1627,6 +1713,7 @@ namespace BattleChess.Unity
             float radius = Mathf.Sqrt(DrawnCellCap * hexArea / Mathf.PI);
 
             bool moved = Vec2.Distance(unit.Position, _gridDrawnAround) > grid.Spacing;
+            bool rebuilt = false;
 
             if (_gridCells.Count == 0 || moved ||
                 Mathf.Abs(grid.Spacing - _gridSpacingDrawn) > 0.01f)
@@ -1634,6 +1721,7 @@ namespace BattleChess.Unity
                 grid.Snapshot(_gridCells, unit.Position, radius);
                 _gridSpacingDrawn = grid.Spacing;
                 _gridDrawnAround = unit.Position;
+                rebuilt = true;
             }
 
             _gridStates.Clear();
@@ -1645,14 +1733,37 @@ namespace BattleChess.Unity
 
             Vec2 to = MouseWorld();
 
-            // M82. Straightened with the same cast-ahead pass every planner's
-            // answer goes through, because the raw grid answer is a path of hex
-            // centres and nothing would ever walk it. At a tenth of a regiment
-            // to a cell the difference is 159 points a route against five.
-            _overlay.SetGridRoute(
-                grid.TryRoute(unit.Position, to, out List<Vec2> route)
-                    ? Marching.Straightened(_battle, unit, route)
-                    : null);
+            // <b>Only when the cursor has actually moved a cell.</b> This is a
+            // whole grid search and it was being run every single frame, at
+            // whatever the mouse happened to be pointing at - which a recording
+            // caught costing a median of 92 ms a frame and 262 at the worst,
+            // while the simulation's own share of those frames was nought.
+            //
+            // The rule is the one the snapshot above already uses on the
+            // regiment: a move of less than one cell cannot change which cells
+            // a route goes through, so it cannot change the answer. Same
+            // threshold, same reason, and the picture is identical.
+            bool sameQuestion =
+                _gridRouteFresh && !rebuilt &&
+                Vec2.Distance(to, _gridRouteTo) <= grid.Spacing &&
+                Vec2.Distance(unit.Position, _gridRouteFrom) <= grid.Spacing;
+
+            if (!sameQuestion)
+            {
+                _gridRouteTo = to;
+                _gridRouteFrom = unit.Position;
+                _gridRouteFresh = true;
+
+                // M82. Straightened with the same cast-ahead pass every
+                // planner's answer goes through, because the raw grid answer is
+                // a path of hex centres and nothing would ever walk it. At a
+                // tenth of a regiment to a cell the difference is 159 points a
+                // route against five.
+                _overlay.SetGridRoute(
+                    grid.TryRoute(unit.Position, to, out List<Vec2> route)
+                        ? Marching.Straightened(_battle, unit, route)
+                        : null);
+            }
 
             // What the grid is really marking against. The body drawn on screen
             // is not it: a cell is refused where this regiment's own circle,
@@ -1720,9 +1831,72 @@ namespace BattleChess.Unity
                 $"held {GridRoutePlanner.Held}).");
         }
 
+        // Filled afresh every frame and handed straight to the overlay, which
+        // copies out of them. Kept as fields rather than made on the spot
+        // because two lists a frame at sixty a second is the steady litter that
+        // was showing up in the recording as a collection on the frames that
+        // stopped - and the collector, not the drawing, is what stopped them.
+        private readonly List<OverlayUnit> _overlayShapes = new List<OverlayUnit>();
+        private readonly List<(Vector3, Vector3)> _overlaySightLines =
+            new List<(Vector3, Vector3)>();
+
+        /// <summary>What the harness switch was last seen at.</summary>
+        private bool _harnessWas = true;
+
+        /// <summary>
+        /// Notices the harness being switched, and clears what it had drawn.
+        /// </summary>
+        /// <remarks>
+        /// Cleared rather than left up, because geometry that stops being
+        /// refreshed but carries on being drawn is worse than no geometry at
+        /// all: it is a picture of where things were when you stopped looking,
+        /// and nothing on screen says so.
+        /// </remarks>
+        private void ReconcileHarness()
+        {
+            if (_options.Harness == _harnessWas) return;
+
+            _harnessWas = _options.Harness;
+
+            // Said before the console stops listening, and after it starts, so
+            // the line explaining the switch survives the switch either way.
+            if (_options.Harness)
+            {
+                _console.Listening = true;
+                _console.Info("Harness",
+                    "Harness back on — the overlay, the grid and this console are being kept up again.");
+                return;
+            }
+
+            _console.Info("Harness",
+                "Harness off — the overlay, the regiment grid and this console stop being kept up. " +
+                "The frame counter does not, and a recording already started keeps writing. " +
+                "F2 again to bring it back.");
+
+            _console.Listening = false;
+
+            _overlayShapes.Clear();
+            _overlaySightLines.Clear();
+
+            _overlay.SetUnits(_overlayShapes);
+            _overlay.SetSightLines(_overlaySightLines);
+            _overlay.SetRegimentGrid(null, null, default);
+            _overlay.SetGridRoute(null);
+            _overlay.SetReservedAreas(null);
+            _overlay.SetSearchCells(null, default);
+            _overlay.SetRawPath(null, default);
+            _overlay.ClearRoutePreview();
+
+            _gridCells.Clear();
+            _gridSpacingDrawn = 0f;
+            _gridDrawnAround = default;
+            _gridRouteFresh = false;
+        }
+
         private void RefreshOverlayUnits()
         {
-            var shapes = new List<OverlayUnit>();
+            List<OverlayUnit> shapes = _overlayShapes;
+            shapes.Clear();
 
             // Show the width actually used for routing, so the overlay never
             // implies a constraint that is not being applied.
@@ -2103,6 +2277,19 @@ namespace BattleChess.Unity
         private void ReportOrderedScene(IReadOnlyList<UnitInstance> wing, Vec2[] wanted)
         {
             if (_battle == null || wing == null || wing.Count == 0) return;
+
+            // Gated on the harness rather than on a switch of its own, and
+            // that is the whole argument for where it sits. W7 says a
+            // diagnostic has to work from the recording alone, so this stays on
+            // for an ordinary session - a bug report that arrives without the
+            // arrangement it happened in is a bug report nobody can act on.
+            //
+            // But it is forty-six formatted lines and forty-six writes on the
+            // very frame an order is given, which is already the worst frame in
+            // the session, and it was sixty-one per cent of one recording. So
+            // when the harness is off - which is exactly when somebody is
+            // timing orders rather than diagnosing them - it goes too.
+            if (!_options.Harness) return;
 
             for (int i = 0; i < wing.Count && i < wanted.Length; i++)
             {
@@ -2954,13 +3141,37 @@ namespace BattleChess.Unity
                   $"x{_options.TimeScale:0}{(_options.Running ? "" : "  PAUSED")}]   "
                 : string.Empty;
 
-            GUI.Label(new Rect(20, 16, Screen.width - 40, 22), clock + _status);
+            // Right of the status line rather than in the debug panel, because
+            // the question it answers - is it running badly right now - is
+            // asked while watching the battle, not while reading the panel.
+            // The status line yields the width so a long status cannot run
+            // underneath the digits.
+            if (_options.ShowFrameRate)
+            {
+                _frameRate.Draw(new Rect(
+                    Screen.width - 30f - FrameRate.Width, 16, FrameRate.Width, 22));
+            }
+
+            // Under the bar rather than in it: the bar's two rows are spoken
+            // for, and a row that only appears when a toggle is on must not
+            // reflow the two that are always there.
+            if (_options.ShowFrameRate && _options.ExplainTheFrame)
+            {
+                _frameRate.DrawSplit(new Rect(
+                    Screen.width - 10f - FrameRate.SplitWidth, 72f, FrameRate.SplitWidth, 22f));
+            }
+
+            float statusWidth = Screen.width - 40f
+                - (_options.ShowFrameRate ? FrameRate.Width + 20f : 0f);
+
+            GUI.Label(new Rect(20, 16, statusWidth, 22), clock + _status);
             GUI.Label(new Rect(20, 38, Screen.width - 40, 22),
                 (_options.PreviewRouteMode
                     ? "PREVIEWING — R-click plans a route and draws it, nothing moves. Untick to give real orders.    "
                     : "L-click/drag select    R-click march, R-drag sets facing, R-click enemy attacks    ") +
                 "B bind    1-4 reshape    QERT stance    V fog    G ghost    Space pause    . step    " +
-                "+/- speed    Middle-drag pan    F1 debug");
+                "+/- speed    Middle-drag pan    F1 debug    F2 harness" +
+                (_options.Harness ? string.Empty : "  — OFF, game only"));
 
             DrawBondButton();
 

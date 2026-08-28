@@ -402,6 +402,10 @@ namespace BattleChess.Rules
 
             for (int round = 0; round < MostRounds; round++)
             {
+                // Between rounds as well as inside them: a round that finishes
+                // just over the line must not start another.
+                if (Marching.OutOfTime()) break;
+
                 ledger.Rounds++;
 
                 // Clean first, shouldering through only if nothing else reaches.
@@ -1928,6 +1932,11 @@ namespace BattleChess.Rules
 
                 settled[at] = true;
                 ledger.Expanded++;
+
+                // Stopping here leaves the search in the state emptying the
+                // frontier would have left it in, which is a path this code
+                // already takes and already answers for.
+                if ((ledger.Expanded & 63) == 0 && Marching.OutOfTime()) break;
 
                 int from = stateAt[at];
                 Vec2 here = places[from];

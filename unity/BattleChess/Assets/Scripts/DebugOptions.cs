@@ -69,7 +69,14 @@ namespace BattleChess.Unity
         public bool ShowZoneOfControl;
 
         /// <summary>Outline the exact rectangle each unit occupies.</summary>
-        public bool ShowFootprintOutline = true;
+        /// <remarks>
+        /// Off. It was the one piece of debug geometry left on by default, and
+        /// the argument for it - that a rectangle you cannot identify is just a
+        /// coloured smear - belongs to the nameplates, which are drawn by the
+        /// game and are still there. This is the router's rectangle, which is a
+        /// question about the router.
+        /// </remarks>
+        public bool ShowFootprintOutline;
 
         /// <summary>Draw the raw search cells of the route rather than the smoothed line.</summary>
         public bool ShowRawPath;
@@ -85,7 +92,13 @@ namespace BattleChess.Unity
         /// the mover's halo - which is the thing the grid marks cells against
         /// and is very much larger than the body drawn on screen.
         /// </summary>
-        public bool ShowReservedAreas = true;
+        /// <remarks>
+        /// Off, and it costs nothing either way - it is only ever drawn inside
+        /// the regiment grid, which is itself off. On by default it was a
+        /// setting that did nothing until you turned another one on, which is
+        /// the worst kind: it cannot be judged from where it sits.
+        /// </remarks>
+        public bool ShowReservedAreas;
 
         /// <summary>
         /// Cell spacing as a multiple of the regiment's own bounding diameter.
@@ -108,7 +121,13 @@ namespace BattleChess.Unity
         /// Draw every planner in <c>RoutePlanners.All</c>, each in its own
         /// colour, rather than only the ladder and the search.
         /// </summary>
-        public bool PreviewEveryPlanner = true;
+        /// <remarks>
+        /// Off. It only fires in preview mode, so it cost nothing while that
+        /// was off - but it means the first preview anybody takes silently runs
+        /// four planners instead of the one the game uses, and reads as the
+        /// game being slow rather than as four answers being drawn.
+        /// </remarks>
+        public bool PreviewEveryPlanner;
 
         /// <summary>
         /// Include the hybrid A* prototype in that. Off by default and worth
@@ -162,7 +181,12 @@ namespace BattleChess.Unity
         /// route at — the corners and face projections its candidate generator
         /// built, not just the ones the winning route used.
         /// </summary>
-        public bool ShowRouteCandidates = true;
+        /// <remarks>
+        /// Off. Same reason as the reserved areas: it is drawn only alongside a
+        /// route preview, so on by default it was a tick that did nothing you
+        /// could see until you turned something else on.
+        /// </remarks>
+        public bool ShowRouteCandidates;
 
         /// <summary>Whose eyes the field is shown through. -1 shows everything.</summary>
         /// <remarks>
@@ -214,7 +238,65 @@ namespace BattleChess.Unity
         public bool RestoreSelected;
         public bool DestroySelected;
 
-        public bool Visible = true;
+        /// <summary>
+        /// Show the frame counter in the top bar.
+        /// </summary>
+        /// <remarks>
+        /// On by default and in the always-visible bar, not behind F1. The
+        /// harness exists to be watched, and a cost you only see when you go
+        /// looking for it is a cost that gets found by somebody saying it felt
+        /// slow.
+        /// </remarks>
+        public bool ShowFrameRate = true;
+
+        /// <summary>
+        /// Break the frame into sim, views, tracking, gui and the rest.
+        /// </summary>
+        /// <remarks>
+        /// The rate on its own says a frame is dear and not one word about why,
+        /// and the slow-frame line in the console that would say why only fires
+        /// over 33 ms - so a steady 85 a second, which is a frame two thirds
+        /// spent on something, reports nothing at all. This is that line, on
+        /// screen, without the threshold.
+        /// </remarks>
+        public bool ExplainTheFrame;
+
+        /// <summary>
+        /// Whether the harness does anything at all beyond running the game.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The master switch, and it exists because of a measurement.</b> A
+        /// recording of thirty slow frames put the median at 92 ms and 262 at
+        /// the worst, and <c>tracking</c> - the harness's own per-frame work -
+        /// was 2 568 ms of the 3 930 spent. The simulation's share was a median
+        /// of nought. What was slow was the debugger, not the game.
+        /// </para>
+        /// <para>
+        /// So this turns that work off rather than merely hiding it: the
+        /// overlay is not refreshed, the grid is not built, the heap is not
+        /// asked how big it is, and the console keeps nothing. It is the only
+        /// honest way to answer "how fast is the game" from inside a harness
+        /// that is itself the most expensive thing on the frame.
+        /// </para>
+        /// <para>
+        /// What deliberately stays on: the frame counter, because it is the
+        /// instrument you are reading the answer off, and it costs a ring write
+        /// a frame. And a recording already started keeps writing - stopping a
+        /// file somebody explicitly asked for would be a trap.
+        /// </para>
+        /// </remarks>
+        public bool Harness = true;
+
+        /// <summary>Whether the options panel and console are drawn.</summary>
+        /// <remarks>
+        /// Starts hidden. The panel is fifty-odd GUILayout controls and the
+        /// console re-formats every entry it holds, both of them twice a frame
+        /// - measured as the whole of the <c>gui</c> column - and none of it is
+        /// the game. The top bar says F1, which is the only thing you need to
+        /// know to get it back.
+        /// </remarks>
+        public bool Visible;
 
         private Vector2 _scroll;
 
@@ -236,6 +318,18 @@ namespace BattleChess.Unity
             GUILayout.Label("Debug options   (F1 hides)");
 
             _scroll = GUILayout.BeginScrollView(_scroll);
+
+            // First, and on its own, because everything under it is a thing
+            // this switch stops paying for.
+            Harness = GUILayout.Toggle(Harness,
+                Harness
+                    ? " Harness ON — overlay, grid and console are being kept up (F2)"
+                    : " Harness OFF — only the game is running (F2)");
+
+            if (!Harness)
+                GUILayout.Label("   Nothing below is being computed. The frame counter still is.");
+
+            GUILayout.Space(6);
 
             GUILayout.Label($"Clock   x{TimeScale:0}   {(Running ? "running" : "PAUSED")}");
             GUILayout.BeginHorizontal();
@@ -269,6 +363,14 @@ namespace BattleChess.Unity
             if (PreviewEveryPlanner)
                 PreviewTheHybrid = GUILayout.Toggle(PreviewTheHybrid, " ...including hybrid A* (slow — freezes a frame)");
             ShowRouteCandidates = GUILayout.Toggle(ShowRouteCandidates, " Mark the search's candidate places");
+
+            GUILayout.Space(6);
+            GUILayout.Label("Cost");
+            ShowFrameRate = GUILayout.Toggle(ShowFrameRate,
+                $" Frame counter in the top bar (worst is over {FrameRate.SlowMs:0} ms)");
+
+            if (ShowFrameRate)
+                ExplainTheFrame = GUILayout.Toggle(ExplainTheFrame, " ...and where the frame goes");
 
             GUILayout.Space(6);
             GUILayout.Label("Lines and labels");

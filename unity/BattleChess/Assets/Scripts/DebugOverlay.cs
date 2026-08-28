@@ -318,7 +318,9 @@ namespace BattleChess.Unity
 
         private void OnRenderObject()
         {
-            if (Options == null || !Options.Visible) return;
+            // Harness first: with it off nothing here has been refreshed since
+            // it went off, so drawing it would be drawing a stale field.
+            if (Options == null || !Options.Harness || !Options.Visible) return;
 
             _material.SetPass(0);
             GL.PushMatrix();

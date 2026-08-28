@@ -39,6 +39,13 @@ namespace BattleChess.Rules
         /// </summary>
         internal static bool PoseSearchBeforePressing = true;
 
+        /// <summary>How many orders left the cascade early on the clock.</summary>
+        /// <remarks>
+        /// Kept because a budget that fires constantly is not a safety net, it
+        /// is the planner - and the only way to tell the two apart is to count.
+        /// </remarks>
+        internal static int OutOfTimeAtTheGrid;
+
         /// <summary>How far the pose search may stray from the route guiding it.</summary>
         /// <summary>What a corridor-bounded pose search may spend before widening.</summary>
         internal static int BoundedBudget = 4000;
@@ -594,6 +601,35 @@ namespace BattleChess.Rules
 
             if (takeIt && TookGridRoute(gridRoute, fine: false, out Plan overGrid))
                 return overGrid;
+
+            // ---- out of time ------------------------------------------------
+            //
+            // Everything below here escalates: the fine tier asks grids of four
+            // and sixteen times the field, the tangent graph draws a visibility
+            // set, and the pose search is tens of milliseconds by design. A
+            // budget that merely interrupted the coarse grid would hand the
+            // order to all three, which is how the first measurement of this
+            // made the Crucible slower rather than faster - 81 ms to 98, and the
+            // worst order from 6 to 23.
+            //
+            // So running out of time leaves the cascade rather than stepping
+            // down it, and takes the answer already in hand: the ladder's, which
+            // is either a route it proved or a press-through it declared. M98:
+            // a declared press is a legitimate answer. What is never returned
+            // here is something nobody checked.
+            if (Marching.OutOfTime() && ladder.Path.Found)
+            {
+                OutOfTimeAtTheGrid++;
+
+                log?.Info("Path",
+                    $"{unit.Def.DisplayName} ran out of its search budget " +
+                    $"({Marching.SearchBudgetMs:0} ms) after the grid — taking the ladder's " +
+                    $"{(ladder.PressedThrough ? "press-through" : "route")} rather than asking " +
+                    "the finer grids, the tangents and the pose search.",
+                    unit.Id);
+
+                return ladder;
+            }
 
             // ---- the fine tier, M87 -----------------------------------------
             //

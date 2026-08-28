@@ -28,6 +28,20 @@ namespace BattleChess.Unity
         public bool ShowInfo = true;
         public bool ShowDecisions = true;
 
+        /// <summary>
+        /// Whether anything said is kept on screen.
+        /// </summary>
+        /// <remarks>
+        /// Turned off with the harness. It saves the ring - the appends, and
+        /// the trim of a quarter of it every four hundred entries - but it is
+        /// worth being exact about what it does <i>not</i> save: the message
+        /// was interpolated at the call site, before this was ever asked, so
+        /// the string was built either way. Only a change in the rules could
+        /// save that, and it is not worth making the simulation pass around
+        /// closures to avoid formatting a line.
+        /// </remarks>
+        public bool Listening = true;
+
         /// <summary>Where the current recording is being written, if any.</summary>
         public string RecordingPath { get; private set; }
 
@@ -48,6 +62,11 @@ namespace BattleChess.Unity
                 _file.WriteLine($"{Tick,6} {Prefix(entry.Level)} {entry.Category,-9} {unit,-5} {entry.Message}");
                 _written++;
             }
+
+            // A recording is deliberate and goes on regardless, which is why
+            // this sits below the file write and not above it: switching the
+            // harness off must not silently kill a file somebody asked for.
+            if (!Listening) return;
 
             // A ring by trimming: a long session should not grow without bound,
             // and the recent past is what matters when testing by hand.
