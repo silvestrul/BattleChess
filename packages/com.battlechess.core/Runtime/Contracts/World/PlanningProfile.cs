@@ -217,6 +217,18 @@ namespace BattleChess.Contracts
             /// <summary>Marking which cells the bodies hold. The sampling itself.</summary>
             FieldMark,
 
+            /// <summary>
+            /// Bringing a kept field up to date: unmarking the bodies that have
+            /// moved and marking them again where they now stand.
+            /// </summary>
+            /// <remarks>
+            /// Its own line rather than folded into <see cref="FieldMark"/>,
+            /// because the two answer different questions. FieldMark is what a
+            /// field costs to raise; this is what it costs to <i>keep</i>, and
+            /// the second is the one a battle pays every tick.
+            /// </remarks>
+            FieldPatch,
+
             /// <summary>The A* loop over cells, without the string-pull after it.</summary>
             GridExpand,
 
@@ -338,6 +350,18 @@ namespace BattleChess.Contracts
 
             /// <summary>Pairs of those bodies examined for a passage between them.</summary>
             GapPairs,
+
+            /// <summary>
+            /// Buckets a query looked at, against <c>NearBuckets</c>, which is
+            /// the ones it kept.
+            /// </summary>
+            /// <remarks>
+            /// The two together are the only way to see the shape of the waste:
+            /// a query that keeps eleven buckets out of eleven is tight and one
+            /// that keeps eleven out of forty is scanning a rectangle round a
+            /// diagonal line.
+            /// </remarks>
+            NearBucketsSeen,
 
             /// <summary>Passages wide enough to keep.</summary>
             GapMouths,

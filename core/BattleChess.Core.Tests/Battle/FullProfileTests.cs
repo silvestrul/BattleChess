@@ -125,6 +125,60 @@ namespace BattleChess.Tests.Battle
 
 
         /// <summary>
+        /// What bounding the grid search to a corridor costs, and what it saves.
+        /// </summary>
+        /// <remarks>
+        /// The gate is the right-hand columns, not the left. A corridor that
+        /// makes an order cheaper by refusing to find its route has not made
+        /// anything better - M-W10 - so what has to hold across the sweep is
+        /// <c>routed</c>, <c>pressed</c>, <c>unwalk</c> and above all
+        /// <c>route s</c>, the seconds of marching the plans actually buy. The
+        /// clock is only worth reading where those have not moved.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it is what sized " +
+                     "the corridor the grid search is allowed to wander in, and what refused it.")]
+        public void WhatBoundingTheGridSearchCosts()
+        {
+            float wasFraction = RegimentGrid.CorridorFraction;
+            bool wasIncremental = RegimentGrid.MarkIncrementally;
+
+            try
+            {
+                foreach (string warm in Fields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"corridor",-22}{"field",-16}{"ms/order",10}{"worst ms",10}" +
+                    $"{"routed",8}{"pressed",9}{"unwalk",8}{"route s",12}{"off-line",12}");
+                _out.WriteLine(new string('-', 109));
+
+                foreach (float fraction in new[] { 0f, 2f, 1f, 0.5f, 0.25f })
+                {
+                    RegimentGrid.CorridorFraction = fraction;
+
+                    foreach (string field in Fields)
+                    {
+                        RegimentGrid.CellsOutsideCorridor = 0;
+
+                        Row row = Measure(field, planner: null, passes: 3);
+
+                        _out.WriteLine(
+                            $"{(fraction <= 0f ? "unbounded" : $"x{fraction:0.00} of the march"),-22}" +
+                            $"{field,-16}{row.MsPerOrder,10:0.000}{row.Worst,10:0.0}" +
+                            $"{row.Routed,8}{row.Pressed,9}{row.Unwalkable,8}{row.Seconds,12:0.0}" +
+                            $"{RegimentGrid.CellsOutsideCorridor,12:N0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                RegimentGrid.CorridorFraction = wasFraction;
+                RegimentGrid.MarkIncrementally = wasIncremental;
+            }
+        }
+
+        /// <summary>
         /// How many candidate places a march actually reaches, against the cap
         /// that sizes the scratchpad for it.
         /// </summary>
@@ -1582,6 +1636,12 @@ namespace BattleChess.Tests.Battle
             yield return ("grid cells x0.25", () => RegimentGrid.SpacingMultiple = 0.25f);
             yield return ("grid cells x0.5", () => RegimentGrid.SpacingMultiple = 0.5f);
             yield return ("grid cells x2", () => RegimentGrid.SpacingMultiple = 2f);
+            yield return ("grid corridor unbounded", () => RegimentGrid.CorridorFraction = 0f);
+            yield return ("grid corridor x0.25", () => RegimentGrid.CorridorFraction = 0.25f);
+            yield return ("grid corridor x1", () => RegimentGrid.CorridorFraction = 1f);
+            yield return ("grid marked from scratch",
+                () => RegimentGrid.MarkIncrementally = false);
+
             yield return ("grid budget 5k", () => RegimentGrid.CellBudget = 5_000);
             yield return ("grid budget 160k", () => RegimentGrid.CellBudget = 160_000);
 
@@ -1654,6 +1714,8 @@ namespace BattleChess.Tests.Battle
             private float _turnCell, _turnAcross;
             private int _poseBudget, _bounded, _cellBudget, _places, _headings, _shootEvery;
             private float _spacing, _corridor, _wayRound, _straight, _crab, _bin, _weight;
+            private float _gridCorridor;
+            private bool _incremental;
 
             public static Defaults Capture() => new Defaults
             {
@@ -1671,6 +1733,8 @@ namespace BattleChess.Tests.Battle
                 _crab = StagedRoutePlanner.CrabbedShareCeiling,
                 _spacing = RegimentGrid.SpacingMultiple,
                 _cellBudget = RegimentGrid.CellBudget,
+                _gridCorridor = RegimentGrid.CorridorFraction,
+                _incremental = RegimentGrid.MarkIncrementally,
                 _places = RouteSearch.MostPlaces,
                 _headings = HybridAStarPlanner.Headings,
                 _bin = HybridAStarPlanner.PositionBin,
@@ -1698,6 +1762,8 @@ namespace BattleChess.Tests.Battle
                 StagedRoutePlanner.StraightLineCostCeiling = _straight;
                 StagedRoutePlanner.CrabbedShareCeiling = _crab;
                 RegimentGrid.SpacingMultiple = _spacing;
+                RegimentGrid.CorridorFraction = _gridCorridor;
+                RegimentGrid.MarkIncrementally = _incremental;
                 RegimentGrid.CellBudget = _cellBudget;
                 RouteSearch.MostPlaces = _places;
                 HybridAStarPlanner.Headings = _headings;

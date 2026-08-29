@@ -47,19 +47,34 @@ namespace BattleChess.Tests.Battle
         private static readonly string[] Fields =
             { "crucible", "brokencountry", "longmarch", "greatfield", "sidewaysmile" };
 
+        /// <summary>
+        /// How many regiments are moved between one order and the next, so that
+        /// the field the next order asks for is out of date.
+        /// </summary>
+        /// <remarks>
+        /// Twelve of eighty, which is roughly what a wing under orders looks
+        /// like. The number matters less than that it is neither nought - a
+        /// bench, where the cache always hits - nor all of them, which is what
+        /// throwing the field away amounts to and is what the old mode measured.
+        /// </remarks>
+        private static int _shove;
+
         /// <summary>The cascade, stage by stage, and then its worst order alone.</summary>
         [Fact(Skip = "A record of a measurement rather than a check on one - it orders every " +
-                     "bench field ten times over and profiles four of those passes.")]
+                     "bench field twenty times over and profiles eight of those passes.")]
         public void WhereEveryStageGoes()
         {
             float was = Marching.SearchBudgetMs;
+            bool wasReuse = RegimentGrid.Reuse;
+            bool wasIncremental = RegimentGrid.MarkIncrementally;
 
             // Off, or the report describes a ceiling rather than the planner.
             Marching.SearchBudgetMs = 0f;
 
             try
             {
-                // Both, because the difference between them is the finding.
+                // Four modes, because no single one of them is a battle and
+                // the differences between them are the whole finding.
                 //
                 // A kept field is found again only while nothing has moved, and
                 // on a bench nothing ever does: the same arrangement is loaded
@@ -68,17 +83,27 @@ namespace BattleChess.Tests.Battle
                 // all. Read on its own that table says raising the field costs
                 // 120 us, which is the price of *not* raising it.
                 //
-                // A played battle moves regiments every tick, so the stamp
-                // changes and the field is built again. Reuse off is that, and
-                // there FieldMark is the largest single step on the board.
-                foreach (bool reuse in new[] { true, false })
+                // Reuse off was the stand-in for a battle and it is the wrong
+                // stand-in now: it says "throw the field away every order",
+                // which is the thing being removed, not "a dozen regiments
+                // marched". So the last two modes shove part of the army
+                // between orders and differ only in whether the field is
+                // patched or raised again - same arrangements, same orders,
+                // same routes, one lever apart.
+                foreach ((string title, bool reuse, bool incremental, int shove) in new[]
+                {
+                    ("fields kept between orders — a bench, where nothing moves", true, true, 0),
+                    ("fields thrown away every order — the old stand-in for a battle", false, true, 0),
+                    ("a battle: twelve regiments move between orders, the field patched", true, true, 12),
+                    ("a battle: twelve regiments move between orders, the field raised again", true, false, 12),
+                })
                 {
                     RegimentGrid.Reuse = reuse;
+                    RegimentGrid.MarkIncrementally = incremental;
+                    _shove = shove;
 
                     _out.WriteLine(string.Empty);
-                    _out.WriteLine(reuse
-                        ? "######## fields kept between orders — a bench, where nothing moves ########"
-                        : "######## fields rebuilt every order — a battle, where everything does ########");
+                    _out.WriteLine($"######## {title} ########");
 
                     foreach (string field in Fields) Diagnose(field);
                 }
@@ -86,7 +111,10 @@ namespace BattleChess.Tests.Battle
             finally
             {
                 Marching.SearchBudgetMs = was;
-                RegimentGrid.Reuse = true;
+                RegimentGrid.Reuse = wasReuse;
+                RegimentGrid.MarkIncrementally = wasIncremental;
+                _shove = 0;
+                RegimentGrid.Forget();
             }
         }
 
@@ -157,11 +185,33 @@ namespace BattleChess.Tests.Battle
             slowest = default;
             slowestMs = 0d;
 
+            // Every field starts from nothing, or the first order of a pass
+            // inherits whatever the pass before it left cached and the mode
+            // being measured is not the mode that ran.
+            RegimentGrid.Forget();
+
+            var army = new List<UnitInstance>();
+            foreach (UnitInstance unit in battle.UnitsOnField()) army.Add(unit);
+
+            int shoved = 0;
+
             long began = Stopwatch.GetTimestamp();
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
                 if (only.HasValue && unit.Id != only.Value) continue;
+
+                // Outside the order's own clock below, but inside the pass
+                // total, which is right: moving is the battle's business and
+                // not the planner's, and what it costs the planner is the
+                // patching it forces, which is inside.
+                for (int i = 0; i < _shove && army.Count > 0; i++)
+                {
+                    UnitInstance moved = army[shoved++ % army.Count];
+
+                    moved.Position = new Vec2(moved.Position.X + 1.3f, moved.Position.Y + 0.7f);
+                    moved.Facing = Facing.FromDegrees(moved.Facing.Degrees + 0.9f);
+                }
 
                 long at = Stopwatch.GetTimestamp();
 

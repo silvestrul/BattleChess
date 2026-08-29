@@ -153,6 +153,41 @@ namespace BattleChess.Rules.GridPlanning
         public static bool Reuse = true;
 
         /// <summary>
+        /// Whether a kept field whose arrangement has changed is patched rather
+        /// than thrown away and raised again.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Why this is the largest saving available.</b> Marking the bodies
+        /// was measured at <b>49,5%</b> of everything planning does on the
+        /// Crucible once the field is rebuilt each order - 275 ms of 556, the
+        /// largest single step on the board by a factor of three. And nearly
+        /// all of it is re-answering a question whose answer has not changed:
+        /// a tick moves the regiments that are marching and leaves the rest
+        /// standing, so of eighty bodies perhaps a dozen are anywhere new, and
+        /// the field is rebuilt for all eighty because the stamp is a hash over
+        /// the whole army and says only <i>something</i> moved.
+        /// </para>
+        /// <para>
+        /// <b>Why it is exact and not an approximation.</b> Coverage is counted
+        /// rather than flagged - see <see cref="SharedField"/> - so marking is
+        /// reversible: a body taken off with the rectangle it was put on with
+        /// touches the same cells and the same samples and leaves the counts
+        /// where a field that had never seen it would have them. The field
+        /// remembers each rectangle for exactly this reason, since a body that
+        /// has moved can no longer say where it used to stand.
+        /// </para>
+        /// <para>
+        /// A lever rather than a rewrite, so the two can be put side by side on
+        /// the same arrangement and shown to answer identically.
+        /// </para>
+        /// </remarks>
+        public static bool MarkIncrementally = true;
+
+        /// <summary>Bodies restamped on kept fields, on this thread.</summary>
+        [ThreadStatic] public static int BodiesRestamped;
+
+        /// <summary>
         /// Whether the call in flight is a finer tier than the ordinary one.
         /// </summary>
         /// <remarks>
@@ -164,6 +199,63 @@ namespace BattleChess.Rules.GridPlanning
 
         /// <summary>Cells one search may settle before it gives up.</summary>
         internal static int CellBudget = 40_000;
+
+        /// <summary>
+        /// How far off the drawn line the search may wander, as a multiple of
+        /// the length of that line. Nought lets it wander anywhere.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>What this is really for: the fine tier.</b> A* over open ground
+        /// settles cells in a disc round the start until the heuristic pulls it
+        /// to the goal, and the number of cells in a disc goes as the square of
+        /// how fine they are. So the fine tier of M87 - a quarter of the coarse
+        /// spacing, sixteen times the cells - spends its time settling ground
+        /// hundreds of metres to either side of a march that was only ever
+        /// going to bend round one regiment. Measured on the Crucible,
+        /// <c>GridSearchFine</c> was 5,7 ms a call against
+        /// <c>GridSearch</c>'s 0,9.
+        /// </para>
+        /// <para>
+        /// <b>Why it is a bound on the search and not on the field.</b> The
+        /// obvious version of this marks only the bodies near the corridor,
+        /// which is wrong twice over: it would make the field a function of the
+        /// order rather than of the arrangement, so no two regiments could
+        /// share one and none could be patched between ticks - and a route is
+        /// then only as safe as the guess about where it would go. Refusing the
+        /// <i>cells</i> outside the corridor instead leaves the field exactly as
+        /// it was, shared and patched, and makes the restriction honest: a
+        /// route that stays inside the window was checked against every body,
+        /// and one that wanted to leave it is simply not found, which the
+        /// cascade already knows how to answer.
+        /// </para>
+        /// <para>
+        /// <b>Off, on the measurement, and this is the interesting part.</b>
+        /// Swept unbounded / x2 / x1 / x0,5 / x0,25 of the march over four
+        /// fields, and the premise was simply wrong. A* with an admissible
+        /// heuristic does <i>not</i> settle a disc round the start - the
+        /// heuristic pulls it down the line, and at x2 and x1 the corridor
+        /// refuses almost nothing, costing 4% for no saving at all. Below that
+        /// it starts refusing cells the route needed, and then the cascade
+        /// falls through to the stages the grid exists to avoid: on the
+        /// Crucible at x0,5 an order goes from <b>2,1 ms to 13,1</b> - six times
+        /// dearer for being given less to search - and on the Sideways Smile
+        /// shoulder-throughs go from 1 to 11 and unwalkable routes from 2 to 12
+        /// while the marching drops from 39 638 s to 28 953.
+        /// <para>
+        /// Which is M-W10 twice over: the cheaper number was the worse route,
+        /// and then it was not even cheaper. Kept as a lever with its
+        /// measurement rather than deleted, so the idea is not had again.
+        /// </para>
+        /// </para>
+        /// </remarks>
+        public static float CorridorFraction = 0f;
+
+        /// <summary>The narrowest corridor, in cells, whatever the fraction says.</summary>
+        public static float CorridorLeastCells = 6f;
+
+        /// <summary>Cells refused for being outside the corridor, on this thread.</summary>
+        [ThreadStatic] public static int CellsOutsideCorridor;
 
         /// <summary>
         /// Whether the route keeps the node of the cell it starts in and the
@@ -257,6 +349,13 @@ namespace BattleChess.Rules.GridPlanning
         // the sake of saving a rebuild that costs under a millisecond.
         [ThreadStatic] private static Dictionary<long, SharedField>? _fields;
         [ThreadStatic] private static long _fieldStamp;
+
+        // The search's own books, kept between searches rather than built for
+        // each. See CellTable: three managed collections allocated per order
+        // were most of what GridExpand measured. Per thread for the same reason
+        // the fields are.
+        [ThreadStatic] private static CellTable? _cells;
+        [ThreadStatic] private static CoordMinHeap? _open;
 
         private readonly SharedField _field;
 
@@ -360,11 +459,21 @@ namespace BattleChess.Rules.GridPlanning
 
             _fields ??= new Dictionary<long, SharedField>();
 
-            if (!Reuse || stamp != _fieldStamp)
+            // Without patching, a move throws every field away, which is what
+            // this did and what made marking half the bill. With it, each field
+            // carries its own stamp and is brought up to date when it is asked
+            // for - so a field nobody asks about costs nothing to keep stale.
+            if (!Reuse || (!MarkIncrementally && stamp != _fieldStamp))
             {
                 _fields.Clear();
-                _fieldStamp = stamp;
             }
+
+            _fieldStamp = stamp;
+
+            // A rectangle halo keys on the facing as well, so a long battle
+            // could otherwise accumulate a field per degree. Nothing here is
+            // worth a leak.
+            if (_fields.Count > 32) _fields.Clear();
 
             // A rectangle halo differs per order rather than per footprint, so
             // a field built with one cannot answer for another. Keyed on the
@@ -378,6 +487,14 @@ namespace BattleChess.Rules.GridPlanning
 
             if (_fields.TryGetValue(key, out SharedField found))
             {
+                if (found.Stamp != stamp)
+                {
+                    using (PlanningProfile.Measure(PlanningProfile.Step.FieldPatch))
+                        Restamp(found, battle, reach, moving);
+
+                    found.Stamp = stamp;
+                }
+
                 FieldsReused++;
                 return found;
             }
@@ -400,14 +517,64 @@ namespace BattleChess.Rules.GridPlanning
                 foreach (UnitInstance body in battle.UnitsOnField())
                 {
                     (float across, float along) = ReachOn(body.Shape, reach, moving);
-                    field.Mark(body.Shape, across, along, +1);
+                    field.Add(body.Id, body.Shape, across, along);
                 }
             }
+
+            field.Stamp = stamp;
 
             _fields[key] = field;
             FieldsBuilt++;
             return field;
         }
+
+        /// <summary>
+        /// Brings a kept field up to date by restamping only what has moved.
+        /// </summary>
+        /// <remarks>
+        /// The walk over the army is the cheap half and is not avoidable: the
+        /// stamp says that something moved and never which, so somebody has to
+        /// ask each body whether it is where the field thinks. That is a
+        /// handful of float comparisons a body against the several hundred
+        /// cells and several thousand sample tests that marking one costs.
+        /// </remarks>
+        private static void Restamp(
+            SharedField field, BattleState battle, float reach, OrientedRect? moving)
+        {
+            HashSet<UnitId> standing = _standing ??= new HashSet<UnitId>();
+            standing.Clear();
+
+            int was = field.Restamped;
+
+            foreach (UnitInstance body in battle.UnitsOnField())
+            {
+                standing.Add(body.Id);
+
+                (float across, float along) = ReachOn(body.Shape, reach, moving);
+
+                if (field.Marked.TryGetValue(body.Id, out SharedField.MarkedBody had) &&
+                    had.Matches(body.Shape, across, along))
+                    continue;
+
+                field.Remove(body.Id);
+                field.Add(body.Id, body.Shape, across, along);
+            }
+
+            // The dead and the routed, who are marked and are no longer there.
+            // Collected first: taking one off edits the book being walked.
+            List<UnitId>? gone = null;
+
+            foreach (UnitId who in field.Marked.Keys)
+                if (!standing.Contains(who))
+                    (gone ??= new List<UnitId>()).Add(who);
+
+            if (gone != null)
+                for (int i = 0; i < gone.Count; i++) field.Remove(gone[i]);
+
+            BodiesRestamped += field.Restamped - was;
+        }
+
+        [ThreadStatic] private static HashSet<UnitId>? _standing;
 
         /// <summary>
         /// A number that changes whenever anything has moved, so a field built
@@ -589,11 +756,26 @@ namespace BattleChess.Rules.GridPlanning
                 return true;
             }
 
-            var cameFrom = new Dictionary<Coord, Coord>();
-            var bestCost = new Dictionary<Coord, float> { [start] = 0f };
-            var settled = new HashSet<Coord>();
-            var open = new CoordMinHeap();
+            // The corridor this search is allowed to wander in. Squared, and
+            // the ends measured against the same segment the cells are, so the
+            // start and the goal are inside it by construction.
+            Vec2 travel = to - from;
+            float span = travel.Length;
+            Vec2 heading = span > 0f ? travel / span : new Vec2(1f, 0f);
 
+            float corridor = CorridorFraction > 0f
+                ? MathF.Max(span * CorridorFraction, _field.Spacing * CorridorLeastCells)
+                : float.MaxValue;
+
+            float corridorSquared = corridor >= float.MaxValue ? float.MaxValue : corridor * corridor;
+
+            CellTable cells = _cells ??= new CellTable();
+            CoordMinHeap open = _open ??= new CoordMinHeap();
+
+            cells.Open();
+            open.Clear();
+
+            cells.Reached(start, 0f, start);
             open.Push(start, Heuristic(start, goal));
 
             int explored = 0;
@@ -603,7 +785,7 @@ namespace BattleChess.Rules.GridPlanning
 
             while (open.TryPop(out Coord current))
             {
-                if (!settled.Add(current)) continue;
+                if (!cells.Settle(current)) continue;
 
                 explored++;
 
@@ -616,20 +798,28 @@ namespace BattleChess.Rules.GridPlanning
                 {
                     LastCellsExplored = explored;
                     using (PlanningProfile.Measure(PlanningProfile.Step.GridPull))
-                        waypoints = Reconstruct(cameFrom, start, goal, from, to);
+                        waypoints = Reconstruct(cells, start, goal, from, to);
                     LastRawWaypoints = waypoints.Count;
                     return true;
                 }
 
                 if (explored >= CellBudget) break;
 
-                float cost = bestCost[current];
+                cells.TryCost(current, out float cost);
                 HexMath.Neighbours(current, neighbours);
 
                 for (int i = 0; i < neighbours.Length; i++)
                 {
                     Coord next = neighbours[i];
-                    if (settled.Contains(next)) continue;
+                    if (cells.IsSettled(next)) continue;
+
+                    if (next != goal &&
+                        corridorSquared < float.MaxValue &&
+                        OffTheLine(layout.ToWorld(next), from, heading, span) > corridorSquared)
+                    {
+                        CellsOutsideCorridor++;
+                        continue;
+                    }
 
                     // The goal cell is enterable whatever is marked on it, so
                     // it also needs a going the arithmetic can divide by.
@@ -651,16 +841,31 @@ namespace BattleChess.Rules.GridPlanning
 
                     float tentative = cost + _field.Spacing / going * penalty;
 
-                    if (bestCost.TryGetValue(next, out float known) && tentative >= known) continue;
+                    if (cells.TryCost(next, out float known) && tentative >= known) continue;
 
-                    bestCost[next] = tentative;
-                    cameFrom[next] = current;
+                    cells.Reached(next, tentative, current);
                     open.Push(next, tentative + Heuristic(next, goal));
                 }
             }
 
             LastCellsExplored = explored;
             return false;
+        }
+
+        /// <summary>How far a cell's centre lies off the drawn line, squared.</summary>
+        private static float OffTheLine(Vec2 at, Vec2 from, Vec2 heading, float length)
+        {
+            Vec2 offset = at - from;
+
+            float onto = offset.X * heading.X + offset.Y * heading.Y;
+
+            if (onto < 0f) onto = 0f;
+            else if (onto > length) onto = length;
+
+            float dx = offset.X - heading.X * onto;
+            float dy = offset.Y - heading.Y * onto;
+
+            return dx * dx + dy * dy;
         }
 
         /// <summary>
@@ -671,11 +876,11 @@ namespace BattleChess.Rules.GridPlanning
             Coord.Distance(cell, goal) * _field.Spacing / _field.Fastest * 1.001f;
 
         private List<Vec2> Reconstruct(
-            Dictionary<Coord, Coord> cameFrom, Coord start, Coord goal, Vec2 from, Vec2 to)
+            CellTable reached, Coord start, Coord goal, Vec2 from, Vec2 to)
         {
             var cells = new List<Coord>();
 
-            for (Coord at = goal; at != start; at = cameFrom[at]) cells.Add(at);
+            for (Coord at = goal; at != start; at = reached.CameFrom(at)) cells.Add(at);
 
             cells.Add(start);
             cells.Reverse();

@@ -66,6 +66,84 @@ namespace BattleChess.Rules.GridPlanning
 
         private readonly Dictionary<Coord, float> _going = new Dictionary<Coord, float>();
 
+        /// <summary>
+        /// Every body currently marked on this field, as it stood when it was
+        /// marked.
+        /// </summary>
+        /// <remarks>
+        /// <b>This is what lets a field be patched rather than rebuilt.</b>
+        /// Marking is counting, and counting is reversible: a body marked with
+        /// <c>+1</c> is taken off again by marking the <i>same rectangle with
+        /// the same reaches</i> at <c>-1</c>, which touches the same cells and
+        /// the same samples and leaves the counts exactly where a field that
+        /// had never seen it would have them. So the rectangle has to be
+        /// remembered, not re-derived: a body that has moved can no longer say
+        /// where it used to be, and unmarking it at its new place would corrupt
+        /// the field silently.
+        /// </remarks>
+        private readonly Dictionary<UnitId, MarkedBody> _marked =
+            new Dictionary<UnitId, MarkedBody>();
+
+        /// <summary>A body as it was when it was stamped onto the field.</summary>
+        internal readonly struct MarkedBody
+        {
+            internal readonly OrientedRect Body;
+            internal readonly float Across;
+            internal readonly float Along;
+
+            internal MarkedBody(in OrientedRect body, float across, float along)
+            {
+                Body = body;
+                Across = across;
+                Along = along;
+            }
+
+            /// <summary>Whether a body still stands exactly where this says.</summary>
+            internal bool Matches(in OrientedRect now, float across, float along) =>
+                Across == across &&
+                Along == along &&
+                Body.Centre.X == now.Centre.X &&
+                Body.Centre.Y == now.Centre.Y &&
+                Body.Facing.Radians == now.Facing.Radians &&
+                Body.Footprint.Width == now.Footprint.Width &&
+                Body.Footprint.Depth == now.Footprint.Depth;
+        }
+
+        /// <summary>
+        /// The arrangement this field was last brought up to date for.
+        /// </summary>
+        /// <remarks>
+        /// Held here rather than beside the cache because the cache holds
+        /// several fields - one per footprint and spacing - and only the one
+        /// actually asked for is worth patching. A field nobody asks about
+        /// stays out of date for nothing.
+        /// </remarks>
+        internal long Stamp;
+
+        /// <summary>Bodies stamped on or off since this field was made.</summary>
+        internal int Restamped;
+
+        /// <summary>Who is on the field, as it believes.</summary>
+        internal IReadOnlyDictionary<UnitId, MarkedBody> Marked => _marked;
+
+        /// <summary>Marks a body and remembers where it stood.</summary>
+        internal void Add(UnitId who, in OrientedRect body, float across, float along)
+        {
+            Mark(body, across, along, +1);
+            _marked[who] = new MarkedBody(body, across, along);
+            Restamped++;
+        }
+
+        /// <summary>Takes a body off again, exactly where it was put on.</summary>
+        internal void Remove(UnitId who)
+        {
+            if (!_marked.TryGetValue(who, out MarkedBody was)) return;
+
+            Mark(was.Body, was.Across, was.Along, -1);
+            _marked.Remove(who);
+            Restamped++;
+        }
+
         internal SharedField(
             HexLayout layout, ITerrainMap terrain, IMovementModel movement, MovementType moving,
             float spacing, float fastest, int samples)
@@ -151,7 +229,13 @@ namespace BattleChess.Rules.GridPlanning
             Vec2 centre = grown.Centre;
 
             Dictionary<Coord, byte[]> target = into ?? _cover;
-            var done = new HashSet<Coord>();
+
+            // Kept between calls rather than made for each. Marking a body is
+            // several hundred cells, and a field is marked eighty times when it
+            // is raised and twice per mover when it is patched, so this was one
+            // of the larger sources of litter in planning.
+            HashSet<Coord> done = _done ??= new HashSet<Coord>();
+            done.Clear();
 
             for (float y = centre.Y - span; y <= centre.Y + span + step; y += step)
             for (float x = centre.X - span; x <= centre.X + span + step; x += step)
@@ -178,8 +262,33 @@ namespace BattleChess.Rules.GridPlanning
                     int now = counts[i] + sign;
                     counts[i] = (byte)Math.Clamp(now, 0, 255);
                 }
+
+                // Cells an unmarking emptied outright stop being touched
+                // cells. Without this a field that is patched rather than
+                // rebuilt keeps every cell any body has ever stood in, and
+                // CountBlocked - which walks the touched cells once per order -
+                // grows without bound as the battle goes on, trading one cost
+                // for a worse one. Taken out here rather than gathered and
+                // taken out after, because the walk is over a grid of points
+                // and not over the dictionary being edited.
+                if (sign >= 0 || counts == null) continue;
+
+                bool anything = false;
+
+                for (int i = 0; i < counts.Length; i++)
+                    if (counts[i] != 0) { anything = true; break; }
+
+                if (!anything) target.Remove(cell);
             }
         }
+
+        /// <summary>One thread's scratch set of cells already visited.</summary>
+        /// <remarks>
+        /// Per thread because a wing is marked across several, and two marks at
+        /// once sharing this would each skip the other's cells - which is a
+        /// body silently half-stamped onto the field.
+        /// </remarks>
+        [ThreadStatic] private static HashSet<Coord>? _done;
 
         /// <summary>How fast the going is at a cell's centre, cached.</summary>
         internal float GoingAt(Coord cell)

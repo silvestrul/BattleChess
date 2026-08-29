@@ -179,8 +179,6 @@ namespace BattleChess.Rules
             float diagonal = half * 1.41421356f;
             float span = corridor + diagonal;
 
-            int lowColumn = Column(MathF.Min(from.X, to.X) - span);
-            int highColumn = Column(MathF.Max(from.X, to.X) + span);
             int lowRow = Row(MathF.Min(from.Y, to.Y) - span);
             int highRow = Row(MathF.Max(from.Y, to.Y) + span);
 
@@ -188,26 +186,78 @@ namespace BattleChess.Rules
             float reachSquared = span * span;
 
             for (int row = lowRow; row <= highRow; row++)
-            for (int column = lowColumn; column <= highColumn; column++)
             {
-                int bucket = row * _columns + column;
+                // M106. The columns this row can possibly want, rather than the
+                // columns the whole leg's bounding box wants.
+                //
+                // A march is nearly always diagonal, and a rectangle drawn round
+                // a diagonal line is mostly not near the line: measured, a query
+                // looked at forty buckets to keep eleven, and the thirty it
+                // threw away each cost a bucket centre, a projection onto the
+                // segment and a squared distance. Clipping the segment to the
+                // row's own band first and taking the columns of *that* leaves
+                // the arithmetic per bucket exactly as it was and asks it of far
+                // fewer.
+                //
+                // Still a superset, which is the only thing that matters here: a
+                // bucket whose centre is within span of the segment has its
+                // nearest point on the segment within span in y as well, so that
+                // point lies inside the band this clips to, so its x is inside
+                // the range taken - and the centre is then within span of that x.
+                float bandLow = _origin.Y + row * _bucketMetres - span;
+                float bandHigh = bandLow + _bucketMetres + 2f * span;
 
-                if (marks.Visited[bucket] == marks.Sweep) continue;
+                float leftX, rightX;
 
-                // The bucket's own square is what has to reach the corridor,
-                // so its centre is allowed to sit a half-diagonal further off.
-                var centre = new Vec2(
-                    _origin.X + (column + 0.5f) * _bucketMetres,
-                    _origin.Y + (row + 0.5f) * _bucketMetres);
+                if (MathF.Abs(travel.Y) < 1e-4f)
+                {
+                    leftX = MathF.Min(from.X, to.X);
+                    rightX = MathF.Max(from.X, to.X);
+                }
+                else
+                {
+                    float first = (bandLow - from.Y) / travel.Y;
+                    float last = (bandHigh - from.Y) / travel.Y;
 
-                if (FarFromSegment(centre, from, along, length) > reachSquared) continue;
+                    if (first > last) { (first, last) = (last, first); }
 
-                marks.Visited[bucket] = marks.Sweep;
-                PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
+                    first = Math.Clamp(first, 0f, 1f);
+                    last = Math.Clamp(last, 0f, 1f);
 
-                List<UnitInstance> held = _buckets[bucket];
-                for (int i = 0; i < held.Count; i++)
-                    into.Add(held[i]);
+                    float atFirst = from.X + travel.X * first;
+                    float atLast = from.X + travel.X * last;
+
+                    leftX = MathF.Min(atFirst, atLast);
+                    rightX = MathF.Max(atFirst, atLast);
+                }
+
+                int lowColumn = Column(leftX - span);
+                int highColumn = Column(rightX + span);
+
+                for (int column = lowColumn; column <= highColumn; column++)
+                {
+                    int bucket = row * _columns + column;
+
+                    PlanningProfile.Tally(PlanningProfile.Step.NearBucketsSeen);
+
+                    if (marks.Visited[bucket] == marks.Sweep) continue;
+
+                    // The bucket's own square is what has to reach the
+                    // corridor, so its centre is allowed to sit a half-diagonal
+                    // further off.
+                    var centre = new Vec2(
+                        _origin.X + (column + 0.5f) * _bucketMetres,
+                        _origin.Y + (row + 0.5f) * _bucketMetres);
+
+                    if (FarFromSegment(centre, from, along, length) > reachSquared) continue;
+
+                    marks.Visited[bucket] = marks.Sweep;
+                    PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
+
+                    List<UnitInstance> held = _buckets[bucket];
+                    for (int i = 0; i < held.Count; i++)
+                        into.Add(held[i]);
+                }
             }
         }
 
