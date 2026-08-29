@@ -1083,3 +1083,24 @@ The crab is finished — 12,5% before [M101](#m101) and [M102](#m102), half a pe
 Buckets opened per query fall 31% and buckets examined 26%; `NearQuery` −6% and `BodyScan` −9% on the Crucible in the battle mode. Routes unmoved — the suite is 9 failed / 650 passed throughout, and a body wrongly dropped here is a collision nobody saw, which is what the whole suite is watching for.
 
 **The bucket width is re-swept and stays at 128 m**, now for a different reason. With the widening gone the basin moved and flattened: summed over four fields, 256 m is 1,2% better than 128 and 512 is 7% worse, but the two candidates disagree in sign per field — the Crucible prefers 256 by 5,9% and Broken Country prefers 128 by 6,7%. Below 32 m it collapses, and hard: at 8 m a query opens 345 buckets on the Crucible and 1 627 on the Sideways Smile, and an order costs three to ten times what it does at 128. No reason to move it.
+
+<a id="m110"></a>
+**M110** — The designer asked for a moved-set on the battle, so that patching a field walks the dozen regiments that moved rather than asking all eighty where they are. **Measured before building, and it is not the lever.** Splitting `FieldPatch` into the walk and the restamping says the walk is **0,5 ms of 344,8 — a seventh of one per cent.** The whole of the patch is the marking: 696 restampings at 145 µs each, 29,3% of planning. A moved-set would have been machinery for nothing, and the arithmetic was already on the table — a patch of twelve costs 2 797 µs and twenty-four body-marks at 117 µs is 2 808.
+
+**So the lever is what marking one body costs**, and it was doing two things per cell it did not need to.
+
+The scan walks a square around the body at 0,45 of the cell spacing, and for every cell asked <see cref="OrientedRect.ContainsPoint"/> of all seven of its samples. But the square is a square and a regiment is a rectangle inside it, so most cells cannot hold a single sample - and each of those was paying seven point-in-rectangle tests to find out, each of which reads `Forward` and `Right` off the rectangle afresh and each of which calls `SampleAt`, which works out the cell's world centre **again**.
+
+Now the cell's centre is worked out once and projected onto the body's own axes once, which gives the true distance from the cell to the rectangle on each axis; a cell further off than the outermost sample ring can be refused outright, on one test rather than seven. The samples that survive are projected in the same frame, so `ContainsPoint`'s trigonometry is hoisted out of the loop entirely. **Nothing about what is marked changes** - the refusal is exact, not a tolerance: a sample sits at most `_ringReach` from its cell's centre, so a cell further than that outside the body cannot contain one.
+
+**Marking a whole field of eighty: 5 453 µs → 2 649, a shade over half.** Paired against `454c063`, order alternated, least of three:
+
+| field | a bench | fields rebuilt | a battle, patched |
+|---|---|---|---|
+| Crucible | −12,1% | **−24,6%** | **−18,0%** |
+| Broken Country | −8,3% | **−22,2%** | −13,6% |
+| Long March | −1,3% | −11,5% | −5,6% |
+| Great Field | −9,7% | −20,6% | −6,2% |
+| Sideways Smile | −8,3% | −18,4% | −5,8% |
+
+Fifteen cells, one sign again. Routes unmoved: 9 failed / 651 passed, the same nine.

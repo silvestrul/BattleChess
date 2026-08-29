@@ -571,8 +571,11 @@ namespace BattleChess.Rules.GridPlanning
                     had.Matches(body.Shape, across, along))
                     continue;
 
-                field.Remove(body.Id);
-                field.Add(body.Id, body.Shape, across, along);
+                using (PlanningProfile.Measure(PlanningProfile.Step.FieldRestamp))
+                {
+                    field.Remove(body.Id);
+                    field.Add(body.Id, body.Shape, across, along);
+                }
             }
 
             // The dead and the routed, who are marked and are no longer there.

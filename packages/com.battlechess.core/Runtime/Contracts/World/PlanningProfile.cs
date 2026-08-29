@@ -229,6 +229,19 @@ namespace BattleChess.Contracts
             /// </remarks>
             FieldPatch,
 
+            /// <summary>
+            /// The restamping itself, inside <see cref="FieldPatch"/>, so that
+            /// what is left as FieldPatch's own time is the walk over the army
+            /// that finds who moved.
+            /// </summary>
+            /// <remarks>
+            /// Split because the two have completely different answers. If the
+            /// walk is most of it, a moved-set on the battle removes it; if the
+            /// marking is most of it, a moved-set buys nothing and the lever is
+            /// the cost of marking one body.
+            /// </remarks>
+            FieldRestamp,
+
             /// <summary>The A* loop over cells, without the string-pull after it.</summary>
             GridExpand,
 

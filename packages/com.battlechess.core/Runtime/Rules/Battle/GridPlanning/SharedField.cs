@@ -57,6 +57,18 @@ namespace BattleChess.Rules.GridPlanning
         /// <summary>Sample offsets from a cell's centre, in metres.</summary>
         private readonly Vec2[] _offsets;
 
+        /// <summary>
+        /// How far the furthest sample sits from its cell's centre.
+        /// </summary>
+        /// <remarks>
+        /// M110's cheap refusal. A cell whose centre lies further than this from
+        /// the body cannot have <i>any</i> sample inside it, so the seven
+        /// point-in-rectangle tests can be skipped on one test - and most cells
+        /// of the square the scan walks are in that case, because the scan
+        /// covers a square and a regiment is a rectangle inside it.
+        /// </remarks>
+        private readonly float _ringReach;
+
         /// <summary>How many bodies cover each sample of each touched cell.</summary>
         /// <remarks>
         /// Only cells something reaches appear. A cell with no entry is free at
@@ -184,6 +196,12 @@ namespace BattleChess.Rules.GridPlanning
             Samples = samples;
 
             _offsets = OffsetsFor(samples, layout.CellSize);
+
+            for (int i = 0; i < _offsets.Length; i++)
+            {
+                float far = _offsets[i].Length;
+                if (far > _ringReach) _ringReach = far;
+            }
         }
 
         /// <summary>
@@ -264,17 +282,55 @@ namespace BattleChess.Rules.GridPlanning
             HashSet<Coord> done = _done ??= new HashSet<Coord>();
             done.Clear();
 
+            // The body's own frame, lifted out of the loop. ContainsPoint reads
+            // Forward and Right off the rectangle every time it is called, and
+            // it was being called seven times per cell over several hundred
+            // cells per body.
+            Vec2 right = grown.Right;
+            Vec2 forward = grown.Forward;
+            float halfWidth = grown.Footprint.HalfWidth;
+            float halfDepth = grown.Footprint.HalfDepth;
+
             for (float y = centre.Y - span; y <= centre.Y + span + step; y += step)
             for (float x = centre.X - span; x <= centre.X + span + step; x += step)
             {
                 Coord cell = Layout.ToCoord(new Vec2(x, y));
                 if (!done.Add(cell)) continue;
 
+                // The cell's own middle, once. SampleAt works it out again for
+                // every sample, and it is a pair of multiply-adds and a vector
+                // build each time.
+                Vec2 middle = Layout.ToWorld(cell);
+
+                Vec2 fromBody = middle - grown.Centre;
+                float across = fromBody.X * right.X + fromBody.Y * right.Y;
+                float along = fromBody.X * forward.X + fromBody.Y * forward.Y;
+
+                // How far the cell's centre lies outside the body, on the
+                // body's own axes. Nought on either axis means inside on that
+                // axis, so this is the true distance to the rectangle and not
+                // an approximation of it.
+                float outWidth = MathF.Abs(across) - halfWidth;
+                float outDepth = MathF.Abs(along) - halfDepth;
+
+                if (outWidth > _ringReach || outDepth > _ringReach) continue;
+
+                if (outWidth > 0f && outDepth > 0f &&
+                    outWidth * outWidth + outDepth * outDepth > _ringReach * _ringReach)
+                    continue;
+
                 byte[]? counts = null;
 
                 for (int i = 0; i < Samples; i++)
                 {
-                    if (!grown.ContainsPoint(SampleAt(cell, i))) continue;
+                    Vec2 offset = _offsets[i];
+                    float sampleAcross = across + offset.X * right.X + offset.Y * right.Y;
+
+                    if (MathF.Abs(sampleAcross) > halfWidth) continue;
+
+                    float sampleAlong = along + offset.X * forward.X + offset.Y * forward.Y;
+
+                    if (MathF.Abs(sampleAlong) > halfDepth) continue;
 
                     if (counts == null && !target.TryGetValue(cell, out counts))
                     {
