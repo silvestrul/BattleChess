@@ -1030,3 +1030,35 @@ Run properly — the old tree in a git worktree beside the new one, both built o
 **And the first paired attempt was still wrong, in my own favour.** It showed the new tree 7 to 31% *slower* — because the new tree's record calls `RegimentGrid.Forget()` at the start of each pass and the old one did not, so the new one paid for three field builds the old one skipped. **A paired measurement must pair the harness too**, not only the code: the two trees have to run the same test, the same number of modes, the same amount of work, or the difference measured is the difference between the tests.
 
 So: [M53](#m53)'s protocol is not enough on its own. Least-of-N inside one process handles noise within a run and does nothing about drift between runs. **Where a comparison can be made inside one process by moving a lever, make it there** — [M104](#m104)'s patched-against-rebuilt is worth believing for exactly that reason and [M103](#m103)'s is not — and where it cannot, alternate the order and say the spread out loud. Fifth instance of the family that [W11](#w11) opened: a measurement that did not measure what it said it did.
+
+<a id="w13"></a>
+**W13** — The designer, cutting short a line of work: *"some increased RAM usage is fine as long as CPU time is lower so you dont have to mind that stat too much"*.
+
+Said after [M103](#m103) and [M106](#m106) were kept on an **allocation** measurement, having come out inside the noise on the clock. So the standing order is: **the clock is the score, and memory is currency to spend on it.** Allocation still matters where it is charged to a frame that did no planning — a collector pause is CPU time in the place it hurts most — but it is not a result on its own, and a change that only moves bytes has not moved anything the designer asked for.
+
+**It changes answers already written down.** [M103](#m103) refused a flat array over the map on the grounds that the fine tier is sixteen times denser and any fixed extent is *"either wrong at one tier or enormous at the other"*. Enormous is now allowed, so that reasoning no longer holds — and [M107](#m107) is what happened when it was tried.
+
+<a id="m107"></a>
+**M107** — Built and reverted. Under [W13](#w13) the obvious move was to make the field itself flat: `SharedField` held a `Dictionary<Coord, byte[]>` of coverage and a `Dictionary<Coord, float>` of going, and between them `FieldPatch` and `GridExpand` were **48% of planning**, nearly all of it hashing an eight-byte struct. The A* asks two of those per neighbour, six neighbours to a cell; the marking asks one per sample point of every cell every body touches. A flat array indexed by cell makes each an add and an index, and at a quarter of the coarse spacing a two-kilometre map is fifty thousand cells — a third of a megabyte, which W13 says is affordable.
+
+**It measures at nothing.** Paired against `8a3793d`, both trees running the identical record, order alternated, least of three: **−0,7% / −0,4% / −0,4% / −1,1% / −0,7%** on the five fields in the mode that models a battle, and −7,5% to +4,8% with mixed signs in the static modes. Below the ±3% this machine can hold. Reverted rather than kept, because a whole storage scheme is not worth carrying for a number that is not there — and it is a lot to carry: it needed a bounding box over axial coordinates, a fallback for cells outside it, and a second flag array to tell *has coverage* from *is already in the touched list*, which the gate caught as a patched field holding **300 cells against a rebuilt one's 292**.
+
+**Why the obvious win is not one, and this is the part worth keeping.** The sparse structure was faster than it looks for the same reason the dense one is slower than it looks: **a battlefield is mostly empty**, so the dictionary held only the few hundred cells anything touched, packed together and resident in cache — while the flat array scatters the same few hundred reads across a third of a megabyte. The change trades a hash for a cache miss, and on this data those cost about the same. On top of that every field raised must now allocate and zero the whole array, which in the rebuild-every-order mode is forty-three memsets of 350 kB.
+
+So W13's licence is real and this particular way of spending it is not. Sparse-because-empty is a property of the problem, not an accident of the first implementation.
+
+<a id="m108"></a>
+**M108** — Where the remaining cost sits, after M100–M106, on the Crucible with twelve regiments moving between orders and the field patched — 412 ms of self time over eighty orders:
+
+| step | calls | self | share |
+|---|---:|---:|---:|
+| `FieldPatch` | 41 | 114,7 ms | **27,8%** |
+| `GridExpand` | 44 | 84,9 | **20,6%** |
+| `NearQuery` | 19 972 | 59,2 | **14,4%** |
+| `BodyScan` | 19 972 | 59,0 | **14,3%** |
+| `FieldMark` | 3 | 28,1 | 6,8% |
+| `ClearLine` | 19 972 | 14,8 | 3,6% |
+| `ThreadGap` | 45 | 1,9 | 0,5% |
+| `Crab` | 50 | 0,1 | 0,0% |
+
+The crab is finished — 12,5% before [M101](#m101) and [M102](#m102), half a per cent after. What is left is three things and none of them has a cheap answer yet: patching still costs about half a rebuild because the unmark-and-mark plus the walk over the army eat the arithmetic of *twelve of eighty*; `GridExpand` is now real work rather than allocation, and [M107](#m107) says the flat-array answer to it is not one; and `NearQuery` with `BodyScan` is 29% spread over twenty thousand calls, where every attempt so far to hoist the corridor scan per plan has cost more than it saved, because a plan-wide corridor hands back three times the bodies a per-leg one does.
