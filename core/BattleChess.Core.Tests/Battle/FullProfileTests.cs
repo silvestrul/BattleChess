@@ -1006,8 +1006,8 @@ namespace BattleChess.Tests.Battle
         /// which of the two dominates is what this asks.
         /// </remarks>
         [Fact(Skip = "A record of a measurement rather than a check on one - it is what closed " +
-                     "the halo half of open finding 23, and it rebuilds the spatial index at " +
-                     "five widths while it runs.")]
+                     "the halo half of open finding 23 and then what re-opened it for M109, and " +
+                     "it rebuilds the spatial index at seven widths while it runs.")]
         public void WhatTheIndexCostsAtEachBucketWidth()
         {
             float was = UnitIndex.BucketMetres;
@@ -1027,7 +1027,7 @@ namespace BattleChess.Tests.Battle
 
                 foreach (string field in Fields)
                 {
-                    foreach (float bucket in new[] { 512f, 256f, 128f, 64f, 32f })
+                    foreach (float bucket in new[] { 512f, 256f, 128f, 64f, 32f, 16f, 8f })
                     {
                         UnitIndex.BucketMetres = bucket;
 

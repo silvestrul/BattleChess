@@ -20,13 +20,32 @@ namespace BattleChess.Rules
     /// changes only when somebody moves.
     /// </para>
     /// <para>
-    /// A regiment is filed under the one bucket its <i>centre</i> falls in,
-    /// never under several. That is what makes a query return each body once
-    /// without a de-duplicating pass over the results: buckets are disjoint, so
-    /// distinct buckets hold distinct bodies. The price is that a query has to
-    /// widen itself by the largest bounding radius on the field, since a body
-    /// filed one bucket over may still reach in. Cheap, and provably cannot
-    /// miss.
+    /// <b>M109. A regiment is filed under every bucket its own circle reaches</b>,
+    /// which is the trade the designer authorised - <i>"if an algorythm can be
+    /// optimised for speed rather than memory then its a good idea"</i>. It used
+    /// to be filed under the one bucket its <b>centre</b> sat in, so that
+    /// buckets held disjoint sets and a query needed no de-duplicating pass.
+    /// That saved a stamp per body and cost far more than it saved, because a
+    /// body filed one bucket over can still reach in - so <b>every query had to
+    /// widen itself by the widest bounding radius on the whole field</b>, and
+    /// then by half a bucket diagonal on top, which at 128 m buckets is 181 m of
+    /// slack around a reach of about ninety. [M95] measured that slack, called
+    /// it the price of the arrangement and swept the bucket size instead; the
+    /// arrangement itself was the thing to change.
+    /// </para>
+    /// <para>
+    /// Filing by reach makes the query exact in the only way that matters: it
+    /// asks for bodies within <c>reach</c> of the line and no longer for bodies
+    /// within <c>reach + widest reach</c>. A body whose circle comes near the
+    /// line covers some point near the line, that point is in some bucket, and
+    /// the body is filed there - so nothing can be missed, and the corridor
+    /// stops carrying somebody else's radius. The dedup it costs is a stamp per
+    /// body per query against an array indexed by the body's place in the order
+    /// of battle.
+    /// </para>
+    /// <para>
+    /// It also unlocks the bucket size, which was pinned by the widening. See
+    /// <see cref="BucketMetres"/>.
     /// </para>
     /// <para>
     /// Deliberately not a quadtree or a BVH. The field is a fixed rectangle a
@@ -64,7 +83,10 @@ namespace BattleChess.Rules
         /// </remarks>
         internal static float BucketMetres = 128f;
 
-        private readonly List<UnitInstance>[] _buckets;
+        private readonly List<int>[] _buckets;
+
+        /// <summary>The order of battle as it was filed, indexed by bucket entry.</summary>
+        private IReadOnlyList<UnitInstance> _filed = System.Array.Empty<UnitInstance>();
         private readonly int _columns;
         private readonly int _rows;
         private readonly Vec2 _origin;
@@ -101,6 +123,13 @@ namespace BattleChess.Rules
         private sealed class Marks
         {
             public int[] Visited = System.Array.Empty<int>();
+
+            /// <summary>
+            /// Which query last handed back each body, so that a body filed in
+            /// four buckets is still returned once.
+            /// </summary>
+            public int[] Handed = System.Array.Empty<int>();
+
             public int Sweep;
         }
 
@@ -117,9 +146,9 @@ namespace BattleChess.Rules
             _columns = Math.Max(1, (int)MathF.Ceiling(span.X / _bucketMetres));
             _rows = Math.Max(1, (int)MathF.Ceiling(span.Y / _bucketMetres));
 
-            _buckets = new List<UnitInstance>[_columns * _rows];
+            _buckets = new List<int>[_columns * _rows];
             for (int i = 0; i < _buckets.Length; i++)
-                _buckets[i] = new List<UnitInstance>();
+                _buckets[i] = new List<int>();
 
         }
 
@@ -145,9 +174,10 @@ namespace BattleChess.Rules
             Marks marks = MarksForThisThread();
             marks.Sweep++;
 
-            // The corridor this query is really asking about: everything whose
-            // own reach can touch the line.
-            float corridor = reach + _widestReach;
+            // The corridor this query is really asking about. Since M109 a body
+            // is filed under every bucket it reaches, so this is the caller's
+            // own reach and carries nobody else's radius.
+            float corridor = reach;
 
             Vec2 travel = to - from;
             float length = travel.Length;
@@ -254,10 +284,27 @@ namespace BattleChess.Rules
                     marks.Visited[bucket] = marks.Sweep;
                     PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
 
-                    List<UnitInstance> held = _buckets[bucket];
-                    for (int i = 0; i < held.Count; i++)
-                        into.Add(held[i]);
+                    Hand(bucket, into, marks);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Empties one bucket into an answer, once per body however many buckets
+        /// it is filed in.
+        /// </summary>
+        private void Hand(int bucket, List<UnitInstance> into, Marks marks)
+        {
+            List<int> held = _buckets[bucket];
+
+            for (int i = 0; i < held.Count; i++)
+            {
+                int who = held[i];
+
+                if (marks.Handed[who] == marks.Sweep) continue;
+
+                marks.Handed[who] = marks.Sweep;
+                into.Add(_filed[who]);
             }
         }
 
@@ -286,7 +333,7 @@ namespace BattleChess.Rules
             Marks marks = MarksForThisThread();
 
             marks.Sweep++;
-            Gather(at, reach + _widestReach, into, marks);
+            Gather(at, reach, into, marks);
         }
 
         private Marks MarksForThisThread()
@@ -295,6 +342,9 @@ namespace BattleChess.Rules
 
             if (marks.Visited.Length < _buckets.Length)
                 marks.Visited = new int[_buckets.Length];
+
+            if (marks.Handed.Length < _filed.Count)
+                marks.Handed = new int[Math.Max(64, _filed.Count * 2)];
 
             return marks;
         }
@@ -311,15 +361,13 @@ namespace BattleChess.Rules
             {
                 int bucket = row * _columns + column;
 
-                // Buckets are disjoint, so a bucket already emptied into this
-                // answer has nothing new to say.
+                // A bucket already emptied into this answer has nothing new to
+                // say; a body it shares with another bucket is caught by Hand.
                 if (marks.Visited[bucket] == marks.Sweep) continue;
                 marks.Visited[bucket] = marks.Sweep;
                 PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
 
-                List<UnitInstance> held = _buckets[bucket];
-                for (int i = 0; i < held.Count; i++)
-                    into.Add(held[i]);
+                Hand(bucket, into, marks);
             }
         }
 
@@ -348,6 +396,7 @@ namespace BattleChess.Rules
                 _buckets[i].Clear();
 
             _widestReach = 0f;
+            _filed = units;
 
             for (int i = 0; i < units.Count; i++)
             {
@@ -361,7 +410,20 @@ namespace BattleChess.Rules
                 if (radius > _widestReach) _widestReach = radius;
 
                 Vec2 at = unit.Position;
-                _buckets[Row(at.Y) * _columns + Column(at.X)].Add(unit);
+
+                // Every bucket the body's own circle reaches. Its square, not
+                // the circle - a bucket that only the corner of the bounding
+                // box touches holds the body needlessly, which costs one
+                // comparison in one query and saves the arithmetic here on
+                // every refile.
+                int lowColumn = Column(at.X - radius);
+                int highColumn = Column(at.X + radius);
+                int lowRow = Row(at.Y - radius);
+                int highRow = Row(at.Y + radius);
+
+                for (int row = lowRow; row <= highRow; row++)
+                for (int column = lowColumn; column <= highColumn; column++)
+                    _buckets[row * _columns + column].Add(i);
             }
 
             _built = true;

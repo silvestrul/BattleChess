@@ -1036,6 +1036,8 @@ So: [M53](#m53)'s protocol is not enough on its own. Least-of-N inside one proce
 
 Said after [M103](#m103) and [M106](#m106) were kept on an **allocation** measurement, having come out inside the noise on the clock. So the standing order is: **the clock is the score, and memory is currency to spend on it.** Allocation still matters where it is charged to a frame that did no planning — a collector pause is CPU time in the place it hurts most — but it is not a result on its own, and a change that only moves bytes has not moved anything the designer asked for.
 
+**Proportionate, not unconditional.** Asked how far it goes: *"even if you use 4-8gb of ram is fine it gives a decent return (i dont want to trade 2gb ram for 2% speed but if an algorythm can be optimised for speed rather than memory then its a good idea)"*. So the budget is real and large, and it is still a budget: gigabytes are available to an algorithm that becomes fundamentally cheaper, and are not available to buy a couple of per cent. [M107](#m107) is the shape that fails this twice over — it spent a third of a megabyte per field and bought nought point seven per cent.
+
 **It changes answers already written down.** [M103](#m103) refused a flat array over the map on the grounds that the fine tier is sixteen times denser and any fixed extent is *"either wrong at one tier or enormous at the other"*. Enormous is now allowed, so that reasoning no longer holds — and [M107](#m107) is what happened when it was tried.
 
 <a id="m107"></a>
@@ -1062,3 +1064,22 @@ So W13's licence is real and this particular way of spending it is not. Sparse-b
 | `Crab` | 50 | 0,1 | 0,0% |
 
 The crab is finished — 12,5% before [M101](#m101) and [M102](#m102), half a per cent after. What is left is three things and none of them has a cheap answer yet: patching still costs about half a rebuild because the unmark-and-mark plus the walk over the army eat the arithmetic of *twelve of eighty*; `GridExpand` is now real work rather than allocation, and [M107](#m107) says the flat-array answer to it is not one; and `NearQuery` with `BodyScan` is 29% spread over twenty thousand calls, where every attempt so far to hoist the corridor scan per plan has cost more than it saved, because a plan-wide corridor hands back three times the bodies a per-leg one does.
+
+<a id="m109"></a>
+**M109** — [M95](#m95) asked the wrong question, and this pass is what happens when the right one is asked. Its complaint was arithmetically exact: a clearance query widens by `reach + widest reach`, takes any bucket whose centre lies within half a diagonal of that, and a body may sit half a diagonal outside the bucket it was filed in — **181 m of slack around a reach of about ninety**. M95 then swept the *bucket width* over a twenty-four-fold range, found a flat basin, and concluded the slack was the price of the arrangement. It was the price of **one line** of the arrangement: a regiment was filed under the single bucket its **centre** sat in, so a query had to carry somebody else's radius in case a body filed one bucket over reached in.
+
+**File a body under every bucket its own circle reaches and the widening is not needed at all.** A body whose circle comes near the line covers some point near the line; that point lies in some bucket; the body is filed there — so nothing can be missed and the corridor is the caller's own reach. What it costs is the de-duplicating pass the disjoint filing existed to avoid, which is one stamp per body per query against an array indexed by the body's place in the order of battle. It costs almost no memory either — a regiment's circle spans one bucket, sometimes four, at 128 m — so this is [W13](#w13)'s *"if an algorythm can be optimised for speed rather than memory then its a good idea"* rather than a purchase.
+
+**Paired against `71cdaa2`, both trees on the identical record, order alternated, least of three. Fifteen cells, one sign:**
+
+| field | a bench | fields rebuilt | a battle, patched |
+|---|---|---|---|
+| Crucible | −6,1% | −2,8% | −2,7% |
+| Broken Country | −8,2% | −3,4% | −2,9% |
+| Long March | −4,7% | −6,8% | −4,1% |
+| Great Field | −11,0% | −9,0% | −5,5% |
+| Sideways Smile | −10,6% | −8,1% | −3,7% |
+
+Buckets opened per query fall 31% and buckets examined 26%; `NearQuery` −6% and `BodyScan` −9% on the Crucible in the battle mode. Routes unmoved — the suite is 9 failed / 650 passed throughout, and a body wrongly dropped here is a collision nobody saw, which is what the whole suite is watching for.
+
+**The bucket width is re-swept and stays at 128 m**, now for a different reason. With the widening gone the basin moved and flattened: summed over four fields, 256 m is 1,2% better than 128 and 512 is 7% worse, but the two candidates disagree in sign per field — the Crucible prefers 256 by 5,9% and Broken Country prefers 128 by 6,7%. Below 32 m it collapses, and hard: at 8 m a query opens 345 buckets on the Crucible and 1 627 on the Sideways Smile, and an order costs three to ten times what it does at 128. No reason to move it.
