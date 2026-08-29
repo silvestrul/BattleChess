@@ -1104,3 +1104,20 @@ Now the cell's centre is worked out once and projected onto the body's own axes 
 | Sideways Smile | −8,3% | −18,4% | −5,8% |
 
 Fifteen cells, one sign again. Routes unmoved: 9 failed / 651 passed, the same nine.
+
+<a id="m111"></a>
+**M111** — Built and reverted, and this time with numbers rather than a paper estimate. A plan asks *"who is near this line"* about two hundred times, and the lines are legs of one march mostly lying on top of each other — the straight cast, the arc round a body, the halves of a bend, the smoothing casts. So a query was widened by a slack and kept, and a later leg answered from it whenever the leg lay wholly inside the corridor already asked for. The reuse is **provable, not likely**: a kept answer holds every body within `cachedReach` of the old line, so it serves a new leg whenever every point of that leg is within `cachedReach - reach` of the old line, and distance to a segment is convex along a segment, so testing the two ends tests the whole leg. It is also confined to the inside of a plan, because the test is geometric and says nothing about time — a corridor kept across a tick would answer with an army that has marched off it.
+
+It works, and it costs more than it saves, at every setting:
+
+| slack | Crucible ms/order | queries | reused | bodies scanned | `NearQuery` | `BodyScan` | the two together |
+|---|---|---|---|---|---|---|---|
+| **off** | **2,281** | 17 728 | 0 | 226 940 | 41,2 ms | 40,1 ms | **81,3 ms** |
+| 10 m | 2,401 | 15 138 | 2 590 | 245 429 | 37,4 | 47,1 | 84,5 |
+| 25 m | 2,351 | 12 382 | 5 346 | 278 605 | 33,3 | 55,1 | 88,4 |
+| 50 m | 2,390 | 8 777 | 8 951 | 328 080 | 27,9 | 58,4 | 86,3 |
+| 100 m | 2,423 | 4 370 | 13 358 | 450 987 | 19,3 | 71,6 | 90,9 |
+
+At a hundred metres of slack it answers **three queries in four from the corridor** and the query time falls by more than half — and the bodies scanned **double**, and the scan costs more than the query saved. The exchange rate is the whole finding and it is not close to favourable: one avoided query saves about 2,3 µs and brings roughly seventeen extra bodies with it, at about 0,14 µs each. It is a loss at 10 m and a bigger loss at 100, on every field, monotonically. `routed`, `pressed` and the seconds of marching are identical at every setting, so nothing about the answers is in question — only the price.
+
+Third time this idea has been costed and the first with numbers on it, so it is now closed rather than merely doubted. The reason it looked promising after [M109](#m109) — a corridor that no longer carries the widest radius on the field is cheap enough to widen — is true and beside the point: the cost was never the width of the query, it was the length of the list it hands back.
