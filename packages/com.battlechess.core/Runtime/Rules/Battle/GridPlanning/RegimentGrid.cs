@@ -485,6 +485,21 @@ namespace BattleChess.Rules.GridPlanning
                      + (long)MathF.Round(reach * 16f) * 17L
                      + (moving.HasValue ? (long)MathF.Round(moving.Value.Facing.Degrees) : -1L);
 
+            // A different battle, or the same battle on different ground, and
+            // every field kept here answers for somewhere else. Checked before
+            // the stamp, because patching a field onto the wrong map is exactly
+            // the failure this guards - see SharedField.RaisedOver.
+            if (_fields.Count > 0)
+            {
+                foreach (SharedField any in _fields.Values)
+                {
+                    if (any.RaisedOver(battle.Terrain, battle.Movement)) break;
+
+                    _fields.Clear();
+                    break;
+                }
+            }
+
             if (_fields.TryGetValue(key, out SharedField found))
             {
                 if (found.Stamp != stamp)

@@ -93,7 +93,7 @@ namespace BattleChess.Tests.Battle
                 foreach ((string title, bool reuse, bool incremental, int shove) in new[]
                 {
                     ("fields kept between orders — a bench, where nothing moves", true, true, 0),
-                    ("fields thrown away every order — the old stand-in for a battle", false, true, 0),
+                    ("fields rebuilt every order — a battle, where everything does", false, true, 0),
                     ("a battle: twelve regiments move between orders, the field patched", true, true, 12),
                     ("a battle: twelve regiments move between orders, the field raised again", true, false, 12),
                 })
@@ -143,8 +143,22 @@ namespace BattleChess.Tests.Battle
                 orders = Orders(field);
             }
 
+            // Bytes as well as milliseconds, because they are different
+            // questions and only one of them survives the noise on this
+            // machine. A managed allocation is nearly free to make and is paid
+            // for later, all at once, by whichever frame the collector happens
+            // to land on - so litter is what turns a planner that averages four
+            // milliseconds into a game that hitches. And the editor runs Mono,
+            // where it is dearer than it is here.
+            long litterBefore = GC.GetAllocatedBytesForCurrentThread();
+            Time(field, only: null, out _, out _);
+            long litter = GC.GetAllocatedBytesForCurrentThread() - litterBefore;
+
             _out.WriteLine(string.Empty);
             _out.WriteLine($"=== {field}: {orders} orders ===");
+            _out.WriteLine(
+                $"    {litter / 1024d / 1024d,7:0.00} MB allocated     " +
+                $"{litter / 1024d / Math.Max(1, orders),7:0.0} kB an order");
             _out.WriteLine(
                 $"    {total,7:0.0} ms total     {total / Math.Max(1, orders),6:0.00} ms an order     " +
                 $"dearest {worst,6:0.0} ms  ({dearest})     " +

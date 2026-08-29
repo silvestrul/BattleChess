@@ -123,6 +123,33 @@ namespace BattleChess.Rules.GridPlanning
         /// <summary>Bodies stamped on or off since this field was made.</summary>
         internal int Restamped;
 
+        /// <summary>
+        /// Whether this field was raised over the ground a caller is asking
+        /// about.
+        /// </summary>
+        /// <remarks>
+        /// <b>The hole M104 opened, and it is worth stating plainly.</b> The
+        /// cache is keyed by spacing, samples, movement type, reach and facing -
+        /// by everything about the <i>mover</i>, and by nothing about the
+        /// battle. That was safe only because a field was thrown away the
+        /// moment anything moved, so a field could not outlive the arrangement
+        /// it was raised over, and it certainly could not outlive the map.
+        /// Patching removed that guarantee: a kept field is now brought up to
+        /// date by restamping the bodies, and restamping the bodies does
+        /// nothing whatever about the <i>going</i>, which is cached per cell and
+        /// sampled from whichever terrain the field was built with.
+        /// <para>
+        /// So a second battle on a second map found the first map's field,
+        /// patched the regiments onto it, and searched it with the first map's
+        /// ground. Caught by <c>WingOrderTests</c> rather than by anything
+        /// nearer: routes came back different planned all at once from planned
+        /// one at a time, because which thread carried which map's leftovers is
+        /// a matter of which thread the pool happened to hand out.
+        /// </para>
+        /// </remarks>
+        internal bool RaisedOver(ITerrainMap terrain, IMovementModel movement) =>
+            ReferenceEquals(_terrain, terrain) && ReferenceEquals(_movement, movement);
+
         /// <summary>Who is on the field, as it believes.</summary>
         internal IReadOnlyDictionary<UnitId, MarkedBody> Marked => _marked;
 

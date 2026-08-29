@@ -184,6 +184,76 @@ namespace BattleChess.Tests.Battle
             }
         }
 
+        /// <summary>
+        /// A field kept from one battle is never patched onto another one's
+        /// ground.
+        /// </summary>
+        /// <remarks>
+        /// <b>Red first, and it was a real bug.</b> The field cache is keyed by
+        /// everything about the mover and nothing about the battle, which was
+        /// safe only while a field was thrown away the moment anything moved.
+        /// Once fields are patched instead, a second battle on a second map
+        /// finds the first map's field, restamps the regiments onto it, and
+        /// searches it with the first map's going - because restamping bodies
+        /// says nothing about terrain. Without the guard this test reports
+        /// hundreds of cells differing; <c>WingOrderTests</c> caught it too, but
+        /// only as "2 of 80 routes changed when the wing was planned at once",
+        /// which names a symptom three steps downstream.
+        /// </remarks>
+        [Fact]
+        public void AFieldFromOneBattleIsNotPatchedOntoAnothersGround()
+        {
+            bool was = RegimentGrid.MarkIncrementally;
+
+            try
+            {
+                RegimentGrid.MarkIncrementally = true;
+                RegimentGrid.Forget();
+
+                // One map, then a different one, on the same thread - which is
+                // all it takes, because the cache is per thread and the key
+                // does not mention the battle.
+                BattleState first = BenchScenariosTests.Load("crucible");
+                RegimentGrid.For(first, First(first));
+
+                BattleState second = BenchScenariosTests.Load("longmarch");
+                UnitInstance mover = First(second);
+
+                RegimentGrid afterTheFirst = RegimentGrid.For(second, mover);
+
+                // The same battle with nothing kept, which is what it should
+                // have been all along.
+                RegimentGrid.Forget();
+                RegimentGrid alone = RegimentGrid.For(second, mover);
+
+                var cells = new List<Coord>();
+                alone.Snapshot(cells);
+
+                int differed = 0;
+
+                foreach (Coord cell in cells)
+                    if (afterTheFirst.IsBlocked(cell) != alone.IsBlocked(cell) ||
+                        afterTheFirst.StateOf(cell) != alone.StateOf(cell))
+                        differed++;
+
+                _out.WriteLine(
+                    $"{cells.Count} cells compared, {afterTheFirst.BlockedCells} held " +
+                    $"against {alone.BlockedCells}, {differed} differed");
+
+                // Not vacuous: the two maps have to disagree about their ground,
+                // or a stale field would read correctly by luck.
+                Assert.NotEqual(first.Terrain.Bounds, second.Terrain.Bounds);
+
+                Assert.Equal(0, differed);
+                Assert.Equal(alone.BlockedCells, afterTheFirst.BlockedCells);
+            }
+            finally
+            {
+                RegimentGrid.MarkIncrementally = was;
+                RegimentGrid.Forget();
+            }
+        }
+
         /// <summary>The first regiment on the field, whoever it is.</summary>
         private static UnitInstance First(BattleState battle)
         {

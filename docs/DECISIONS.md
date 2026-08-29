@@ -940,3 +940,93 @@ That is the Crucible, and the other three fields have the same shape: the straig
 
 <a id="w6"></a>
 **W6** — *"Each collision is documented and every decision including the calculated path and how to go around."* — who, where, facing where, how deeply overlapping, what each was doing, who gives ground and why, and how long it lasted. It was completely silent before: the overlap cost, the shuffle apart and the yield rule all ran without a word, so every play-test report of "it goes through them" had to be reproduced from scratch against a recording that contained no evidence it had happened. **And a routing decision names the line, not just the rung.** Which rung of M18 answered is a one-word summary of a decision whose substance is *where it decided to walk* — so every rung now prints its waypoints, and a detour prints which side it passes and how far off the straight line it swings. Both are said **once per event, not once per tick**: a rung reports on the tick its answer changes, and a collision on the tick it opens and the tick it clears. Volume is a build gate, not a preference — `NoSingleRuleDrownsOutTheRest` failed this pass at 218 of 297 lines and was right to.
+
+<a id="m100"></a>
+**M100** — The designer, on the search stages below the grid: *"so keep grid stage and cap any search on a total of 10ms lets try it like this"*.
+
+`Marching.SearchBudgetMs` opens a deadline per plan, and `Marching.StopNow()` folds it together with [M80](#m80)'s `GiveUpNow` so one call answers both *"has this order been superseded"* and *"has this order run out of time"*. Polled at the round loop of `RouteSearch`, every 64 expansions of its ledger, and every 64 cells of the grid A*.
+
+**The first version made things worse and the reason is worth keeping.** Timing out the coarse grid does not end the order; it drops through to the fine tier, the tangent graph and the pose lattice, each dearer than the thing that just gave up. The Crucible went **81 → 98 ms** and its worst order 6 → 23. The fix is not a bigger budget but a short-circuit: when time is out **and the ladder already has an answer**, take the ladder's answer and stop, rather than falling onward. Same shape as [M61](#m61) and [M105](#m105) — a bound on a cheap stage is a promotion for a dear one.
+
+<a id="m101"></a>
+**M101** — A gap wide enough to march through is not the same thing as a gap. `Marching.ThreadAGap` kept every pair of bodies whose separation cleared the mover's width, which on an open field is most pairs on the board: two regiments **eight hundred metres apart** name a "gap", and the three clearance tests were then run on it in full.
+
+`GapWidthCeiling = 2f` — a passage is a passage while it is under twice what the regiment needs, and above that it is simply open ground the straight line already had. Measured on the Crucible: passages put to the clearance tests **25 582 → 1 062**. `found`, `failed` and `pressed` identical at every ceiling tried; march seconds unchanged on four fields and **−0,49% on the Long March**.
+
+<a id="m102"></a>
+**M102** — The designer, on where a crab should look: *"a crab is good and cheap if it only tries the bodies near the main body"*, and then precisely: *"if 8 is between 7 and 9 then verify 1-8 and 8-9 then 6-7 9-10 so on ... and after a number you just stop"*.
+
+**`ThreadAGap`'s own remarks had always described this and the code had never done it** — *"the bodies are projected onto the axis across the march, sorted, and the spaces between them read off"*. Sorted and read off is a sweep: a formed line of ten bodies has **nine** spaces in it. What was written instead paired every body with every other, which on the same ten is **forty-five**, and most of those name no space at all because three other bodies stand between the two being asked about. Second instance this pass of behaviour documented but absent, after `GiveUpNow`.
+
+Now: bodies sorted by **signed** offset across the march — signed, or the sort interleaves the two flanks and makes neighbours of bodies on opposite sides of the line — the walk started at the body that actually blocks the straight line, and worked outward both ways, `GapSpacesEitherSide = 4`.
+
+**It answers identically.** March seconds identical on all five bench fields; `found` 80/80/80/40/40 and `failed` 0 throughout; the Long March keeps **all 24** of its threaded gaps at every setting down to one space either side. Pairs examined fell from 587 a call to about 8, and passages tried from 1 062 to 10 on the Crucible, 760 to 8 on Broken Country, 306 to 24 on the Great Field, 281 to 23 on the Sideways Smile, 152 to 24 on the Long March. Shipped at four rather than one because cost is flat from four down and a bench is not every arrangement.
+
+<a id="m103"></a>
+**M103** — The grid A* kept a `Dictionary<Coord, Coord>`, a `Dictionary<Coord, float>` and a `HashSet<Coord>`, and built all three **afresh on every order**. `CellTable` is one open-addressed probe table per thread carrying all three columns, with a generation counter so a search begins by incrementing an integer rather than by emptying anything. Not an array indexed by cell, because the cell range is not bounded — `HexLayout.ToCoord` will name a cell off the map, and the fine tier is sixteen times denser than the coarse one, so any fixed extent is wrong at one tier or enormous at the other.
+
+**On the clock it buys nothing measurable, and that is the honest reading** — see [W12](#w12) for how it first appeared to buy 26%. Paired against `a6d7f5b` on the same machine, order alternated, least of four passes: **+0,7% to +3,3%** across five fields with fields rebuilt every order, which is inside this machine's spread.
+
+**What it buys is litter, and that measurement holds to a tenth of a per cent**, because allocation is counted rather than timed. Bytes an order, `GC.GetAllocatedBytesForCurrentThread` over a whole field, least of three passes, spread 0,0–0,4%:
+
+| field | before | after | |
+|---|---|---|---|
+| Crucible | 340,8 kB | **95,0 kB** | −72% |
+| Broken Country | 362,6 | **101,5** | −72% |
+| Long March | 70,2 | **27,3** | −61% |
+| Great Field | 168,4 | **59,8** | −64% |
+| Sideways Smile | 152,5 | **55,9** | −63% |
+
+With fields kept it is −60% to −79%. This is the right thing to have bought: a managed allocation is nearly free to make and is paid for later, all at once, by whichever frame the collector lands on — which is what a hitch **is**, and it is charged to a frame that did no planning at all. The editor runs Mono, where it is dearer than on the bench. Two thirds of it is this table and the rest is the two scratch collections `SharedField.Mark` made per body — a `HashSet<Coord>` per call and a list of emptied cells per unmarking, both now kept per thread.
+
+<a id="m104"></a>
+**M104** — A field was thrown away whenever anything moved. That is not what the stamp says: it is a hash over the whole army, so it says only that **something** moved, and a tick moves the regiments that are marching and leaves the rest standing. Eighty bodies were re-marked because a dozen had gone anywhere.
+
+**Exact, not approximate.** Coverage is counted rather than flagged ([`SharedField`](../packages/com.battlechess.core/Runtime/Rules/Battle/GridPlanning/SharedField.cs)), so marking is reversible: a body taken off with the rectangle it was put on with touches the same cells and the same samples and leaves the counts where a field that had never seen it would have them. So the field remembers each rectangle — a body that has moved can no longer say where it used to stand, and unmarking it at its new place would corrupt the field in silence. Cells an unmarking empties are dropped, or a patched field keeps every cell any body has ever stood in and `CountBlocked` grows for the rest of the battle.
+
+**The gate is cell by cell, not a timing.** `PatchingAFieldTests` shoves 1, 12 or 40 regiments the way a tick does and compares `FillAt`, `IsBlocked` and `NodeAt` over every cell of the field against one raised from nothing: **0 of 2 377 / 3 069 / 6 398 / 100 cells differ** on four fields, blocked counts equal, and it asserts that something was actually restamped so that comparing two identical fields cannot pass for a check. A second gate destroys nine regiments, because the walk over the army can say which bodies moved and cannot say which stopped existing — they are no longer in it to be asked.
+
+**Measured within one process**, which is the only comparison this machine can carry (see [W12](#w12)): the same arrangements, the same orders, twelve regiments moved between each, patched against raised again, three independent runs —
+
+| field | clock, three runs | bytes an order |
+|---|---|---|
+| Crucible | **−22% / −19% / −22%** | 39,6 kB against 99,0 — **−60%** |
+| Broken Country | **−22% / −19% / −21%** | 53,7 against 168,7 — **−68%** |
+| Long March | −8% / −11% / −9% | 17,4 against 27,3 — −36% |
+| Great Field | −1% / −5% / +2% | 55,0 against 67,7 — −19% |
+| Sideways Smile | −1% / −5% / −0% | 56,7 against 67,6 — −16% |
+
+**And it opened a hole, which is the part of this entry worth reading.** The field cache is keyed by spacing, samples, movement type, reach and facing — by everything about the **mover** and nothing about the **battle**. That was safe only because a field was thrown away the moment anything moved, so it could not outlive the arrangement it was raised over and certainly could not outlive the map. Patching removed that guarantee, and restamping the bodies says nothing whatever about the **going**, which is cached per cell and sampled from whichever terrain the field was built with. So a second battle on a second map found the first map's field, restamped the regiments onto it, and searched it with the first map's ground.
+
+Caught by `WingOrderTests`, and only as *"2 of 80 routes changed when the wing was planned at once"* — [M62](#m62)'s symptom exactly, three steps downstream of the cause, and visible only in parallel because which thread carries which map's leftovers is a matter of which thread the pool hands out. Bisected to the lever in one run. The guard drops every kept field when the ground under it is not the ground being asked about, and the gate for it is direct rather than downstream: raise a field on the Crucible, then ask for one on the Long March, and compare it cell by cell against a Long March field raised from nothing. **Red first at 3 800 of 6 398 cells** — with the blocked counts *equal*, because the bodies were right and only the ground was wrong, which is what made it invisible to every check that counts routes.
+
+**Why it is not the ten-fold the arithmetic suggests**, and this is the part to read before raising it further: a patch costs a walk over the whole army to find out who moved, plus an unmark and a mark for each who did, and an unmark is a mark plus the scan that drops emptied cells. Twelve of eighty moved is 24 body-marks against 80, and it measures at about half rather than at 0,3 of a rebuild. The two forty-regiment fields gain almost nothing because twelve of forty moving every order is most of the army — there, a patch **is** a rebuild, which is the honest bound on this and not a defect in it.
+
+<a id="m105"></a>
+**M105** — Bounding the grid A* to a corridor round the drawn line, on the reasoning that the fine tier of [M87](#m87) is sixteen times the cells and spends them settling ground hundreds of metres either side of a march that was only going to bend round one regiment. Refused on the measurement, and the premise was simply wrong: **A\* with an admissible heuristic does not settle a disc** — the heuristic pulls it down the line — so the corridor refuses almost nothing until it starts refusing the route.
+
+| corridor | Crucible ms/order | Sideways Smile pressed | Sideways Smile unwalkable | Sideways Smile march s |
+|---|---|---|---|---|
+| unbounded | **2,14** | **1** | **2** | **39 638** |
+| x2 of the march | 2,22 | 1 | 2 | 39 638 |
+| x1 | 2,24 | 2 | 3 | 38 184 |
+| x0,5 | **13,08** | 11 | 12 | 28 953 |
+| x0,25 | 14,18 | 11 | 12 | 28 953 |
+
+At x2 and x1 it costs 4% and saves nothing. Below that the cascade falls through to the stages the grid exists to avoid and an order goes from 2,1 ms to 13,1 — **six times dearer for being given less to search**. Which is [W10](#w10) twice over: the cheaper number was the worse route, and then it was not even cheaper. Third instance of the same shape after [M61](#m61) and [M100](#m100). Kept as a lever at nought with its numbers, so the idea is not had again.
+
+<a id="m106"></a>
+**M106** — A clearance query scanned the **bounding rectangle** of the leg, widened by `reach + widest reach + half a diagonal`. A march is nearly always diagonal, and a rectangle drawn round a diagonal line is mostly not near the line. Clipping the segment to each bucket row's own band first and taking the columns of *that* leaves the arithmetic per bucket exactly as it was and asks it of far fewer, and is still provably a superset: a bucket whose centre is within span of the segment has its nearest point on the segment within span in **y** as well, so that point lies inside the band, so its **x** is inside the range taken.
+
+Like [M103](#m103), **inside the noise on the clock** and kept for the operation count rather than for a number the machine could not hold: 23,5 buckets examined per query to keep 11,1, where the rectangle scan it replaces examined about forty.
+
+<a id="w12"></a>
+**W12** — **Two builds compared across two processes cannot be trusted on this machine, and the first reading said the opposite of the truth.**
+
+The pass above was first measured by running the record before the change and again after, one run each. It reported the Crucible **535 → 397 ms, −26%**, with `GridExpand` down 29% and `FieldMark` down 24% — and `FieldMark` had not been touched, which should have been the tell and was instead written up as a plausible knock-on from allocation pressure.
+
+Run properly — the old tree in a git worktree beside the new one, both built once, the two **alternated** so neither is always the one that runs second, least of four passes each — the same comparison is **+0,7% to +3,3%**. The −26% was the machine. The baseline's own `GridExpand` read **56,6 ms in one run and 91,3 in another** from an identical binary, a 61% spread, which is larger than every effect being claimed.
+
+**And the first paired attempt was still wrong, in my own favour.** It showed the new tree 7 to 31% *slower* — because the new tree's record calls `RegimentGrid.Forget()` at the start of each pass and the old one did not, so the new one paid for three field builds the old one skipped. **A paired measurement must pair the harness too**, not only the code: the two trees have to run the same test, the same number of modes, the same amount of work, or the difference measured is the difference between the tests.
+
+So: [M53](#m53)'s protocol is not enough on its own. Least-of-N inside one process handles noise within a run and does nothing about drift between runs. **Where a comparison can be made inside one process by moving a lever, make it there** — [M104](#m104)'s patched-against-rebuilt is worth believing for exactly that reason and [M103](#m103)'s is not — and where it cannot, alternate the order and say the spread out loud. Fifth instance of the family that [W11](#w11) opened: a measurement that did not measure what it said it did.
