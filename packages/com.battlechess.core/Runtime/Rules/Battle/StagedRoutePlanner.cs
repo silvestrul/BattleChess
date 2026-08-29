@@ -46,6 +46,12 @@ namespace BattleChess.Rules
         /// </remarks>
         internal static int OutOfTimeAtTheGrid;
 
+        /// <summary>
+        /// How many orders were already out of time when they reached the
+        /// escape, whether or not they had an answer to leave with.
+        /// </summary>
+        internal static int OutOfTimeReachedTheGrid;
+
         /// <summary>How far the pose search may stray from the route guiding it.</summary>
         /// <summary>What a corridor-bounded pose search may spend before widening.</summary>
         internal static int BoundedBudget = 4000;
@@ -394,6 +400,7 @@ namespace BattleChess.Rules
                     TangentTooDear = WayRoundTooDear = CrabTooLong =
                     TangentAsked = BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
+            OutOfTimeAtTheGrid = OutOfTimeReachedTheGrid = 0;
             HybridPlanning.HybridAStarPlanner.RanOutOfTime = 0;
             GridPlanning.GridRoutePlanner.ResetCounters();
         }
@@ -621,7 +628,16 @@ namespace BattleChess.Rules
             // is either a route it proved or a press-through it declared. M98:
             // a declared press is a legitimate answer. What is never returned
             // here is something nobody checked.
-            if (Marching.StopNow() && ladder.Path.Found)
+            bool spent = Marching.StopNow();
+
+            // Counted apart from the escape itself, because "the door never
+            // opened" has two quite different causes and they want opposite
+            // fixes: a clock that has not run out yet by the time the order
+            // reaches this line means the door is in the wrong place, and a
+            // ladder holding nothing means the door is barred.
+            if (spent) OutOfTimeReachedTheGrid++;
+
+            if (spent && ladder.Path.Found)
             {
                 OutOfTimeAtTheGrid++;
 

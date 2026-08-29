@@ -179,6 +179,80 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// Why a tighter cap makes the worst order dearer rather than cheaper.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The designer, reading [M112]: <i>"how is it that the cap at 10 ms has
+        /// worst order 43 but cap at 20 ms has worst order at 32 - if the cap is
+        /// 10 ms then worst is 10 ms isnt it?"</i>. It is the right question and
+        /// the number is not a misprint.
+        /// </para>
+        /// <para>
+        /// The cascade has exactly one door out on the clock, after the coarse
+        /// grid, and it is barred unless the ladder already holds an answer:
+        /// <c>if (Marching.StopNow() &amp;&amp; ladder.Path.Found)</c>. An order
+        /// whose ladder found nothing walks straight past it into the fine tier,
+        /// where the quarter-spacing grid is <b>sixteen times the field</b> and
+        /// raising it is un-polled from the first cell to the last. So the cap
+        /// does not bound the order; it decides <i>which stage the order is
+        /// standing in when the clock runs out</i>.
+        /// </para>
+        /// <para>
+        /// That gives the counter-intuitive direction its mechanism, and this
+        /// table is here to confirm or refute it: if a tighter cap is demoting
+        /// orders rather than ending them, <b>fine asked must rise as the cap
+        /// falls</b>. If it does not rise, the mechanism is something else and
+        /// this entry is wrong.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - " +
+                     "it orders two bench fields thirty-two times over at four budgets.")]
+        public void WhyATighterCapCostsMore()
+        {
+            float was = Marching.SearchBudgetMs;
+
+            string[] fields = { "crucible", "brokencountry" };
+
+            try
+            {
+                foreach (string warm in fields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"cap",-8}{"field",-16}{"worst ms",10}{"ms/order",10}" +
+                    $"{"spent",8}{"escaped",9}{"coarse won",12}{"fine asked",12}" +
+                    $"{"fine won",10}{"pose asked",12}");
+                _out.WriteLine(new string('-', 99));
+
+                foreach (float cap in new[] { 0f, 20f, 10f, 5f })
+                {
+                    Marching.SearchBudgetMs = cap;
+
+                    foreach (string field in fields)
+                    {
+                        Row row = Measure(field, planner: null, passes: 3);
+
+                        _out.WriteLine(
+                            $"{(cap <= 0f ? "off" : $"{cap:0} ms"),-8}{field,-16}" +
+                            $"{row.Worst,10:0.0}{row.MsPerOrder,10:0.000}" +
+                            $"{StagedRoutePlanner.OutOfTimeReachedTheGrid,8}" +
+                            $"{StagedRoutePlanner.OutOfTimeAtTheGrid,9}" +
+                            $"{GridRoutePlanner.Found,12}" +
+                            $"{GridRoutePlanner.FineAsked,12}" +
+                            $"{GridRoutePlanner.FineFound,10}" +
+                            $"{StagedRoutePlanner.PoseAsked,12}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = was;
+            }
+        }
+
+        /// <summary>
         /// What capping a whole order at a few milliseconds does to the routes.
         /// </summary>
         /// <remarks>

@@ -1123,6 +1123,8 @@ At a hundred metres of slack it answers **three queries in four from the corrido
 Third time this idea has been costed and the first with numbers on it, so it is now closed rather than merely doubted. The reason it looked promising after [M109](#m109) — a corridor that no longer carries the widest radius on the field is cheap enough to widen — is true and beside the point: the cost was never the width of the query, it was the length of the list it hands back.
 
 <a id="m112"></a>
+**M112** — *Corrected in part by [M113](#m113): this entry's worst-order column is a single sample of a tail and does not order the caps, and its guess at why a tighter cap costs more is wrong.*
+
 **M112** — The designer: *"experiment how many press throughs if we cap everything at 10ms (so like full algorithm ladder + whatever else to go at a total of 10ms). also verify for 5ms"*. [M100](#m100)'s budget is opened from the stamp the order is charged against, so it already caps the cascade end to end rather than the searches alone, and the question can be put to it directly. Five bench fields, three quality passes a row because **a wall-clock cap makes planning non-deterministic** — the same order on the same arrangement finishes under the wire on one pass and is cut off on the next, so what a cap costs is a distribution.
 
 | cap | pressed, all five fields | orders over budget | worst order | ms an order | marching |
@@ -1142,3 +1144,58 @@ Third time this idea has been costed and the first with numbers on it, so it is 
 **And below twenty milliseconds the cap makes orders dearer, not cheaper.** 2,31 ms an order uncapped, 3,14 at ten and 2,94 at five. Same shape as [M61](#m61), [M100](#m100) and [M105](#m105) for the fourth time: a stage cut off does not end the order, it hands it down to the stage below, and everything below the grid is dearer than the grid. M100's short-circuit only fires where the ladder already has an answer; where it has none the cascade goes on paying.
 
 **This machine is not the game.** The bench is CoreCLR and the editor is Mono, two to four times slower on this arithmetic, so ten milliseconds here buys two to four times the work ten milliseconds buys in play. **The 5 ms row is the better guide to what a 10 ms cap will feel like in the editor** — four extra press-throughs across 320 orders, and a tail still eight times the cap.
+
+### M113 — the cap's escape is in the wrong place, and the worst order is noise
+
+**The designer, reading M112:** *"how is it that the cap at 10 ms has worst order
+43 but cap at 20 ms has worst order at 32 it makes no sense if the cap is 10 ms
+then worst is 10ms isnt it?"*
+
+Two separate answers, and the first is a correction to M112.
+
+**The worst-order column is a single sample and it swings.** Uncapped Broken
+Country read **30,3 ms** in one run of `WhyATighterCapCostsMore` and **47,2 ms**
+in the next — same binary, same setting, nothing changed between them. So M112's
+"43,6 at ten against 32,4 at twenty" is not a real ordering, and reporting it as
+one was over-reading a max. **A maximum over 80 orders has no central tendency to
+average out; it is the tail itself, and one sample of a tail is not a
+measurement.** Read the mean, and read a max only as an order of magnitude.
+
+**But the cap does not bound an order, and that part stands.** Two counters split
+out of the escape gate say why, and both are **zero at every budget**:
+
+| cap | worst ms | ms/order | spent | escaped | coarse won | fine asked | fine won | pose asked |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| off | 29,5 / 47,2 | 2,60 / 2,98 | 0 | 0 | 128 | 44 / 40 | **44 / 40** | **0** |
+| 20 ms | 32,6 / 45,2 | 2,41 / 2,84 | 0 | 0 | 128 | 44 / 40 | 40 / 36 | 4 / 4 |
+| 10 ms | 44,5 / 40,4 | 3,20 / 3,22 | 0 | 0 | 128 | 44 / 40 | 28 / 24 | 16 / 16 |
+| 5 ms | 41,0 / 38,0 | 3,03 / 3,39 | 0 | 0 | 128 | 47 / 48 | **21 / 12** | **19 / 24** |
+
+*(crucible / brokencountry, least of three passes, counters over four passes.)*
+
+`escaped` is the door at `StagedRoutePlanner.Choose` firing; `spent` is the clock
+being out at the moment an order reaches it, whether or not it had an answer to
+leave with. **`spent` is zero**, so the door is not barred by its
+`ladder.Path.Found` condition — **it is never even reached in time**. It sits
+after the coarse grid, which is cheap; the budget is spent in the *fine* tier and
+the pose search, both of which are past it. A cap whose only exit is checked
+before the expensive work cannot bound the expensive work.
+
+**And the mechanism for orders getting dearer is not what M112 guessed.** It is
+not demotion into the fine tier: `fine asked` is flat (44, 44, 44, 47). It is that
+the cap makes the fine grid **fail** rather than skipping it. `RegimentGrid`
+polls `StopNow` every 64 cells and breaks with no route, so a search that would
+have answered now answers nothing — `fine won` **44 → 21** — and the order falls
+through to the tangent graph and the pose search, `pose asked` **0 → 19**. The
+lattice is tens of milliseconds by design. **The cap converts a finished cheap
+search into a failed cheap search plus a whole dear one.**
+
+This is the fifth instance of the shape behind M61, M100, M105 and M112: cutting a
+stage off does not end an order, it hands the order downwards, and everything
+below the grid is dearer than the grid.
+
+**Not fixed here — measured only.** The fix has two halves and neither is taken
+yet: move the escape so it is asked *between* stages rather than once, and make a
+search that gives up on the clock say so, so the cascade can stop rather than
+step down. `OutOfTimeAtTheGrid` also never reset with the other counters, so any
+earlier table that read it was reading every pass since the process began; fixed.
