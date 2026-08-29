@@ -179,6 +179,124 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// What capping a whole order at a few milliseconds does to the routes.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The designer: <i>"experiment how many press throughs if we cap
+        /// everything at 10ms ... also verify for 5ms"</i>. The budget is opened
+        /// from the stamp the order is charged against, so it caps the cascade
+        /// end to end - ladder, crab, grid, tangents, lattice - and not the
+        /// searches alone.
+        /// </para>
+        /// <para>
+        /// <b>Read the pressed column, and then read the spread beside it.</b> A
+        /// wall-clock cap makes planning <i>non-deterministic</i>: the same
+        /// order on the same arrangement can finish under the wire on one pass
+        /// and be cut off on the next, so what a cap costs is a distribution and
+        /// not a number. Three quality passes per row, and both ends reported.
+        /// </para>
+        /// <para>
+        /// <b>And this machine is not the game.</b> The bench runs on CoreCLR
+        /// and the editor on Mono, which is two to four times slower on this
+        /// kind of arithmetic - so ten milliseconds here buys two to four times
+        /// the work ten milliseconds buys in the editor. The 5 ms row is the
+        /// better guide to what a 10 ms cap will feel like in play, and the 2 ms
+        /// row is not idle curiosity either.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one - it plans every " +
+                     "bench field forty-five times over and drives a global lever while it runs.")]
+        public void WhatCappingAWholeOrderCosts()
+        {
+            float was = Marching.SearchBudgetMs;
+
+            try
+            {
+                foreach (string warm in AllFields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"cap",-8}{"field",-16}{"ms/order",10}{"worst ms",10}" +
+                    $"{"routed",14}{"pressed",14}{"unwalkable",14}{"over budget",14}{"route s",12}");
+                _out.WriteLine(new string('-', 112));
+
+                foreach (float cap in new[] { 0f, 20f, 10f, 5f, 2f })
+                {
+                    Marching.SearchBudgetMs = cap;
+
+                    foreach (string field in AllFields)
+                    {
+                        var rows = new List<Row>();
+                        var overrun = new List<int>();
+
+                        for (int pass = 0; pass < 3; pass++)
+                        {
+                            Marching.OrdersOverBudget = 0;
+                            Marching.OrdersPlanned = 0;
+
+                            rows.Add(Measure(field, planner: null, passes: 3));
+
+                            overrun.Add(Marching.OrdersOverBudget);
+                        }
+
+                        _out.WriteLine(
+                            $"{(cap <= 0f ? "off" : $"{cap:0} ms"),-8}{field,-16}" +
+                            $"{Least(rows, r => r.MsPerOrder),10:0.000}" +
+                            $"{Least(rows, r => r.Worst),10:0.0}" +
+                            $"{Spread(rows, r => r.Routed),14}" +
+                            $"{Spread(rows, r => r.Pressed),14}" +
+                            $"{Spread(rows, r => r.Unwalkable),14}" +
+                            $"{Both(overrun),14}" +
+                            $"{Least(rows, r => r.Seconds),12:0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = was;
+            }
+        }
+
+        private static readonly string[] AllFields =
+            { "crucible", "brokencountry", "longmarch", "greatfield", "sidewaysmile" };
+
+        private static double Least(List<Row> rows, Func<Row, double> of)
+        {
+            double least = double.MaxValue;
+            foreach (Row row in rows) least = Math.Min(least, of(row));
+            return least;
+        }
+
+        /// <summary>Both ends of a count across the passes, or the one if they agree.</summary>
+        private static string Spread(List<Row> rows, Func<Row, int> of)
+        {
+            int low = int.MaxValue, high = int.MinValue;
+
+            foreach (Row row in rows)
+            {
+                low = Math.Min(low, of(row));
+                high = Math.Max(high, of(row));
+            }
+
+            return low == high ? low.ToString() : $"{low}-{high}";
+        }
+
+        private static string Both(List<int> counts)
+        {
+            int low = int.MaxValue, high = int.MinValue;
+
+            foreach (int count in counts)
+            {
+                low = Math.Min(low, count);
+                high = Math.Max(high, count);
+            }
+
+            return low == high ? low.ToString() : $"{low}-{high}";
+        }
+
+        /// <summary>
         /// How many candidate places a march actually reaches, against the cap
         /// that sizes the scratchpad for it.
         /// </summary>

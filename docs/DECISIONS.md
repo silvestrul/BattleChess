@@ -1121,3 +1121,24 @@ It works, and it costs more than it saves, at every setting:
 At a hundred metres of slack it answers **three queries in four from the corridor** and the query time falls by more than half — and the bodies scanned **double**, and the scan costs more than the query saved. The exchange rate is the whole finding and it is not close to favourable: one avoided query saves about 2,3 µs and brings roughly seventeen extra bodies with it, at about 0,14 µs each. It is a loss at 10 m and a bigger loss at 100, on every field, monotonically. `routed`, `pressed` and the seconds of marching are identical at every setting, so nothing about the answers is in question — only the price.
 
 Third time this idea has been costed and the first with numbers on it, so it is now closed rather than merely doubted. The reason it looked promising after [M109](#m109) — a corridor that no longer carries the widest radius on the field is cheap enough to widen — is true and beside the point: the cost was never the width of the query, it was the length of the list it hands back.
+
+<a id="m112"></a>
+**M112** — The designer: *"experiment how many press throughs if we cap everything at 10ms (so like full algorithm ladder + whatever else to go at a total of 10ms). also verify for 5ms"*. [M100](#m100)'s budget is opened from the stamp the order is charged against, so it already caps the cascade end to end rather than the searches alone, and the question can be put to it directly. Five bench fields, three quality passes a row because **a wall-clock cap makes planning non-deterministic** — the same order on the same arrangement finishes under the wire on one pass and is cut off on the next, so what a cap costs is a distribution.
+
+| cap | pressed, all five fields | orders over budget | worst order | ms an order | marching |
+|---|---|---|---|---|---|
+| **off** | **1** | 0 | 29,0 ms | 2,31 | — |
+| 20 ms | 1 | 10–14 of 320 | 32,4 | 2,34 | unchanged |
+| **10 ms** | **2** | 30–34 | **43,6** | 3,14 | −0,3% |
+| **5 ms** | **5** | 117–125 | 38,7 | 2,94 | −1,4% |
+| 2 ms | **64–67** | 518–524 | 3,3 | 1,07 | **−15%** |
+
+**The answer to the question asked: almost none.** At ten milliseconds the whole bench gains **one** shoulder-through, on the Great Field, and every order still routes — 80/80/80/40/40. At five it gains four, and the marching is 1,4% shorter, which is press-throughs cutting corners and not routes improving. Only at two does it collapse: sixty-odd of 320 orders shouldering through their own, and the 15% drop in marching is that and nothing else.
+
+**Two things the experiment turned up that were not asked for, and both matter more than the answer.**
+
+**The cap does not cap.** At a ten-millisecond budget the worst single order is **43,6 ms**, and at five it is 38,7. `Marching.StopNow` is polled at the round loop of `RouteSearch`, every 64 expansions of its ledger and every 64 cells of the grid A\* — and nowhere else. Raising a field, restamping it, smoothing a route, the arch and the crab and every `IsClearLine` inside them run to completion whatever the clock says. So the budget bounds the *searches* and the entry says "the cascade", and on the tail — which is the only place a budget is for — it is out by four times.
+
+**And below twenty milliseconds the cap makes orders dearer, not cheaper.** 2,31 ms an order uncapped, 3,14 at ten and 2,94 at five. Same shape as [M61](#m61), [M100](#m100) and [M105](#m105) for the fourth time: a stage cut off does not end the order, it hands it down to the stage below, and everything below the grid is dearer than the grid. M100's short-circuit only fires where the ladder already has an answer; where it has none the cascade goes on paying.
+
+**This machine is not the game.** The bench is CoreCLR and the editor is Mono, two to four times slower on this arithmetic, so ten milliseconds here buys two to four times the work ten milliseconds buys in play. **The 5 ms row is the better guide to what a 10 ms cap will feel like in the editor** — four extra press-throughs across 320 orders, and a tail still eight times the cap.

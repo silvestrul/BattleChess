@@ -411,6 +411,20 @@ namespace BattleChess.Rules
         /// and an expansion is not much more, so asking every time would be a
         /// measurable share of the thing it is trying to bound.
         /// </remarks>
+        /// <summary>Orders that ran past their budget, on this thread.</summary>
+        /// <remarks>
+        /// The budget is opened from the same stamp the order is charged
+        /// against, so it covers the whole cascade and not the searches alone -
+        /// which is what makes "cap everything at ten milliseconds" a thing that
+        /// can be asked of it. This says how often the cap actually bit, which
+        /// no other counter does: <see cref="StagedRoutePlanner"/>'s counts only
+        /// the one place that short-circuits on it.
+        /// </remarks>
+        [ThreadStatic] public static int OrdersOverBudget;
+
+        /// <summary>Orders planned, on this thread, so the count above has a denominator.</summary>
+        [ThreadStatic] public static int OrdersPlanned;
+
         internal static bool OutOfTime() =>
             _deadline != 0L && System.Diagnostics.Stopwatch.GetTimestamp() > _deadline;
 
@@ -513,6 +527,9 @@ namespace BattleChess.Rules
             }
             finally
             {
+                OrdersPlanned++;
+                if (OutOfTime()) OrdersOverBudget++;
+
                 // Cleared, or a later plan on this pooled thread would inherit a
                 // deadline that expired before it began and give up at once.
                 _deadline = 0L;
