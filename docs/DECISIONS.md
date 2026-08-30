@@ -1354,3 +1354,44 @@ legs and lost monotonically, because *"the cost was never the width of the query
 it was the length of the list"*. Fewer queries, then, rather than cheaper ones —
 which means the arch, and which is a change to how a way round is found rather
 than to what it costs. Not taken here.
+
+### M114c — the arch is not the dearest step; it is the dearest *survivor*
+
+**The designer:** *"so wayaround is the most expensive?"*. Not in an ordinary
+order, and the difference is self time against inclusive time — which is exactly
+the distinction [M114b]'s table was too quick with.
+
+An uncapped pass, eighty orders, by **self** time — the work a step does itself
+rather than the work it calls:
+
+| step | crucible self | brokencountry self | share |
+|---|---:|---:|---:|
+| `GridExpand` | 58,7 ms | 75,3 ms | **30% / 33%** |
+| `NearQuery` | 40,6 | 46,8 | 21% / 21% |
+| `BodyScan` | 39,8 | 43,2 | 20% / 19% |
+| `FieldMark` | 14,3 | 14,4 | 7% / 6% |
+| `ClearLine` | 10,7 | 12,4 | 5% / 5% |
+| **`WayRound`** | **7,8** | **7,6** | **4% / 3%** |
+| `Ladder` | 1,7 | 1,8 | 1% / 1% |
+| total | 197,3 | 227,8 | |
+
+**The arch's own work is three to four per cent of an order.** Its inclusive 55,6
+ms is large, but inclusive time is what a step *and everything under it* cost, and
+what is under the arch is clearance queries — which the grid stages ask too, in
+larger numbers. Reading 87% off an inclusive column and calling the arch expensive
+was reading a delegation as a cost.
+
+**The dearest single step is `GridExpand` at 30–33%**, and the dearest *thing* is
+not a step at all: `NearQuery` + `BodyScan` together are **39–41% of every order**,
+17 728 and 20 288 calls, asked by every stage that exists.
+
+**So the arch is the dearest survivor rather than the dearest step.** [M114b]'s
+number was taken with the budget at a hundredth of a millisecond, where the grid,
+the fine tier and the lattice have all been gated away and only the ladder is
+left. Under a cap the arch is 87% of what remains; uncapped it is 4% of what
+runs. Both true, and only one of them is an answer to *what costs the most*.
+
+**Which does not change where the lever is, only its name.** Fewer clearance
+queries is the same conclusion [M114b] reached and [M111] failed at from the other
+side, and it is worth more than the arch alone suggested: at 39–41% of an order it
+is the largest single thing in the profile after the grid's own expansion.

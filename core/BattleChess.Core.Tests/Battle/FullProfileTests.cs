@@ -215,13 +215,6 @@ namespace BattleChess.Tests.Battle
                     Marching.SearchBudgetMs = was;
                     Row whole = Measure(field, planner: null, passes: 3);
 
-                    Marching.SearchBudgetMs = 0.01f;
-
-                    BattleState probed = BenchScenariosTests.Load(field);
-                    PlanningProfile.Start();
-                    BenchScenariosTests.OrderEverybody(probed, null);
-                    PlanningProfile.Stop();
-
                     _out.WriteLine(string.Empty);
                     _out.WriteLine($"=== {field} ===");
                     _out.WriteLine(
@@ -231,6 +224,27 @@ namespace BattleChess.Tests.Battle
                         $"    the floor{floor.MsPerOrder,7:0.000} ms an order, " +
                         $"worst {floor.Worst,6:0.0} ms   " +
                         $"({floor.MsPerOrder / whole.MsPerOrder:0%} of an ordinary order)");
+
+                    // Uncapped first, so the two tables below are a whole order
+                    // and then the part of it no gate can prevent.
+                    Marching.SearchBudgetMs = was;
+
+                    BattleState open = BenchScenariosTests.Load(field);
+                    PlanningProfile.Start();
+                    BenchScenariosTests.OrderEverybody(open, null);
+                    PlanningProfile.Stop();
+
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(PlanningProfile.Report(
+                        $"    a whole order - {field}, no cap"));
+
+                    Marching.SearchBudgetMs = 0.01f;
+
+                    BattleState probed = BenchScenariosTests.Load(field);
+                    PlanningProfile.Start();
+                    BenchScenariosTests.OrderEverybody(probed, null);
+                    PlanningProfile.Stop();
+
                     _out.WriteLine(string.Empty);
                     _out.WriteLine(PlanningProfile.Report(
                         $"    what the floor is made of - {field} at a 0,01 ms budget"));
