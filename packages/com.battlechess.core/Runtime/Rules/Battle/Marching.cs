@@ -1568,6 +1568,16 @@ namespace BattleChess.Rules
                 PlanningProfile.Tally(PlanningProfile.Step.NearYield, all.Count);
                 if (all.Count == 0) PlanningProfile.Tally(PlanningProfile.Step.NearEmpty);
 
+                // M119's ceiling. A check where nothing was ever near the leg is
+                // a check a field lookup could have answered without a query or
+                // a scan, because an unmarked cell means no body overlaps a
+                // mover standing on it. Counted rather than acted on: what is
+                // wanted first is the share, since the share times what the
+                // query and the scan cost is the most the idea can ever be
+                // worth, and four things in this family have already been built
+                // before their ceiling was known.
+                bool anybodyNear = false;
+
                 for (int u = 0; u < all.Count; u++)
                 {
                     UnitInstance other = all[u];
@@ -1592,6 +1602,11 @@ namespace BattleChess.Rules
                             span * span)
                             continue;
                     }
+
+                    // Past the distance filter, so this body is genuinely beside
+                    // the leg and the check could not have been answered by
+                    // "nothing is near here".
+                    anybodyNear = true;
 
                     if (WhereItIsStanding(body, travel, other)) continue;
 
@@ -1625,10 +1640,15 @@ namespace BattleChess.Rules
                     // how far along it was met.
                     if (Sweep.Touches(body, travel, other.Shape))
                     {
+                        PlanningProfile.Tally(PlanningProfile.Step.ClearLineBlocked);
                         blocker = other;
                         return false;
                     }
                 }
+
+                PlanningProfile.Tally(anybodyNear
+                    ? PlanningProfile.Step.ClearLineSomebodyNear
+                    : PlanningProfile.Step.ClearLineNobodyNear);
             }
 
             // The ground last, and it is worth saying why, because it used to be

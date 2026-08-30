@@ -1612,5 +1612,40 @@ leg is wholly unmarked, no body is near it and there is nothing to scan.
 **The prior is poor and should be said out loud.** That would be the fifth attempt
 in this family. What would make it different from the four that lost is that it
 removes the query rather than narrowing it — but the ceiling on it is exactly the
-share of clearance checks that touch no marked cell, and **nobody has measured
-that share.** Measure the ceiling before building anything.
+share of clearance checks that touch no marked cell. **So that was measured first,
+before anything was built.**
+
+### M119a — the ceiling is five per cent, and three quarters of every check is a refusal
+
+Every clearance check on every bench field, sorted by what it found:
+
+| field | checks | nobody near | share | somebody near, clear | **blocked** | query+scan | **ceiling** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| crucible | 17 728 | 2 249 | 12,7% | 2 033 | **13 446 (75,8%)** | 37,8% | **4,8%** |
+| broken country | 20 288 | 2 860 | 14,1% | 1 864 | **15 564 (76,7%)** | 36,3% | **5,1%** |
+| long march | 11 323 | 1 478 | 13,1% | 1 192 | **8 653 (76,4%)** | 49,6% | **6,5%** |
+| great field | 6 156 | 821 | 13,3% | 710 | **4 625 (75,1%)** | 33,7% | **4,5%** |
+| sideways mile | 5 461 | 747 | 13,7% | 664 | **4 050 (74,2%)** | 30,9% | **4,2%** |
+
+**The answer to the question asked: the ceiling is 4,2% to 6,5% of an order**, and
+the cell walk that would replace the query has to come out of that, so the real
+figure is lower and possibly nothing. Only one clearance check in eight has nobody
+near it. **Not worth building**, and that is now a measurement rather than a
+guess — which is the whole point of asking before building, after four in a row
+that were built first.
+
+**But the table answers a question nobody asked, and it is the larger one.
+Three quarters of every clearance check in the game finds a blocker** — 74% to
+77%, on every field, at every size. The planner is not mostly checking legs that
+work; it is mostly discovering that the legs it invented do not.
+
+That is not a micro-optimisation to be found in `UnitIndex` or `Sweep`. It says
+**the candidate generators propose four legs for every one that survives**, and it
+puts the five losses in this family in their proper light: [M95], [M111], [M116],
+[M118] and now [M119] were all attempts to make a wasted question cheaper to ask.
+The question itself is the waste.
+
+Where that leads — fewer and better candidates from the arch and the tangent
+graph, rather than a faster answer to each — is a change to how a way round is
+found, so it is the designer's to direct and is not taken here. But it is where
+the next real saving is, and the size of it is 76% of 31–50% of every order.

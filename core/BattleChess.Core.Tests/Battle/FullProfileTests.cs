@@ -179,6 +179,94 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// The most a field-answered clearance check could ever be worth.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [M119]. Before building a fifth thing in the family that [M95],
+        /// [M111], [M116] and [M118] all lost, measure what it could win at
+        /// best.
+        /// </para>
+        /// <para>
+        /// A clearance check where <b>no body was ever near the leg</b> is one a
+        /// field lookup could answer without a query or a scan, because an
+        /// unmarked cell means no body overlaps a mover standing on it. So the
+        /// ceiling is that share of checks times what the query and the scan
+        /// cost, and the cell walk that would replace them has to come out of
+        /// it.
+        /// </para>
+        /// <para>
+        /// <b>The share of checks is not the share of time.</b> A check with
+        /// nobody near still pays a full <c>NearQuery</c> and a walk over
+        /// whatever the buckets offered, so it is not a cheap check - but it is
+        /// not the dear one either, since it does no sweep. Both columns are
+        /// reported and the honest ceiling is between them.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatAFieldAnsweredClearanceCheckCouldBeWorth()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+
+            try
+            {
+                Marching.SearchBudgetMs = 0f;
+
+                _out.WriteLine(
+                    $"{"field",-16}{"checks",10}{"nobody near",13}{"share",8}" +
+                    $"{"somebody",10}{"blocked",9}{"query+scan",12}{"ceiling",9}");
+                _out.WriteLine(new string('-', 87));
+
+                foreach (string field in AllFields)
+                {
+                    BenchScenariosTests.OrderEverybody(BenchScenariosTests.Load(field), null);
+
+                    BattleState probed = BenchScenariosTests.Load(field);
+
+                    PlanningProfile.Start();
+                    BenchScenariosTests.OrderEverybody(probed, null);
+                    PlanningProfile.Stop();
+
+                    long none = PlanningProfile.CallsTo(PlanningProfile.Step.ClearLineNobodyNear);
+                    long some = PlanningProfile.CallsTo(PlanningProfile.Step.ClearLineSomebodyNear);
+                    long hit = PlanningProfile.CallsTo(PlanningProfile.Step.ClearLineBlocked);
+
+                    long checks = none + some + hit;
+
+                    // What the two steps a field lookup would replace cost, as a
+                    // share of everything timed.
+                    double whole = 0d;
+                    for (int i = 0; i < PlanningProfile.Steps; i++)
+                        whole += PlanningProfile.SelfMilliseconds((PlanningProfile.Step)i);
+
+                    double scan =
+                        PlanningProfile.SelfMilliseconds(PlanningProfile.Step.NearQuery) +
+                        PlanningProfile.SelfMilliseconds(PlanningProfile.Step.BodyScan);
+
+                    double share = checks > 0L ? (double)none / checks : 0d;
+
+                    _out.WriteLine(
+                        $"{field,-16}{checks,10:N0}{none,13:N0}{share,8:0.0%}" +
+                        $"{some,10:N0}{hit,9:N0}" +
+                        $"{(whole > 0d ? scan / whole : 0d),12:0.0%}" +
+                        $"{(whole > 0d ? share * scan / whole : 0d),9:0.0%}");
+                }
+
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(
+                    "    ceiling = share of checks with nobody near x what the query and");
+                _out.WriteLine(
+                    "    scan cost. The cell walk that would replace them comes out of it,");
+                _out.WriteLine(
+                    "    so the real figure is below this and never above it.");
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+        /// <summary>
         /// What testing a body against the line, rather than only its bucket,
         /// costs and saves.
         /// </summary>

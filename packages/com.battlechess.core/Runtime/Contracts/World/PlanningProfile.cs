@@ -329,6 +329,23 @@ namespace BattleChess.Contracts
             NearSifted,
 
             /// <summary>
+            /// Clearance checks where no body was near the leg at all, so the
+            /// whole query and scan produced the answer "clear" from nothing -
+            /// M119's ceiling.
+            /// </summary>
+            ClearLineNobodyNear,
+
+            /// <summary>
+            /// Clearance checks where a body was near enough to test but none
+            /// blocked. Together with the above and the refusals, these are
+            /// every clearance check there is.
+            /// </summary>
+            ClearLineSomebodyNear,
+
+            /// <summary>Clearance checks that found a blocker.</summary>
+            ClearLineBlocked,
+
+            /// <summary>
             /// One bucket the index opened to answer a query. Counted only.
             /// </summary>
             /// <remarks>
