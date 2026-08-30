@@ -1262,3 +1262,47 @@ zero on both fields at every budget**, so the hole is real but unreached. Refusi
 those orders outright would leave a regiment standing still because planning was
 slow — a rule about what the game does rather than what it costs, and the
 designer's to settle.
+
+### M114a — the floor under the cap, measured by driving the cap to nothing
+
+**The designer:** *"so if the full search is capped to 2ms how do you have worst
+ms at 3.7 then"*. The same question as before and it deserves a number rather
+than a mechanism, so the cap was swept to where it cannot matter.
+
+| cap | worst ms | ms/order | pressed | 2nd cast |
+|---|---:|---:|---:|---:|
+| off | 57,0 / 37,3 | 2,35 / 2,70 | 0 | 0 |
+| 10 ms | 18,2 / 18,5 | 2,01 / 2,17 | 4 | 0 |
+| 2 ms | 3,4 / 3,2 | 1,06 / 1,02 | 21 / 30 | 0 |
+| 1 ms | 2,0 / 3,0 | 0,74 / 0,71 | 32 | 0 |
+| 0,5 ms | 2,3 / 2,3 | 0,74 / 0,71 | 32 | 0 |
+| 0,1 ms | 2,7 / 2,6 | 0,73 / 0,71 | 32 | 0 |
+| **0,01 ms** | **2,0 / 2,4** | **0,74 / 0,71** | 32 | 0 |
+
+**The floor is about 2 ms on the worst order and 0,71 ms on the average, and no
+cap can go below it.** From 1 ms downwards every column is identical: the same
+32 press-throughs, the same 0,71 ms an order, the same worst. A budget of a
+hundredth of a millisecond buys exactly what a budget of one buys, which is the
+definition of a floor.
+
+**What is in it is the ladder, and the ladder cannot be gated by this design.**
+Every gate hands back *what the ladder proved*, so the ladder has to have run
+before the first gate can be asked. Smoothing and the fronts pass sit the other
+side of `Choose` in `Cast` and are outside the gates for the same reason — they
+run on the answer, not on the way to it. So an order costs one whole ladder, one
+smoothing pass and one fronts pass whatever the clock says, and a 2 ms cap
+produces 3,2 ms because that is the floor plus whatever stage had already begun.
+
+**A correction to [M114]'s reasoning, though not to its numbers.** That entry
+reasoned about `Cast` running twice under the M94a arrival licence. The counter
+says `ArrivalAsked` is **0 at every budget on both fields** — the first cast
+answers, so the second never happens here. The floor is one cast, not two.
+
+**Below 2 ms the setting stops being a budget and becomes a switch.** At 1 ms and
+under, 32 orders press through and 96 bodies end up unwalkable — the cascade is
+being skipped wholesale rather than bounded. **2 ms is the lowest setting that
+still plans anything**, and 10 ms remains the sensible operating point.
+
+Lowering the floor further means interrupting the ladder itself, which means
+deciding what a regiment does when even the straight-line check has not finished
+— a rule about the game rather than about its cost, and the designer's to settle.

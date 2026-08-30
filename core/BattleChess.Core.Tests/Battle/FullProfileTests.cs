@@ -207,7 +207,8 @@ namespace BattleChess.Tests.Battle
         /// </para>
         /// </remarks>
         [Fact(Skip = "A record of a measurement rather than a check on one - " +
-                     "it orders two bench fields sixty times over at five budgets.")]
+                     "it orders two bench fields a hundred and eight times over " +
+                     "at nine budgets.")]
         public void WhyATighterCapCostsMore()
         {
             float was = Marching.SearchBudgetMs;
@@ -221,10 +222,11 @@ namespace BattleChess.Tests.Battle
                 _out.WriteLine(
                     $"{"cap",-8}{"field",-15}{"worst ms",9}{"ms/order",9}{"over",6}" +
                     $"{"routed",8}{"pressed",8}{"unwalk",7}" +
-                    $"{"coarse",7}{"fine",6}{"graphs",7}{"pose",6}{"nothing",8}");
+                    $"{"coarse",7}{"fine",6}{"graphs",7}{"pose",6}{"nothing",8}" +
+                    $"{"2nd cast",10}");
                 _out.WriteLine(new string('-', 108));
 
-                foreach (float cap in new[] { 0f, 20f, 10f, 5f, 2f })
+                foreach (float cap in new[] { 0f, 20f, 10f, 5f, 2f, 1f, 0.5f, 0.1f, 0.01f })
                 {
                     Marching.SearchBudgetMs = cap;
 
@@ -251,14 +253,15 @@ namespace BattleChess.Tests.Battle
                         }
 
                         _out.WriteLine(
-                            $"{(cap <= 0f ? "off" : $"{cap:0} ms"),-8}{field,-15}" +
+                            $"{(cap <= 0f ? "off" : $"{cap:0.##} ms"),-8}{field,-15}" +
                             $"{worst,9:0.0}{perOrder,9:0.000}{over,6}" +
                             $"{last.Routed,8}{last.Pressed,8}{last.Unwalkable,7}" +
                             $"{StagedRoutePlanner.StoppedBeforeCoarse,7}" +
                             $"{StagedRoutePlanner.StoppedBeforeFine,6}" +
                             $"{StagedRoutePlanner.StoppedBeforeGraphs,7}" +
                             $"{StagedRoutePlanner.StoppedBeforePose,6}" +
-                            $"{StagedRoutePlanner.OutOfTimeWithNothing,8}");
+                            $"{StagedRoutePlanner.OutOfTimeWithNothing,8}" +
+                            $"{StagedRoutePlanner.ArrivalAsked,10}");
                     }
 
                     _out.WriteLine(string.Empty);
