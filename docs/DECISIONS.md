@@ -1306,3 +1306,51 @@ still plans anything**, and 10 ms remains the sensible operating point.
 Lowering the floor further means interrupting the ladder itself, which means
 deciding what a regiment does when even the straight-line check has not finished
 — a rule about the game rather than about its cost, and the designer's to settle.
+
+### M114b — the floor taken apart: it is the arch, asking who is near a line
+
+**The designer:** *"so the ladder itself is 2ms?"*. No, and [M114a] should not
+have implied it. Profiled at a 0,01 ms budget, where every gate fires at the first
+opportunity and what is left on the clock is by construction only the work no gate
+can prevent:
+
+| | crucible | brokencountry |
+|---|---:|---:|
+| an ordinary order, uncapped | 2,364 ms | 2,612 ms |
+| **the floor, an order** | **0,740 ms** | **0,719 ms** |
+| the floor, worst single order | 2,0 ms | 2,4 ms |
+| the floor as a share of an order | 31% | 28% |
+
+**So the ladder is about three quarters of a millisecond, not two.** Two
+milliseconds is its *worst single order* over eighty, and [M113] is the standing
+warning against reading a maximum as a typical cost.
+
+Where the floor's 63,7 ms over eighty orders goes, inclusive:
+
+| step | incl ms | share of the floor |
+|---|---:|---:|
+| `Plan` | 63,7 | the floor itself |
+| `Ladder` | 60,7 | **95%** |
+| `WayRound` — the arch | 55,5 | **87%** |
+| `Crab` | 2,7 | 4% |
+| `Rung1` — the straight line | 0,8 | 1% |
+| `SmoothRoute` | 0,3 | **0,5%** |
+
+**Two corrections to [M114a], both in the same direction.** Smoothing and the
+fronts pass are not in the floor in any meaningful sense — 0,3 ms across eighty
+orders, half a percent — so naming them alongside the ladder was wrong. And the
+ladder is not a flat cost either: **the arch is 87% of it and the straight line is
+1%**.
+
+**And the floor is not really an algorithm, it is a query count.** `BodyScan` self
+22,4 ms and `NearQuery` self 19,0 ms are together **65% of the floor**, over
+**8 986 calls in eighty orders — 112 clearance queries an order**, nearly all of
+them from the arch. What no gate can prevent is not "planning"; it is asking *who
+is near this line* a hundred and twelve times.
+
+That is the target for anyone lowering the floor, and it is a target with a
+history: [M111] tried to make those queries cheaper by keeping a corridor between
+legs and lost monotonically, because *"the cost was never the width of the query,
+it was the length of the list"*. Fewer queries, then, rather than cheaper ones —
+which means the arch, and which is a change to how a way round is found rather
+than to what it costs. Not taken here.

@@ -179,6 +179,70 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// What the floor under the cap is actually made of.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The designer, after [M114a]: <i>"so the ladder itself is 2ms?"</i>.
+        /// [M114a] measured a floor and called it the ladder without taking it
+        /// apart, which is one step short of an answer. This profiles a pass with
+        /// the budget set to a hundredth of a millisecond, so every gate fires at
+        /// the first opportunity and what remains on the clock is, by
+        /// construction, only the work no gate can prevent.
+        /// </para>
+        /// <para>
+        /// Read the average and the worst as different questions. A floor that
+        /// matters to a frame is the average; a floor that matters to a stutter
+        /// is the worst, and [M113] says one sample of a worst is not a
+        /// measurement, so the worst here is the worst of several passes.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatTheFloorIsMadeOf()
+        {
+            float was = Marching.SearchBudgetMs;
+
+            try
+            {
+                foreach (string field in new[] { "crucible", "brokencountry" })
+                {
+                    Measure(field, planner: null, passes: 1);
+
+                    Marching.SearchBudgetMs = 0.01f;
+
+                    Row floor = Measure(field, planner: null, passes: 3);
+
+                    Marching.SearchBudgetMs = was;
+                    Row whole = Measure(field, planner: null, passes: 3);
+
+                    Marching.SearchBudgetMs = 0.01f;
+
+                    BattleState probed = BenchScenariosTests.Load(field);
+                    PlanningProfile.Start();
+                    BenchScenariosTests.OrderEverybody(probed, null);
+                    PlanningProfile.Stop();
+
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine($"=== {field} ===");
+                    _out.WriteLine(
+                        $"    uncapped {whole.MsPerOrder,7:0.000} ms an order, " +
+                        $"worst {whole.Worst,6:0.0} ms");
+                    _out.WriteLine(
+                        $"    the floor{floor.MsPerOrder,7:0.000} ms an order, " +
+                        $"worst {floor.Worst,6:0.0} ms   " +
+                        $"({floor.MsPerOrder / whole.MsPerOrder:0%} of an ordinary order)");
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(PlanningProfile.Report(
+                        $"    what the floor is made of - {field} at a 0,01 ms budget"));
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = was;
+            }
+        }
+
+        /// <summary>
         /// Why a tighter cap makes the worst order dearer rather than cheaper.
         /// </summary>
         /// <remarks>
