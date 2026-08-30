@@ -1649,3 +1649,65 @@ Where that leads — fewer and better candidates from the arch and the tangent
 graph, rather than a faster answer to each — is a change to how a way round is
 found, so it is the designer's to direct and is not taken here. But it is where
 the next real saving is, and the size of it is 76% of 31–50% of every order.
+
+### M120 — who asks the checks that fail, and the smoother's forty-three casts a shortcut
+
+**The designer:** *"so how do we generate fewer candidates?"*. [M119a] said three
+quarters of every clearance check finds a blocker but not whose, which is the
+difference between *the arch invents bad arcs* and *the grid proposes routes that
+will not walk*. So each check is charged to the innermost open stage rather than
+to the check.
+
+| asked by | share of checks | refusal rate | share of all refusals |
+|---|---:|---:|---:|
+| `WayRound` — the arch | 41–49% | **81,5–85,5%** | 45–52% |
+| `SmoothRoute` | 36–42% | **95,8–97,7%** | 46–54% |
+| `Plan` (the ladder's own casts) | 9% | 2–4% | 0,3% |
+| `GridFine` | 5–8% | 0–2% | 0,1% |
+| `Crab`, `Rung1`, `ThreadGap` | ~1% | 63–100% | 1–4% |
+
+**Two stages are 85–90% of every clearance check in the game and 93–99% of every
+refusal.** The grid, which [M115] showed to be the dearest *step*, barely refuses
+anything: its checks pass. Nothing else is worth looking at.
+
+**The smoother is the surprise, and its loop explains it exactly.**
+
+| field | casts tried | shortcuts taken | casts per shortcut | stretches with nothing clear |
+|---|---:|---:|---:|---:|
+| crucible | 6 344 | **148** | **43** | 218 |
+| broken country | 8 608 | **140** | **62** | 229 |
+| great field | 2 352 | **83** | **28** | 114 |
+
+`Smooth` scans **furthest first** — from the last waypoint backwards, taking the
+first clear cast — on the stated reasoning that *"stopping at the first one that
+happens to be clear would keep most of the wobble it exists to remove"*. That
+reasoning is sound against a *nearest-first, take-first-success* scan. It is not
+sound against **extending outwards and stopping at the first failure**, which
+returns the furthest point that is clear *contiguously* — the same answer wherever
+clearance is monotone along the route, and it is monotone whenever the route bends
+round a body, which is why the route bent.
+
+The cost of the difference is the whole finding. Furthest-first pays one failed
+clearance check for every waypoint it walks past, so a route whose only available
+shortcut is short pays for the entire route. **Forty-three casts to make one
+shortcut on the crucible, sixty-two on Broken Country.** And on the stretches
+where nothing is clear at all — 218 of 366 on the crucible — it walks the whole
+route and buys nothing.
+
+**Measured, the outward scan reaching the same points costs 33,8% to 40,5% of the
+casts.** That is a **60–66% cut in smoothing casts**, which is 36–42% of all
+clearance checks, which are 31–50% of an order: **roughly 7–12% of every order,
+for a change of loop direction.**
+
+**Not taken here.** It is not free: the two scans differ wherever clearance is
+non-monotone along a route, and where they differ the outward one keeps a
+waypoint the furthest-first one would have dropped. That is a route-quality
+question — [W10] says a cheaper number is not a better route — and it wants the
+gate [M119a] implies: the same routes, or a stated count of routes that changed
+and why. The designer's call.
+
+**And the arch is the other half**, at 81,5–85,5% refused over 8 646 casts. Same
+shape, different cause: the smoother tries too many *ends* for one start, and the
+arch proposes too many *arcs*. Cheaper pruning before the swept test — a bounding
+test on whether the arc's corridor can clear the blocker at all — is the obvious
+first thing to measure there, and it has not been measured.

@@ -179,6 +179,89 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// Which stage asks the clearance checks, and which stage's are refused.
+        /// </summary>
+        /// <remarks>
+        /// [M119a] found three quarters of every clearance check finds a
+        /// blocker, and could not say whose. That is the difference between
+        /// <i>the arch invents bad arcs</i> and <i>the grid proposes routes that
+        /// will not walk</i>, and the two want opposite fixes - so the checks are
+        /// charged to the innermost open stage rather than to the check.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhichStageAsksTheChecksThatFail()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+
+            try
+            {
+                Marching.SearchBudgetMs = 0f;
+
+                foreach (string field in new[] { "crucible", "brokencountry", "greatfield" })
+                {
+                    BenchScenariosTests.OrderEverybody(BenchScenariosTests.Load(field), null);
+
+                    Marching.ChecksBy = null;
+                    Marching.BlockedBy = null;
+                    RouteSmoothing.CastsTried = 0L;
+                    RouteSmoothing.CastsTaken = 0L;
+                    RouteSmoothing.Reached = 0L;
+                    RouteSmoothing.NothingClear = 0L;
+
+                    BattleState probed = BenchScenariosTests.Load(field);
+
+                    PlanningProfile.Start();
+                    BenchScenariosTests.OrderEverybody(probed, null);
+                    PlanningProfile.Stop();
+
+                    long[] checks = Marching.ChecksBy ?? Array.Empty<long>();
+
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(
+                        $"    smoothing: {RouteSmoothing.CastsTried:N0} casts tried, " +
+                        $"{RouteSmoothing.CastsTaken:N0} taken, " +
+                        $"{RouteSmoothing.NothingClear:N0} stretches with nothing clear");
+                    _out.WriteLine(
+                        $"    an outward scan reaching the same points would cost " +
+                        $"{RouteSmoothing.Reached + RouteSmoothing.CastsTaken:N0} casts " +
+                        $"({(double)(RouteSmoothing.Reached + RouteSmoothing.CastsTaken) / Math.Max(1L, RouteSmoothing.CastsTried):0.0%} of them)");
+                    long[] blocked = Marching.BlockedBy ?? Array.Empty<long>();
+
+                    long allChecks = 0L, allBlocked = 0L;
+
+                    foreach (long n in checks) allChecks += n;
+                    foreach (long n in blocked) allBlocked += n;
+
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(
+                        $"=== {field}: {allChecks:N0} checks, {allBlocked:N0} refused " +
+                        $"({(allChecks > 0L ? (double)allBlocked / allChecks : 0d):0.0%}) ===");
+                    _out.WriteLine(
+                        $"{"asked by",-18}{"checks",10}{"share",8}{"refused",10}" +
+                        $"{"refusal rate",14}{"of all refusals",17}");
+                    _out.WriteLine(new string('-', 77));
+
+                    var order = new List<int>();
+                    for (int i = 0; i < checks.Length; i++)
+                        if (checks[i] > 0L) order.Add(i);
+
+                    order.Sort((a, b) => checks[b].CompareTo(checks[a]));
+
+                    foreach (int i in order)
+                        _out.WriteLine(
+                            $"{(PlanningProfile.Step)i,-18}{checks[i],10:N0}" +
+                            $"{(double)checks[i] / allChecks,8:0.0%}{blocked[i],10:N0}" +
+                            $"{(double)blocked[i] / checks[i],14:0.0%}" +
+                            $"{(allBlocked > 0L ? (double)blocked[i] / allBlocked : 0d),17:0.0%}");
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+        /// <summary>
         /// The most a field-answered clearance check could ever be worth.
         /// </summary>
         /// <remarks>

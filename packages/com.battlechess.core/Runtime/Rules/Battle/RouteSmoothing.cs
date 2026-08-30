@@ -73,6 +73,41 @@ namespace BattleChess.Rules
         internal static bool SmoothTheRoute = true;
 
         /// <summary>
+        /// What the furthest-first scan costs, against what a scan that
+        /// extended outwards while clear would have cost.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [M119a] charged three quarters of every clearance check in the game
+        /// to a refusal, and [M120] charged 36-42% of all checks to this pass
+        /// with a <b>97% refusal rate</b>. The shape of the loop explains it:
+        /// furthest-first walks back from the last waypoint and takes the first
+        /// clear cast, so when the achievable shortcut is short it pays a failed
+        /// clearance check for every point it walks past.
+        /// </para>
+        /// <para>
+        /// Counted rather than changed, because the alternative - extending
+        /// outwards and stopping at the first failure - gives a different answer
+        /// wherever clearance is not monotone along the route, and how often
+        /// that happens is a fact about arrangements rather than about loops.
+        /// <c>Reached</c> against <c>Tried</c> is the whole question.
+        /// </para>
+        /// </remarks>
+        [System.ThreadStatic] internal static long CastsTried;
+
+        /// <summary>How many of those casts were clear and cheaper.</summary>
+        [System.ThreadStatic] internal static long CastsTaken;
+
+        /// <summary>
+        /// How many points a taken shortcut skipped, summed - which is also
+        /// what an outward scan would have paid in casts.
+        /// </summary>
+        [System.ThreadStatic] internal static long Reached;
+
+        /// <summary>Stretches where no cast at all was clear.</summary>
+        [System.ThreadStatic] internal static long NothingClear;
+
+        /// <summary>
         /// Drops every waypoint the regiment can see past, keeping the fronts
         /// with the points that survive.
         /// </summary>
@@ -139,8 +174,12 @@ namespace BattleChess.Rules
                 // Furthest first: the point of the pass is the long cast, and
                 // stopping at the first one that happens to be clear would
                 // keep most of the wobble it exists to remove.
+                bool tookOne = false;
+
                 for (int to = points.Count - 1; to > at + 1; to--)
                 {
+                    CastsTried++;
+
                     Facing front = Marching.AlongTheLine(points[at], points[to], unit.Facing);
 
                     // A cast that starts where the regiment stands is asked
@@ -156,7 +195,21 @@ namespace BattleChess.Rules
 
                     furthest = to;
                     reached = front;
+                    tookOne = true;
                     break;
+                }
+
+                if (tookOne)
+                {
+                    CastsTaken++;
+
+                    // What an outward scan would have spent to reach the same
+                    // point: one cast a step, plus the one that failed.
+                    Reached += furthest - at;
+                }
+                else
+                {
+                    NothingClear++;
                 }
 
                 keptPoints.Add(points[furthest]);

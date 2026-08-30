@@ -425,6 +425,38 @@ namespace BattleChess.Rules
         /// <summary>Orders planned, on this thread, so the count above has a denominator.</summary>
         [ThreadStatic] public static int OrdersPlanned;
 
+        /// <summary>
+        /// Clearance checks, and the ones that found a blocker, charged to the
+        /// stage that asked rather than to the check itself.
+        /// </summary>
+        /// <remarks>
+        /// [M119a] found that <b>three quarters of every clearance check in the
+        /// game finds a blocker</b>, which says the candidate generators propose
+        /// about four legs for every one that survives - but not <i>which</i>
+        /// generator. That is the difference between "the arch invents bad arcs"
+        /// and "the grid proposes routes that will not walk", and they want
+        /// opposite fixes. Filled only while the profiler is running.
+        /// </remarks>
+        [ThreadStatic] internal static long[]? ChecksBy;
+
+        /// <summary>The refusals among those, by the same stage.</summary>
+        [ThreadStatic] internal static long[]? BlockedBy;
+
+        private static void Charge(bool blocked)
+        {
+            if (!PlanningProfile.Running) return;
+
+            int steps = PlanningProfile.Steps;
+
+            ChecksBy ??= new long[steps];
+            BlockedBy ??= new long[steps];
+
+            int who = (int)PlanningProfile.Charged();
+
+            ChecksBy[who]++;
+            if (blocked) BlockedBy[who]++;
+        }
+
         internal static bool OutOfTime() =>
             _deadline != 0L && System.Diagnostics.Stopwatch.GetTimestamp() > _deadline;
 
@@ -1641,6 +1673,7 @@ namespace BattleChess.Rules
                     if (Sweep.Touches(body, travel, other.Shape))
                     {
                         PlanningProfile.Tally(PlanningProfile.Step.ClearLineBlocked);
+                        Charge(blocked: true);
                         blocker = other;
                         return false;
                     }
@@ -1649,6 +1682,8 @@ namespace BattleChess.Rules
                 PlanningProfile.Tally(anybodyNear
                     ? PlanningProfile.Step.ClearLineSomebodyNear
                     : PlanningProfile.Step.ClearLineNobodyNear);
+
+                Charge(blocked: false);
             }
 
             // The ground last, and it is worth saying why, because it used to be

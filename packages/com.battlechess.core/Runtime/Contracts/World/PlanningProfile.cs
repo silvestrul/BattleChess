@@ -517,6 +517,41 @@ namespace BattleChess.Contracts
 
         private static double ToMilliseconds(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
 
+        /// <summary>
+        /// The innermost open step that is a stage rather than a shared leaf.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A clearance check is asked from a dozen places and charged, in the
+        /// ordinary profile, to none of them: <c>ClearLine</c> is one row however
+        /// it was reached. This walks out through the shared leaves to whichever
+        /// stage actually asked, so a count can be attributed to the arch, the
+        /// grid, the smoother or the gate that verifies a route.
+        /// </para>
+        /// <para>
+        /// Measurement only. It reads a stack the profiler already keeps, and
+        /// returns <see cref="Step.Plan"/> when nothing else is open.
+        /// </para>
+        /// </remarks>
+        public static Step Charged()
+        {
+            if (_stack == null) return Step.Plan;
+
+            for (int i = _depth - 1; i >= 0; i--)
+            {
+                var step = (Step)_stack[i];
+
+                if (step == Step.ClearLine || step == Step.BodyScan ||
+                    step == Step.NearQuery || step == Step.GroundClear ||
+                    step == Step.PassableTable)
+                    continue;
+
+                return step;
+            }
+
+            return Step.Plan;
+        }
+
         /// <summary>How many steps there are, so a caller can size a snapshot.</summary>
         public static int Steps => (int)Step.Count;
 
