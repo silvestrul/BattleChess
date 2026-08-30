@@ -1293,6 +1293,47 @@ namespace BattleChess.Rules
             return 0;
         }
 
+        /// <summary>
+        /// Whether the staging scan walks outward once instead of restarting at
+        /// every stand-off it tries.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M125], and the stage it is about is [M123]'s.</b>
+        /// <see cref="TryStageForDirectRun"/> tries stand-offs outward in
+        /// two-metre steps to twice the mover's bounding radius, and asks
+        /// <see cref="EscapesWithoutDeepening"/> about each - which re-walks the
+        /// whole leg <i>from where the regiment stands</i> every time. The
+        /// samples are a triangular sum: 1 + 2 + ... + n. For an 80x40 spearman
+        /// n is 45 and for 229x114 cavalry it is 128, so a cavalry order walks
+        /// 8 256 samples a push direction against a spearman's 1 035, each one a
+        /// <c>FormationFits</c> and an overlap fraction against every friendly
+        /// regiment on the field. Measured in play, that stage is 76 to 103 ms of
+        /// a single order and it runs before the cascade's first gate, so the
+        /// search budget cannot touch it.
+        /// </para>
+        /// <para>
+        /// Every stand-off on one push lies on the same ray and is walked on the
+        /// same front, so the leg to the second is the leg to the first with more
+        /// on the end. One outward walk carrying the overlaps forward answers all
+        /// of them: about 130 samples where there are 8 256.
+        /// </para>
+        /// <para>
+        /// <b>It is not free, and the reason is the sample grid.</b> The scan
+        /// today spaces a leg's samples by dividing <i>that leg</i> into
+        /// two-metre pieces, so a stand-off at 7,3 m and one at 9,3 m sample
+        /// different ground. A single walk has one grid for all of them. It also
+        /// makes the refusal monotone, which the continuous rule already is - a
+        /// walk that may not deepen an overlap cannot be refused at nine metres
+        /// and allowed at eleven - so a stand-off that escapes today after a
+        /// nearer one failed is a sampling artefact rather than an answer.
+        /// </para>
+        /// </remarks>
+        internal static bool WalkTheStagingOnce;
+
+        /// <summary>Poses the staging scan tested. Measurement only.</summary>
+        [ThreadStatic] internal static long StagingSamples;
+
         private static bool TryStageForDirectRun(
             BattleState battle, UnitInstance unit, Vec2 destination, out Plan plan)
         {
@@ -1323,6 +1364,9 @@ namespace BattleChess.Rules
             Vec2 towardsGoal = destination - unit.Position;
             if (!towardsGoal.IsNearZero)
                 pushes.Add(towardsGoal * -1f);
+
+            if (WalkTheStagingOnce)
+                return StagesWalkingOutwardsOnce(battle, unit, destination, pushes, out plan);
 
             foreach (Vec2 push in pushes)
             {
@@ -1355,6 +1399,126 @@ namespace BattleChess.Rules
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// The same stand-offs, tried in the same order, over one walk out
+        /// instead of one walk for each. See <see cref="WalkTheStagingOnce"/>.
+        /// </summary>
+        private static bool StagesWalkingOutwardsOnce(
+            BattleState battle, UnitInstance unit, Vec2 destination, List<Vec2> pushes, out Plan plan)
+        {
+            plan = default;
+
+            var own = new List<UnitInstance>();
+
+            foreach (UnitInstance other in battle.UnitsOnField())
+            {
+                if (other.Id == unit.Id || other.Owner != unit.Owner) continue;
+                own.Add(other);
+            }
+
+            var lapping = new float[own.Count];
+
+            foreach (Vec2 push in pushes)
+            {
+                if (push.IsNearZero) continue;
+
+                Vec2 direction = push.Normalised();
+                float least = MathF.Max(EgressSpacingMetres, push.Length + EgressSpacingMetres);
+                float furthest = unit.Footprint.BoundingRadius * 2f + least;
+
+                Vec2 first = unit.Position + direction;
+                Facing escapeFront = Facing.Towards(unit.Position, first);
+
+                // The carry starts where the regiment is standing, exactly as
+                // each separate walk starts it today.
+                var standing = new OrientedRect(unit.Position, escapeFront, unit.Footprint);
+
+                for (int i = 0; i < own.Count; i++)
+                    lapping[i] = OrientedRect.OverlapFraction(standing, own[i].Shape);
+
+                bool clear = true;
+
+                // The ground short of the first stand-off, which every stand-off
+                // on this push has to cross and which none of them is.
+                for (float before = EgressSpacingMetres; before < least - 0.001f;
+                     before += EgressSpacingMetres)
+                {
+                    if (!StillEscaping(battle, unit, unit.Position + direction * before,
+                                       escapeFront, own, lapping))
+                    {
+                        clear = false;
+                        break;
+                    }
+                }
+
+                if (!clear) continue;
+
+                for (float distance = least; distance <= furthest; distance += EgressSpacingMetres)
+                {
+                    Vec2 stage = unit.Position + direction * distance;
+
+                    // Refusal is monotone along the ray, so the first stand-off
+                    // that cannot be reached ends this push rather than skipping
+                    // one candidate.
+                    if (!StillEscaping(battle, unit, stage, escapeFront, own, lapping)) break;
+
+                    Facing runFront = Facing.Towards(stage, destination);
+
+                    if (!Marching.IsClearLine(battle, unit, stage, destination, runFront))
+                        continue;
+
+                    float walked = Vec2.Distance(unit.Position, stage) + Vec2.Distance(stage, destination);
+                    PathResult path = PathResult.Success(
+                        new[] { unit.Position, stage, destination }, Array.Empty<Coord>(),
+                        walked, walked, 0);
+
+                    plan = new Plan(path, new Facing?[] { null, escapeFront, runFront }, false);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// One pose along the walk out: whether it stands, and whether it has
+        /// entered or deepened anything since the last one.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="lapping"/> is carried and written through, which is
+        /// the whole saving: it is what the repeated walk recomputes from the
+        /// beginning every time.
+        /// </remarks>
+        private static bool StillEscaping(
+            BattleState battle, UnitInstance unit, Vec2 at, Facing front,
+            List<UnitInstance> own, float[] lapping)
+        {
+            StagingSamples++;
+
+            if (!battle.FormationFits(unit, at, front)) return false;
+
+            var pose = new OrientedRect(at, front, unit.Footprint);
+
+            for (int i = 0; i < own.Count; i++)
+            {
+                float now = OrientedRect.OverlapFraction(pose, own[i].Shape);
+                float before = lapping[i];
+
+                if (before > AllowedContactFraction)
+                {
+                    if (now > before + SeparationTolerance) return false;
+                }
+                else if (now > AllowedContactFraction)
+                {
+                    return false;
+                }
+
+                lapping[i] = now;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1558,6 +1722,8 @@ namespace BattleChess.Rules
 
             for (int i = 1; i <= samples; i++)
             {
+                StagingSamples++;
+
                 Vec2 at = Vec2.Lerp(from, to, (float)i / samples);
                 if (!battle.FormationFits(unit, at, front)) return false;
 

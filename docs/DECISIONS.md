@@ -1966,3 +1966,69 @@ third time: **the sweep count is not the bill**. [M120] found two stages holding
 and both are worth nothing much. The bill was never in the geometry those stages
 ask for. It was in a stage [M120] could not see, because the profile charged
 clearance checks to stages and `Staging` asked none.
+
+### M125 — the staging scan walked once, which halves the played order and changes nothing
+
+**The designer:** *"do it behind a lever see what routes change"*, of [M123]'s
+finding: `TryStageForDirectRun` is 76 to 103 ms of a single order in play, on a
+stage that runs before the cascade's first gate so the search budget cannot touch
+it.
+
+**The lever is `StagedRoutePlanner.WalkTheStagingOnce`.** Every stand-off on one
+push direction lies on the same ray and is walked on the same front, so the leg to
+the second stand-off is the leg to the first with more on the end. Today's scan
+restarts `EscapesWithoutDeepening` at the regiment's feet for each of them, which
+makes the samples a triangular sum: 1 + 2 + ... + n, n being 45 for an 80x40
+spearman and **128 for 229x114 cavalry**. One outward walk carrying the overlaps
+forward answers every stand-off on that push.
+
+**Two things it was expected to change, and neither did.** The scans sample
+different ground - today's divides *each leg* into two-metre pieces, so
+consecutive stand-offs test different points, while one walk has one grid. And a
+single walk makes the refusal monotone, where today a stand-off can escape after a
+nearer one failed. Both are real differences in what is asked. Measured:
+
+| field | orders | same | changed | won't walk | samples | of them |
+|---|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | 40 | **40** | **0** | 5/5 | 59 663 | **11,6%** |
+| greatfield | 40 | 40 | 0 | 0/0 | 2 728 | 100,0% |
+| sidewaysmile | 40 | 40 | 0 | 2/2 | 2 482 | 78,2% |
+| crucible | 80 | 80 | 0 | 0/0 | 0 | - |
+| brokencountry | 80 | 80 | 0 | 0/0 | 0 | - |
+| longmarch | 80 | 80 | 0 | 0/0 | 0 | - |
+
+**Three hundred and sixty routes of three hundred and sixty identical**, the same
+count of routes the executor refuses in both arms, and not a second of difference
+in what any of them costs to walk. The monotone tightening never fired: no
+stand-off on any bench field escapes after a nearer one has failed, which says the
+sampling artefact it removes is one the arrangements do not produce. **The scan
+never runs at all on the three parade-ground fields** - nothing is lapping
+anybody on a start line, which is [M123]'s point restated as a zero.
+
+| field | per stand-off | once | change |
+|---|---:|---:|---:|
+| **thecrowdedwing** | **2,640 ms** | **1,295** | **-50,9%** |
+| sidewaysmile | 0,380 | 0,366 | -3,8% |
+| crucible | 0,448 | 0,449 | +0,1% |
+| brokencountry | 0,500 | 0,503 | +0,6% |
+| longmarch | 0,182 | 0,184 | +0,9% |
+| greatfield | 0,374 | 0,381 | +1,9% |
+
+Taken again: **-52,9%** on the crowded wing, the sample counts identical to the
+digit. The played arrangement's orders halve; the fields where the scan does not
+run move by noise.
+
+**Left off, and it is one word to turn on.** The measurement has no route
+question left in it - which is the opposite of [M121], where the lever was built
+on the same instruction and left off *because* a third of the routes changed. What
+is left is the ordinary risk that six fields are not every arrangement, and the
+failure mode of being wrong is a different stand-off chosen and still put to the
+same gates.
+
+**And it is worth naming what this cost to find.** [M120] measured which stages
+ask the clearance checks that fail, found two holding 93-99% of every refusal,
+and both halves of what it proposed - [M121]'s outward smoothing scan and
+[M124]'s distance proof - were built and are worth nothing much. The stage that
+was actually the bill asks no clearance checks at all, had no clock on it, and
+could not appear in that table for either reason. **A profile can only rank what
+it measures**, and the thing missing from it was not a small row.

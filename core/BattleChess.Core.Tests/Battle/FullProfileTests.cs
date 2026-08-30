@@ -1609,6 +1609,148 @@ namespace BattleChess.Tests.Battle
             }
         }
 
+        /// <summary>
+        /// What walking the staging scan out once instead of once per stand-off
+        /// saves, and which routes it changes.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M125].</b> [M123] found the staging scan to be 76 to 103 ms of a
+        /// single order in play, on a stage that runs before the cascade's first
+        /// gate. <see cref="StagedRoutePlanner.WalkTheStagingOnce"/> collapses
+        /// its triangular sum into one walk.
+        /// </para>
+        /// <para>
+        /// The routes are the question, not the clock, and the reason is
+        /// stated plainly: the two scans sample different ground. Today's spaces
+        /// a leg's samples by dividing <i>that leg</i> into two-metre pieces, so
+        /// consecutive stand-offs test different points; one walk has one grid.
+        /// So this reports what changed and what the change was worth to walk,
+        /// exactly as [M121] did.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatWalkingTheStagingOnceChanges()
+        {
+            bool wasOnce = StagedRoutePlanner.WalkTheStagingOnce;
+            float wasBudget = Marching.SearchBudgetMs;
+
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"orders",8}{"same",6}{"changed",9}{"dearer",8}" +
+                    $"{"walking",10}{"worst one",11}{"unwalk",8}{"samples",11}{"of them",9}");
+                _out.WriteLine(new string('-', 96));
+
+                foreach (string field in AllProvingFields)
+                {
+                    // Both arms warmed on this field before either is read.
+                    StagedRoutePlanner.WalkTheStagingOnce = false;
+                    StagedWalk(field, out _);
+                    StagedRoutePlanner.WalkTheStagingOnce = true;
+                    StagedWalk(field, out _);
+
+                    StagedRoutePlanner.WalkTheStagingOnce = false;
+                    List<Route> back = StagedWalk(field, out long backSamples);
+
+                    StagedRoutePlanner.WalkTheStagingOnce = true;
+                    List<Route> ahead = StagedWalk(field, out long aheadSamples);
+
+                    int same = 0, changed = 0, dearer = 0;
+                    int backUnwalkable = 0, aheadUnwalkable = 0;
+                    double extra = 0d, walked = 0d, worst = 0d;
+
+                    for (int i = 0; i < back.Count; i++)
+                    {
+                        if (!back[i].Walks) backUnwalkable++;
+                        if (!ahead[i].Walks) aheadUnwalkable++;
+
+                        walked += back[i].Seconds;
+
+                        if (SameRoute(back[i].Points, ahead[i].Points)) { same++; continue; }
+
+                        changed++;
+
+                        double delta = ahead[i].Seconds - back[i].Seconds;
+                        extra += delta;
+
+                        if (delta > 0d) dearer++;
+
+                        if (back[i].Seconds > 0d)
+                            worst = Math.Max(worst, delta / back[i].Seconds);
+                    }
+
+                    _out.WriteLine(
+                        $"{field,-16}{back.Count,8}{same,6}{changed,9}{$"{dearer}/{changed}",8}" +
+                        $"{$"{extra / Math.Max(1d, walked):+0.0%;-0.0%;0.0%}",10}" +
+                        $"{worst,11:+0.0%;-0.0%;0.0%}{$"{backUnwalkable}/{aheadUnwalkable}",8}" +
+                        $"{backSamples,11:N0}" +
+                        $"{aheadSamples / (double)Math.Max(1L, backSamples),9:0.0%}");
+                }
+
+                // And the clock, both arms warmed, least of three.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine($"{"field",-16}{"per stand-off",15}{"once",10}{"change",10}");
+                _out.WriteLine(new string('-', 51));
+
+                foreach (string field in AllProvingFields)
+                {
+                    double each = double.MaxValue, once = double.MaxValue;
+
+                    for (int pass = 0; pass < 3; pass++)
+                    {
+                        StagedRoutePlanner.WalkTheStagingOnce = false;
+                        each = Math.Min(each, Clocked(field, out _, out _));
+
+                        StagedRoutePlanner.WalkTheStagingOnce = true;
+                        once = Math.Min(once, Clocked(field, out _, out _));
+                    }
+
+                    _out.WriteLine(
+                        $"{field,-16}{each,15:0.000}{once,10:0.000}{once / each - 1d,10:+0.0%;-0.0%;0.0%}");
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+                StagedRoutePlanner.WalkTheStagingOnce = wasOnce;
+            }
+        }
+
+        /// <summary>Every order on a field, with the staging samples counted.</summary>
+        private static List<Route> StagedWalk(string field, out long samples)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            StagedRoutePlanner.StagingSamples = 0L;
+
+            var routes = new List<Route>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Plan plan = Marching.PlanTo(
+                    battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                routes.Add(plan.Path.Found
+                    ? new Route(
+                        plan.Path.Waypoints.ToArray(),
+                        Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold),
+                        StagedRoutePlanner.WalksCleanly(battle, unit, plan))
+                    : new Route(Array.Empty<Vec2>(), 0d, walks: true));
+            }
+
+            samples = StagedRoutePlanner.StagingSamples;
+
+            return routes;
+        }
+
         private static readonly string[] AllProvingFields =
             { "thecrowdedwing", "crucible", "brokencountry", "greatfield", "longmarch", "sidewaysmile" };
 
