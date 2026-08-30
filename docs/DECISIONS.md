@@ -1455,3 +1455,72 @@ for the arrangements that need it. Worth knowing before anybody optimises it.
 **`Rung1` is 0,000 ms on every field.** The straight line, which answers a good
 share of all orders, costs nothing measurable. What costs is proving it clear,
 which is charged to `ClearLine` and its children rather than to the rung.
+
+### M116 — the corridor refused a second time, and this time we know why
+
+**The designer:** *"limiting search radius (every) to 4x straight line length on
+all sides"*. [M105] refused this, but only tight — a quarter and one times the span
+— and it lost for a reason [M114] has since fixed, so it was worth asking again and
+worth asking wide. The corridor is a half-width, so ×1 already admits a square of
+side twice the march.
+
+| corridor | crucible ms/order | worst | broken country | great field | cells outside | pressed |
+|---|---:|---:|---:|---:|---:|---:|
+| unbounded | 2,316 | 35,7 | 2,605 | 2,090 | 0 | 0 |
+| ×4 | 2,383 | 34,6 | 2,688 | 2,111 | **0** | 0 |
+| ×2 | 2,381 | 29,5 | 2,685 | 2,124 | **0** | 0 |
+| ×1 | 2,375 | 29,4 | 2,689 | 2,103 | 2 352 | 0 / 2 |
+| ×0,5 | **13,072** | **98,6** | 3,965 | 4,292 | 23 008 | 0 / 12 |
+
+**At ×4 and ×2 the corridor refuses not one cell on any field.** That is the whole
+answer, and it is a fact about the search rather than about the width: the grid A\*
+is goal-directed, so it does not wander off the straight line and there is nothing
+out there to prune. The 3% the bounded rows lose is the corridor test itself,
+charged on every cell for nothing.
+
+**Tighten it until it does bite and it bites the route, not the cost.** At ×1 it
+refuses 2 352 cells and the clock does not move, but the great field loses two
+routes to press-throughs. At ×0,5 the crucible goes to 13,072 ms an order — 5,6
+times worse — with a worst order of 98,6 ms, reproducing [M105] exactly.
+
+**So the grid's cost is not breadth, it is depth.** `GridExpand` is dear because it
+settles many cells *near* the line through congested ground, not because it
+searches far from it. No bound on where it may look can help; only a bound on how
+long it may look, which is what [M114]'s gates already are. **Do not have this idea
+a third time.**
+
+### M117 — where a capped order's time actually goes, and what would make 5 ms bind
+
+**The designer:** *"can't we somehow start the order and if it exceeds a threshold
+(5ms) it presses through? or something that caps worst order so it cannot go over
+5ms"*.
+
+The per-order profile from [M115], run again at a 5 ms budget. The worst order on
+the crucible costs **7,794 ms** and is made of:
+
+| step | worst ms | share | calls in that order |
+|---|---:|---:|---:|
+| `NearQuery` | 2,357 | **30,2%** | 943 |
+| `GridExpand` | 1,959 | 25,1% | 2 |
+| `BodyScan` | 1,884 | 24,2% | 943 |
+| `ClearLine` | 0,576 | 7,4% | 943 |
+| `SmoothRoute` | 0,207 | 2,7% | 3 |
+| `WayRound` | 0,176 | 2,3% | 1 |
+| `GridFieldFine` | 0,142 | 1,8% | 1 |
+
+**The overshoot is not one dear un-interruptible stage. It is 943 clearance
+checks, 62% of the order.** `IsClearLine` polls nothing, so a stage part-way
+through testing nine hundred legs runs every one of them whatever the clock says,
+and the gates between stages never get asked.
+
+**Which makes a hard 5 ms cap much cheaper to build than it looked.** The earlier
+worry was that a field raise cannot be abandoned half way without leaving a field
+stamped current and wrong ([M104]). That is still true and still forbids polling
+there — but `GridFieldFine` is 0,142 ms of the worst order, 1,8%, so it is not
+what needs stopping. **The clearance loops are, and they are safe to abandon**:
+`WalksCleanly`, `RouteSmoothing`, `RouteFronts` and the candidate loops in
+`WaysRound` all hold no cached state, so an abandoned one returns *not clear* or
+*unsmoothed* and nothing downstream is corrupted.
+
+Not built — it changes what a regiment does when the clock beats it, which is the
+designer's rule to set, not a cost question.

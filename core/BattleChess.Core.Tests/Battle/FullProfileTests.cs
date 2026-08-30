@@ -179,6 +179,89 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// What bounding the grid search to a corridor round the straight line
+        /// costs, retried generously and after the gates.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The designer: <i>"limiting search radius (every) to 4x straight line
+        /// length on all sides"</i>. [M105] measured this and refused it, but it
+        /// was tried only <b>tight</b> - a quarter and one times the span - and
+        /// it lost for a reason that has since been fixed: a bounded search that
+        /// fails does not end the order, it hands it to the stages below, and
+        /// everything below the grid is dearer. That is the escalation [M114]'s
+        /// gates now catch.
+        /// </para>
+        /// <para>
+        /// So it is worth asking again, and worth asking wide. [M115] says
+        /// <c>GridExpand</c> is 56% of the worst order against 36% of the
+        /// average, which makes a bound on it the one lever aimed at the tail
+        /// rather than at the mean.
+        /// </para>
+        /// <para>
+        /// The corridor is a <b>half-width</b>, so a fraction of 1 already
+        /// admits a square of side twice the march. Read the pressed and
+        /// unwalkable columns as hard as the clock ones: a corridor that shaves
+        /// the tail by refusing routes has not made anything faster, it has
+        /// made the regiment walk through somebody (W10).
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatBoundingTheGridToACorridorCostsNow()
+        {
+            float wasFraction = RegimentGrid.CorridorFraction;
+            float wasBudget = Marching.SearchBudgetMs;
+
+            string[] fields = { "crucible", "brokencountry", "greatfield" };
+
+            try
+            {
+                Marching.SearchBudgetMs = 0f;
+
+                foreach (string warm in fields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"corridor",-12}{"field",-16}{"ms/order",10}{"worst ms",10}" +
+                    $"{"routed",8}{"pressed",9}{"unwalk",8}{"outside",12}{"route s",10}");
+                _out.WriteLine(new string('-', 95));
+
+                foreach (float fraction in new[] { 0f, 4f, 2f, 1f, 0.5f })
+                {
+                    RegimentGrid.CorridorFraction = fraction;
+
+                    foreach (string field in fields)
+                    {
+                        double worst = 0d, perOrder = double.MaxValue;
+                        Row last = null!;
+
+                        for (int repeat = 0; repeat < 3; repeat++)
+                        {
+                            RegimentGrid.CellsOutsideCorridor = 0;
+
+                            last = Measure(field, planner: null, passes: 2);
+
+                            worst = Math.Max(worst, last.Worst);
+                            perOrder = Math.Min(perOrder, last.MsPerOrder);
+                        }
+
+                        _out.WriteLine(
+                            $"{(fraction <= 0f ? "unbounded" : $"x{fraction:0.##}"),-12}{field,-16}" +
+                            $"{perOrder,10:0.000}{worst,10:0.0}" +
+                            $"{last.Routed,8}{last.Pressed,9}{last.Unwalkable,8}" +
+                            $"{RegimentGrid.CellsOutsideCorridor,12:N0}{last.Seconds,10:0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                RegimentGrid.CorridorFraction = wasFraction;
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+        /// <summary>
         /// Every step of the search in the order it runs, for the average order
         /// and for the dearest single one.
         /// </summary>
@@ -217,15 +300,19 @@ namespace BattleChess.Tests.Battle
         {
             float was = Marching.SearchBudgetMs;
 
-            // Uncapped, and said out loud rather than assumed. The budget is a
-            // static shared with every other test in this assembly, and this
-            // suite is order-sensitive - a record that quietly measured a capped
-            // run because something upstream left the cap set would be worse
-            // than no record at all.
-            Marching.SearchBudgetMs = 0f;
-
             try
             {
+            // Uncapped and then capped at five, because the two answer different
+            // questions. Uncapped says where an order's time goes; capped says
+            // where the time goes that the cap failed to stop, which is the only
+            // thing that can be shortened to make the cap bind (W9).
+            //
+            // Set out loud rather than inherited: the budget is a static shared
+            // with an order-sensitive suite.
+            foreach (float budget in new[] { 0f, 5f })
+            {
+            Marching.SearchBudgetMs = budget;
+
             foreach (string field in AllFields)
             {
                 BattleState battle = BenchScenariosTests.Load(field);
@@ -300,7 +387,9 @@ namespace BattleChess.Tests.Battle
                 average /= Math.Max(1, orders);
 
                 _out.WriteLine(string.Empty);
-                _out.WriteLine($"=== {field}: {orders} orders ===");
+                _out.WriteLine(
+                    $"=== {field}: {orders} orders, " +
+                    $"{(budget <= 0f ? "uncapped" : $"capped at {budget:0} ms")} ===");
                 _out.WriteLine(
                     $"    the average order {average,7:0.000} ms" +
                     $"          the worst {worstTotal,7:0.000} ms  ({worstUnit})");
@@ -339,6 +428,7 @@ namespace BattleChess.Tests.Battle
                 _out.WriteLine(
                     $"{"total",-18}{string.Empty,12}{average,9:0.000}{1d,8:0.0%}" +
                     $"{worstTotal,10:0.000}{1d,9:0.0%}");
+            }
             }
             }
             finally
