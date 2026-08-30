@@ -1395,3 +1395,63 @@ runs. Both true, and only one of them is an answer to *what costs the most*.
 queries is the same conclusion [M114b] reached and [M111] failed at from the other
 side, and it is worth more than the arch alone suggested: at 39–41% of an order it
 is the largest single thing in the profile after the grid's own expansion.
+
+### M115 — the cascade in the order it runs, for the average order and the worst
+
+**The designer:** *"if you run from start to finish, just all the orders, can you
+show me in order every single step of search, both for average and for worst order,
+the cost in ms?"*
+
+Two things the ordinary profile could not answer. It sorts by cost, which says
+*what is dear* and hides *what runs when*; and it is cumulative over a pass, so
+there is no such thing in it as an order, let alone a worst one. `PlanningProfile`
+gained `SelfTicks` and `Calls` snapshots so a run can be cut into orders, and the
+steps are listed in cascade order by hand — an order that exists nowhere else in
+the code, because the cascade's sequence lives in `Choose`'s control flow.
+
+**The worst column is one real order, not a maximum per step.** Each step's own
+worst, taken separately, sums to far more than any order ever cost and describes
+an order that never happened. This is the single dearest order broken down, so the
+column sums to its own total.
+
+Uncapped, and the budget is set to nought inside the record rather than inherited,
+because it is a static shared with an order-sensitive suite.
+
+| field | orders | average | worst | worst was |
+|---|---:|---:|---:|---|
+| crucible | 80 | 2,699 ms | 19,959 ms | Swordsmen |
+| broken country | 80 | 2,757 | 21,339 | Swordsmen |
+| long march | 80 | 1,034 | 5,444 | Archers |
+| great field | 40 | 1,911 | 10,426 | Swordsmen |
+| sideways mile | 40 | 1,872 | 13,727 | Swordsmen |
+
+**The finding is that the average order and the worst order have different
+shapes, and so want different fixes.**
+
+| | average | worst single order |
+|---|---:|---:|
+| `GridExpand` | 11–36% | **20–56%** |
+| `BodyScan` + `NearQuery` | **41–60%** | 22–51% |
+| the ladder, all rungs | 5–9% | 1–4% |
+| `SmoothRoute` | 1–2% | 1–3% |
+
+**The average order is clearance queries** — 137 to 254 of them per order, 41 to
+60% of the clock, spread across every stage. **The worst order is the grid's own
+expansion**: on the Crucible's dearest order `GridExpand` alone is 11,182 ms of
+19,959, **56%**, against 36% of the average. That order asked 930 clearance
+queries against an average of 222.
+
+So the tail is not the average order being unlucky; it is a *different
+distribution of work*. Cheapening the queries would move the average and barely
+touch the stutter; bounding the grid moves the stutter and barely touches the
+average. [M114]'s gates do the second, which is the right lever for the thing a
+player feels.
+
+**Two stages essentially never run.** `TangentGraph` is absent from all five
+fields — zero calls — and `PoseSearch` appears once in 320 orders, on the sideways
+mile. The cascade below the fine grids is, on these arrangements, dead weight kept
+for the arrangements that need it. Worth knowing before anybody optimises it.
+
+**`Rung1` is 0,000 ms on every field.** The straight line, which answers a good
+share of all orders, costs nothing measurable. What costs is proving it clear,
+which is charged to `ClearLine` and its children rather than to the rung.

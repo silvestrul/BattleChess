@@ -495,6 +495,53 @@ namespace BattleChess.Contracts
 
         private static double ToMilliseconds(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
 
+        /// <summary>How many steps there are, so a caller can size a snapshot.</summary>
+        public static int Steps => (int)Step.Count;
+
+        /// <summary>Milliseconds, from a difference of two snapshots.</summary>
+        public static double Milliseconds(long ticks) => ToMilliseconds(ticks);
+
+        /// <summary>
+        /// Copies this thread's running self time, in ticks, into the caller's
+        /// array, so that two snapshots either side of a piece of work give what
+        /// that work alone cost.
+        /// </summary>
+        /// <remarks>
+        /// The profile is otherwise cumulative over a whole run, which answers
+        /// "where did the time go" and cannot answer "which order was the worst
+        /// and what was it doing" - a distribution question that needs the run
+        /// cut into orders. Ticks rather than milliseconds because a difference
+        /// of two conversions rounds twice.
+        /// </remarks>
+        public static void SelfTicks(long[] into)
+        {
+            if (into == null) throw new ArgumentNullException(nameof(into));
+
+            if (_inclusive == null || _inChildren == null)
+            {
+                Array.Clear(into, 0, into.Length);
+                return;
+            }
+
+            for (int i = 0; i < (int)Step.Count && i < into.Length; i++)
+                into[i] = _inclusive[i] - _inChildren[i];
+        }
+
+        /// <summary>The same for call counts.</summary>
+        public static void Calls(long[] into)
+        {
+            if (into == null) throw new ArgumentNullException(nameof(into));
+
+            if (_calls == null)
+            {
+                Array.Clear(into, 0, into.Length);
+                return;
+            }
+
+            for (int i = 0; i < (int)Step.Count && i < into.Length; i++)
+                into[i] = _calls[i];
+        }
+
         /// <summary>The whole measurement as a table, heaviest self time first.</summary>
         /// <param name="title">What was being measured, printed above the table.</param>
         public static string Report(string title)

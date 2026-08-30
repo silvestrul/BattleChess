@@ -179,6 +179,231 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// Every step of the search in the order it runs, for the average order
+        /// and for the dearest single one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The designer: <i>"if you run from start to finish, just all the
+        /// orders, can you show me in order every single step of search, both
+        /// for average and for worst order, the cost in ms?"</i>.
+        /// </para>
+        /// <para>
+        /// Two things the ordinary profile cannot do. It sorts by cost, which
+        /// answers <i>what is dear</i> and hides <i>what runs when</i>; and it is
+        /// cumulative over a whole pass, so there is no such thing in it as an
+        /// order, let alone a worst one. So the steps are listed here in cascade
+        /// order by hand, and the run is cut into orders with a snapshot either
+        /// side of each.
+        /// </para>
+        /// <para>
+        /// <b>The worst column is one real order, not a maximum per step.</b>
+        /// Taking each step's worst separately would give a column that sums to
+        /// far more than any order ever cost and describes no order that
+        /// happened. This is the single dearest order by self time, broken down
+        /// - so the column sums to its total, and the shape of it is the shape
+        /// of the stutter a player would actually feel.
+        /// </para>
+        /// <para>
+        /// The last group is not a stage. <c>ClearLine</c>, <c>BodyScan</c> and
+        /// <c>NearQuery</c> are asked by every stage above and sit at no one
+        /// point in the order, which is the whole reason [M114c] found them to be
+        /// the largest thing in the profile without their being a step anybody
+        /// had thought of as a stage.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void EveryStepInTheOrderItRuns()
+        {
+            float was = Marching.SearchBudgetMs;
+
+            // Uncapped, and said out loud rather than assumed. The budget is a
+            // static shared with every other test in this assembly, and this
+            // suite is order-sensitive - a record that quietly measured a capped
+            // run because something upstream left the cap set would be worse
+            // than no record at all.
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+            foreach (string field in AllFields)
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+
+                int steps = PlanningProfile.Steps;
+
+                long[] before = new long[steps], after = new long[steps];
+                long[] callsBefore = new long[steps], callsAfter = new long[steps];
+
+                double[] total = new double[steps];
+                long[] calls = new long[steps];
+
+                double[] worst = new double[steps];
+                long[] worstCalls = new long[steps];
+                double worstTotal = 0d;
+                string worstUnit = string.Empty;
+
+                var pathfinder = new DirectPathfinder(
+                    battle.Terrain, new TerrainMovementModel(TestContent.Terrain),
+                    TestContent.Terrain);
+
+                // Warm, so the first order is not charged with compiling the
+                // planner it is the first ever to use.
+                foreach (UnitInstance warm in battle.UnitsOnField())
+                    Marching.PlanTo(
+                        battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                int orders = 0;
+
+                PlanningProfile.Start();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    PlanningProfile.SelfTicks(before);
+                    PlanningProfile.Calls(callsBefore);
+
+                    Marching.PlanTo(
+                        battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    PlanningProfile.SelfTicks(after);
+                    PlanningProfile.Calls(callsAfter);
+
+                    orders++;
+
+                    double spent = 0d;
+
+                    for (int i = 0; i < steps; i++)
+                    {
+                        double ms = PlanningProfile.Milliseconds(after[i] - before[i]);
+
+                        total[i] += ms;
+                        calls[i] += callsAfter[i] - callsBefore[i];
+                        spent += ms;
+                    }
+
+                    if (spent <= worstTotal) continue;
+
+                    worstTotal = spent;
+                    worstUnit = unit.Def.DisplayName;
+
+                    for (int i = 0; i < steps; i++)
+                    {
+                        worst[i] = PlanningProfile.Milliseconds(after[i] - before[i]);
+                        worstCalls[i] = callsAfter[i] - callsBefore[i];
+                    }
+                }
+
+                PlanningProfile.Stop();
+
+                double average = 0d;
+                foreach (double ms in total) average += ms;
+                average /= Math.Max(1, orders);
+
+                _out.WriteLine(string.Empty);
+                _out.WriteLine($"=== {field}: {orders} orders ===");
+                _out.WriteLine(
+                    $"    the average order {average,7:0.000} ms" +
+                    $"          the worst {worstTotal,7:0.000} ms  ({worstUnit})");
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(
+                    $"{"step",-18}{"calls/order",12}{"avg ms",9}{"avg %",8}" +
+                    $"{"worst ms",10}{"worst %",9}{"calls",8}");
+                _out.WriteLine(new string('-', 74));
+
+                foreach ((string heading, PlanningProfile.Step[] group) in InCascadeOrder)
+                {
+                    _out.WriteLine($"-- {heading}");
+
+                    foreach (PlanningProfile.Step step in group)
+                    {
+                        int i = (int)step;
+
+                        // A step nothing entered is left out rather than printed
+                        // as a row of noughts: on any one field several stages
+                        // are never reached, and a table of noughts hides the
+                        // rows that matter.
+                        if (calls[i] == 0L) continue;
+
+                        double mean = total[i] / Math.Max(1, orders);
+
+                        _out.WriteLine(
+                            $"{step,-18}{(double)calls[i] / Math.Max(1, orders),12:0.0}" +
+                            $"{mean,9:0.000}{(average > 0d ? mean / average : 0d),8:0.0%}" +
+                            $"{worst[i],10:0.000}" +
+                            $"{(worstTotal > 0d ? worst[i] / worstTotal : 0d),9:0.0%}" +
+                            $"{worstCalls[i],8:N0}");
+                    }
+                }
+
+                _out.WriteLine(new string('-', 74));
+                _out.WriteLine(
+                    $"{"total",-18}{string.Empty,12}{average,9:0.000}{1d,8:0.0%}" +
+                    $"{worstTotal,10:0.000}{1d,9:0.0%}");
+            }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = was;
+            }
+        }
+
+        /// <summary>
+        /// The timed steps in the order the cascade runs them, which is not the
+        /// order they are declared in and is nowhere else written down.
+        /// </summary>
+        private static readonly (string, PlanningProfile.Step[])[] InCascadeOrder =
+        {
+            ("the whole order", new[] { PlanningProfile.Step.Plan }),
+
+            ("1. the ladder", new[]
+            {
+                PlanningProfile.Step.Ladder,
+                PlanningProfile.Step.Rung1,
+                PlanningProfile.Step.WayRound,
+                PlanningProfile.Step.Crab,
+                PlanningProfile.Step.ThreadGap,
+            }),
+
+            ("2. the coarse regiment grid", new[]
+            {
+                PlanningProfile.Step.GridCoarse,
+                PlanningProfile.Step.GridField,
+                PlanningProfile.Step.FieldStamp,
+                PlanningProfile.Step.FieldMark,
+                PlanningProfile.Step.FieldPatch,
+                PlanningProfile.Step.FieldRestamp,
+                PlanningProfile.Step.GridSearch,
+                PlanningProfile.Step.GridExpand,
+                PlanningProfile.Step.GridPull,
+            }),
+
+            ("3. the fine grids", new[]
+            {
+                PlanningProfile.Step.GridFine,
+                PlanningProfile.Step.GridFieldFine,
+                PlanningProfile.Step.GridSearchFine,
+            }),
+
+            ("4. the tangent graph", new[] { PlanningProfile.Step.TangentGraph }),
+
+            ("5. the pose search", new[] { PlanningProfile.Step.PoseSearch }),
+
+            ("6. straightening, on whatever answered", new[]
+            {
+                PlanningProfile.Step.SmoothRoute,
+            }),
+
+            ("asked from every stage above, at no one point in the order", new[]
+            {
+                PlanningProfile.Step.ClearLine,
+                PlanningProfile.Step.BodyScan,
+                PlanningProfile.Step.NearQuery,
+                PlanningProfile.Step.GroundClear,
+                PlanningProfile.Step.PassableTable,
+            }),
+        };
+
+        /// <summary>
         /// What the floor under the cap is actually made of.
         /// </summary>
         /// <remarks>
