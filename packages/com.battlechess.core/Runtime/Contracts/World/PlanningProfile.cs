@@ -292,6 +292,34 @@ namespace BattleChess.Contracts
             /// <summary>Driving straight at the destination from one state, to see if it lands.</summary>
             HybridShot,
 
+            /// <summary>
+            /// Clearing the bodies a regiment is standing in before it sets
+            /// off, and the direct run out of them.
+            /// </summary>
+            /// <remarks>
+            /// Added by [M123]. It runs before the cascade's first gate and was
+            /// the only stage in the whole order that no clock was on, which is
+            /// precisely what made a 381 ms plan in a played game unattributable
+            /// (W7 - a recording has to answer on its own).
+            /// </remarks>
+            Staging,
+
+            /// <summary>
+            /// Walking a finished route leg by leg to see whether it is fit to
+            /// hand to the executor.
+            /// </summary>
+            /// <remarks>
+            /// The gate every stage's answer goes through. Deliberately never
+            /// cut short by the budget - returning "clean" early would claim a
+            /// verification nobody performed - so if it is dear it has to be
+            /// made cheaper rather than gated, and that argument cannot be had
+            /// until it has a number.
+            /// </remarks>
+            WalkCheck,
+
+            /// <summary>Working out the front to hold on each leg of a route.</summary>
+            Fronts,
+
             /// <summary>Swept-rectangle first contact. Counted only.</summary>
             SweepTest,
 
@@ -429,6 +457,53 @@ namespace BattleChess.Contracts
         /// <summary>Whether <i>this</i> thread asked to be measured.</summary>
         [ThreadStatic] private static bool _mine;
 
+        /// <summary>Whether this thread is measuring only the outer stages.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M123].</b> The full profile puts two <see cref="Stopwatch"/>
+        /// reads around every clearance check and every terrain lookup, which
+        /// is millions a plan: fine on a bench that is measuring, ruinous in a
+        /// played game that only wants to know which <i>stage</i> spent the
+        /// time. Coarse mode times the cascade's stages and skips every shared
+        /// leaf, so the cost is about a dozen scopes an order instead of
+        /// millions.
+        /// </para>
+        /// <para>
+        /// A skipped leaf is not lost, it is absorbed: its time lands in the
+        /// self time of whichever stage contains it, which is exactly the
+        /// column the question is asked in. Counts are still kept - a tally is
+        /// one increment and the sweep count is worth having beside the
+        /// milliseconds.
+        /// </para>
+        /// </remarks>
+        [ThreadStatic] private static bool _coarse;
+
+        /// <summary>The steps coarse mode still times.</summary>
+        /// <remarks>
+        /// Every stage the cascade can spend an order in, and nothing that is
+        /// asked from more than one of them. The list is the answer to "which
+        /// stage was it", so a step belongs here exactly when naming it would
+        /// tell somebody where to look next.
+        /// </remarks>
+        private static readonly bool[] Coarsely = BuildCoarse();
+
+        private static bool[] BuildCoarse()
+        {
+            var timed = new bool[(int)Step.Count];
+
+            foreach (Step step in new[]
+            {
+                Step.Plan, Step.Staging, Step.Ladder, Step.WayRound, Step.Crab, Step.Rung1,
+                Step.ThreadGap, Step.CandidatePlaces, Step.Hunt, Step.GrowPlaces,
+                Step.TangentGraph, Step.PoseSearch, Step.HexSearch, Step.PathSmooth,
+                Step.GridCoarse, Step.GridFine, Step.GridExpand, Step.GridPull,
+                Step.HybridSearch, Step.SmoothRoute, Step.WalkCheck, Step.Fronts,
+            })
+                timed[(int)step] = true;
+
+            return timed;
+        }
+
         [ThreadStatic] private static long[]? _inclusive;
         [ThreadStatic] private static long[]? _inChildren;
         [ThreadStatic] private static long[]? _calls;
@@ -460,8 +535,19 @@ namespace BattleChess.Contracts
 
             Reset();
 
+            _coarse = false;
             _mine = true;
             _anyone = true;
+        }
+
+        /// <summary>
+        /// Turns measuring on for the calling thread, over the cascade's stages
+        /// only. See <see cref="_coarse"/>.
+        /// </summary>
+        public static void StartCoarse()
+        {
+            Start();
+            _coarse = true;
         }
 
         /// <summary>
@@ -599,6 +685,89 @@ namespace BattleChess.Contracts
                 into[i] = _calls[i];
         }
 
+        /// <summary>
+        /// Where an order's time went, dearest first, as one line for a game
+        /// log rather than a table for a bench.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M123], and it is the line that was missing.</b> A played session
+        /// recorded six hundred and forty orders, the dearest at 381,7 ms, and
+        /// every one of them reported <c>straight line, nothing searched</c> -
+        /// which is <c>RouteEffort.Places &gt; 0</c>, a fact about the tangent
+        /// graph and about nothing else. The recording could not name the stage
+        /// that spent the time, so the next step had to be guessed at. W7 says
+        /// a recording answers on its own.
+        /// </para>
+        /// <para>
+        /// Self time, because that is the column that sums to the whole: a
+        /// stage's own code with its children's time taken out. A stage nobody
+        /// entered contributes nothing and is not printed, and the tail below
+        /// <paramref name="atLeastShare"/> is summed into "rest" rather than
+        /// listed, so the line stays readable when a plan touched everything.
+        /// </para>
+        /// </remarks>
+        /// <param name="most">How many stages to name before the rest.</param>
+        /// <param name="atLeastShare">
+        /// The share of the whole a stage must reach to be worth naming.
+        /// </param>
+        public static string WhereItWent(int most = 4, double atLeastShare = 0.02)
+        {
+            if (_inclusive == null || _inChildren == null) return "not measured";
+
+            int count = (int)Step.Count;
+            double whole = 0d;
+
+            for (int i = 0; i < count; i++)
+                whole += ToMilliseconds(_inclusive[i] - _inChildren[i]);
+
+            if (whole <= 0d) return "nothing measured";
+
+            var order = new int[count];
+            for (int i = 0; i < count; i++) order[i] = i;
+
+            Array.Sort(order, (a, b) =>
+                (_inclusive[b] - _inChildren[b]).CompareTo(_inclusive[a] - _inChildren[a]));
+
+            var said = new StringBuilder();
+            double rest = 0d;
+            int named = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                int step = order[i];
+                double self = ToMilliseconds(_inclusive[step] - _inChildren[step]);
+
+                if (self <= 0d) continue;
+
+                if (named >= most || self < whole * atLeastShare)
+                {
+                    rest += self;
+                    continue;
+                }
+
+                if (named > 0) said.Append(", ");
+
+                said.Append((Step)step).Append(' ').Append(self.ToString("0.0"));
+
+                // The call count only where it explains the milliseconds: one
+                // dear visit and a thousand cheap ones are the same number of
+                // milliseconds and completely different problems.
+                long calls = _calls![step];
+                if (calls > 1L) said.Append('x').Append(calls);
+
+                named++;
+            }
+
+            if (rest > 0.05d)
+                said.Append(named > 0 ? ", " : string.Empty).Append("rest ").Append(rest.ToString("0.0"));
+
+            long sweeps = _calls![(int)Step.SweepTest];
+            if (sweeps > 0L) said.Append(" | ").Append(sweeps).Append(" sweeps");
+
+            return said.ToString();
+        }
+
         /// <summary>The whole measurement as a table, heaviest self time first.</summary>
         /// <param name="title">What was being measured, printed above the table.</param>
         public static string Report(string title)
@@ -671,7 +840,8 @@ namespace BattleChess.Contracts
 
             internal Scope(Step step)
             {
-                if (!_anyone || !_mine || _depth >= MaxDepth)
+                if (!_anyone || !_mine || _depth >= MaxDepth ||
+                    (_coarse && !Coarsely[(int)step]))
                 {
                     _step = 0;
                     _began = 0L;

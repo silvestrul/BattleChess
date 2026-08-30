@@ -523,7 +523,10 @@ namespace BattleChess.Rules
             // for the same reason: this pass moves no waypoint, but it does
             // change the shape the sweep is taken at, so it has to answer to
             // the gate the route already passed.
-            Plan facing = RouteFronts.Applied(battle, unit, straightened);
+            Plan facing;
+
+            using (PlanningProfile.Measure(PlanningProfile.Step.Fronts))
+                facing = RouteFronts.Applied(battle, unit, straightened);
 
             if (ReferenceEquals(straightened.Hold, facing.Hold)) return straightened;
 
@@ -573,7 +576,13 @@ namespace BattleChess.Rules
             // clear the bodies currently lapped, then leave on a leg that can
             // reach the order directly.  More complicated detours remain the
             // ladder/tangent planners' job, where their candidates are richer.
-            if (TryStageForDirectRun(battle, unit, destination, out Plan staged))
+            bool stages;
+            Plan staged;
+
+            using (PlanningProfile.Measure(PlanningProfile.Step.Staging))
+                stages = TryStageForDirectRun(battle, unit, destination, out staged);
+
+            if (stages)
             {
                 Staged++;
                 return staged;
@@ -1095,8 +1104,18 @@ namespace BattleChess.Rules
         internal static int BadFirstLeg, BadLaterLeg, BadPressed, BadNoRoute;
 
         /// <summary>Whether the executor can walk every leg the plan claims.</summary>
-        internal static bool WalksCleanly(BattleState battle, UnitInstance unit, Plan plan) =>
-            FirstBadLeg(battle, unit, plan) == 0;
+        /// <remarks>
+        /// Timed since [M123]. It is asked up to three times an order, over
+        /// every leg of the answer, and it is one of the two places the budget
+        /// deliberately never interrupts - so it is a candidate for a slow order
+        /// that no clock could see.
+        /// </remarks>
+        internal static bool WalksCleanly(BattleState battle, UnitInstance unit, Plan plan)
+        {
+            using var _profile = PlanningProfile.Measure(PlanningProfile.Step.WalkCheck);
+
+            return FirstBadLeg(battle, unit, plan) == 0;
+        }
 
         /// <summary>Whether a leg that would not wheel was walked held instead.</summary>
         internal static bool AllowSidewalk = true;

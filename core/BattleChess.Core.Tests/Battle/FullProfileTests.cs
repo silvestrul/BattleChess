@@ -1349,6 +1349,375 @@ namespace BattleChess.Tests.Battle
         private static readonly string[] AllFields =
             { "crucible", "brokencountry", "longmarch", "greatfield", "sidewaysmile" };
 
+        /// <summary>
+        /// What an order costs by the size of the body being ordered, and which
+        /// stage the dear ones spend it in.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M123], and it is a reproduction rather than a sweep.</b> A played
+        /// session on The Great Field recorded 640 orders. Split by regiment:
+        /// Spearmen (80x40 m) averaged 1,6 ms, Swordsmen (100x50) 2,6, and
+        /// <b>Cavalry (229x114) fifty point seven</b> - twelve per cent of the
+        /// orders and seventy-seven per cent of all the planning in the session,
+        /// with a worst order of 381,7 ms against a 5 ms cap. The obvious
+        /// confounder was ruled out in the recording: cavalry cost 50,7 ms when
+        /// the click landed on taken ground and 50,6 ms when it did not, so the
+        /// placement search is not it.
+        /// </para>
+        /// <para>
+        /// <c>greatfield</c> is that same order of battle, so the question here
+        /// is whether CoreCLR shows the same shape. If it does, the play problem
+        /// is reproducible on a bench and can be profiled without the editor
+        /// (W3); if it does not, the cause is Mono's and this says so before
+        /// anybody optimises against the wrong machine.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatABiggerBodyCostsToOrder()
+        {
+            bool wasExplaining = Marching.ExplainSlowPlans;
+            float wasBudget = Marching.SearchBudgetMs;
+
+            Marching.ExplainSlowPlans = false;
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                // Both fields warmed before either is read, and the whole sweep
+                // taken three times with the least kept. The first row of an
+                // unwarmed table has been a fourfold lie twice this session.
+                foreach (string warm in new[] { "thecrowdedwing", "greatfield" })
+                    ByFootprint(warm);
+
+                foreach (string field in new[] { "thecrowdedwing", "greatfield", "crucible" })
+                {
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(field);
+                    _out.WriteLine(
+                        $"{"regiment",-16}{"footprint",12}{"orders",8}{"mean ms",10}" +
+                        $"{"worst",9}{"share",8}{"sweeps/order",14}");
+                    _out.WriteLine(new string('-', 77));
+
+                    List<Sized> least = ByFootprint(field);
+
+                    for (int again = 0; again < 2; again++)
+                    {
+                        List<Sized> next = ByFootprint(field);
+
+                        for (int i = 0; i < least.Count; i++)
+                            if (next[i].Milliseconds < least[i].Milliseconds)
+                                least[i] = next[i];
+                    }
+
+                    var byKind = new Dictionary<string, List<Sized>>();
+
+                    foreach (Sized one in least)
+                    {
+                        if (!byKind.TryGetValue(one.Kind, out List<Sized>? some) || some == null)
+                            byKind[one.Kind] = some = new List<Sized>();
+
+                        some.Add(one);
+                    }
+
+                    double whole = 0d;
+                    foreach (Sized one in least) whole += one.Milliseconds;
+
+                    foreach (KeyValuePair<string, List<Sized>> kind in
+                             byKind.OrderBy(k => k.Value[0].Width))
+                    {
+                        double spent = 0d, worst = 0d;
+                        long sweeps = 0L;
+
+                        foreach (Sized one in kind.Value)
+                        {
+                            spent += one.Milliseconds;
+                            worst = Math.Max(worst, one.Milliseconds);
+                            sweeps += one.Sweeps;
+                        }
+
+                        _out.WriteLine(
+                            $"{kind.Key,-16}" +
+                            $"{$"{kind.Value[0].Width:0}x{kind.Value[0].Depth:0} m",12}" +
+                            $"{kind.Value.Count,8}{spent / kind.Value.Count,10:0.00}" +
+                            $"{worst,9:0.0}{spent / Math.Max(1e-9d, whole),8:0.0%}" +
+                            $"{sweeps / (double)kind.Value.Count,14:N0}");
+                    }
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+                Marching.ExplainSlowPlans = wasExplaining;
+            }
+        }
+
+        /// <summary>
+        /// Which stage the dearest orders on a field actually spend their time
+        /// in, read the way a played recording now reads it.
+        /// </summary>
+        /// <remarks>
+        /// The same coarse profile [M123] put behind
+        /// <see cref="Marching.ExplainSlowPlans"/>, so this measures the line a
+        /// player's log will print rather than a separate one that might not
+        /// agree with it (W5).
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhereTheDearestOrdersSpendIt()
+        {
+            foreach (string field in new[] { "thecrowdedwing", "greatfield", "crucible" })
+            {
+                BattleState battle = BenchScenariosTests.Load(field);
+                IPathfinder pathfinder = new DirectPathfinder(
+                    battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+                foreach (UnitInstance warm in battle.UnitsOnField())
+                    Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                var said = new List<(double Ms, string Who, string Where)>();
+
+                foreach (UnitInstance unit in battle.UnitsOnField())
+                {
+                    Vec2 to = BenchScenariosTests.OrderFor(battle, unit);
+
+                    PlanningProfile.StartCoarse();
+
+                    long began = Stopwatch.GetTimestamp();
+                    Marching.PlanTo(battle, unit, pathfinder, to);
+                    double ms = PlanningProfile.Milliseconds(Stopwatch.GetTimestamp() - began);
+
+                    said.Add((ms, unit.Def.DisplayName, PlanningProfile.WhereItWent(5, 0.01d)));
+                    PlanningProfile.Stop();
+                }
+
+                said.Sort((a, b) => b.Ms.CompareTo(a.Ms));
+
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(field);
+
+                for (int i = 0; i < 5 && i < said.Count; i++)
+                    _out.WriteLine($"  {said[i].Ms,7:0.0} ms  {said[i].Who,-14} {said[i].Where}");
+            }
+        }
+
+        /// <summary>
+        /// What refusing a leg by distance rather than by sweep saves, and
+        /// whether the two ever disagree.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M124], the other half of [M120].</b> The arch refuses 81,5-85,5%
+        /// of the legs it asks about and the straightening pass 95,8-97,7%, and
+        /// each refusal pays five separating-axis tests over a hexagon and a
+        /// rectangle. <see cref="Marching.ProveBlockedCheaply"/> tries a
+        /// capsule-to-capsule distance first, which can prove a collision but
+        /// never rule one out.
+        /// </para>
+        /// <para>
+        /// Two questions, and the second is the one that matters: what it saves,
+        /// and whether it is sound. The soundness check runs the sweep anyway
+        /// behind every cheap refusal and counts the disagreements, which must
+        /// be nought - and the routes are compared point by point, which must be
+        /// identical, because a test that only ever agrees with the sweep cannot
+        /// change an answer.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatRefusingByDistanceSaves()
+        {
+            bool wasProving = Marching.ProveBlockedCheaply;
+            bool wasChecking = Marching.CheckTheCheapProof;
+            float wasBudget = Marching.SearchBudgetMs;
+
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                // Soundness first, and on every field: with the sweep run behind
+                // every cheap refusal, how often the two disagree.
+                Marching.ProveBlockedCheaply = true;
+                Marching.CheckTheCheapProof = true;
+
+                _out.WriteLine(
+                    $"{"field",-16}{"orders",8}{"proved",10}{"disagreed",12}{"sweeps",12}");
+                _out.WriteLine(new string('-', 58));
+
+                foreach (string field in AllProvingFields)
+                {
+                    Marching.ProvedBlocked = 0L;
+                    Marching.ProofDisagreed = 0L;
+
+                    PlanningProfile.Start();
+                    PlanEveryOrder(field);
+                    long sweeps = PlanningProfile.CallsTo(PlanningProfile.Step.SweepTest);
+                    PlanningProfile.Stop();
+
+                    _out.WriteLine(
+                        $"{field,-16}{OrdersOn(field),8}{Marching.ProvedBlocked,10:N0}" +
+                        $"{Marching.ProofDisagreed,12:N0}{sweeps,12:N0}");
+                }
+
+                Marching.CheckTheCheapProof = false;
+
+                // Then the clock, both arms warmed before either is read.
+                foreach (string warm in AllProvingFields)
+                {
+                    Marching.ProveBlockedCheaply = false;
+                    PlanEveryOrder(warm);
+                    Marching.ProveBlockedCheaply = true;
+                    PlanEveryOrder(warm);
+                }
+
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(
+                    $"{"field",-16}{"by sweep",12}{"by distance",14}{"change",10}" +
+                    $"{"sweeps left",14}{"same routes",14}");
+                _out.WriteLine(new string('-', 80));
+
+                foreach (string field in AllProvingFields)
+                {
+                    double bySweep = double.MaxValue, byDistance = double.MaxValue;
+                    long sweptSweeps = 0L, provedSweeps = 0L;
+
+                    List<Vec2[]> swept = null!, proved = null!;
+
+                    for (int pass = 0; pass < 3; pass++)
+                    {
+                        Marching.ProveBlockedCheaply = false;
+                        bySweep = Math.Min(bySweep, Clocked(field, out swept, out sweptSweeps));
+
+                        Marching.ProveBlockedCheaply = true;
+                        byDistance = Math.Min(byDistance, Clocked(field, out proved, out provedSweeps));
+                    }
+
+                    int same = 0;
+                    for (int i = 0; i < swept.Count; i++)
+                        if (SameRoute(swept[i], proved[i])) same++;
+
+                    _out.WriteLine(
+                        $"{field,-16}{bySweep,12:0.000}{byDistance,14:0.000}" +
+                        $"{byDistance / bySweep - 1d,10:+0.0%;-0.0%;0.0%}" +
+                        $"{provedSweeps / (double)Math.Max(1L, sweptSweeps),14:0.0%}" +
+                        $"{$"{same}/{swept.Count}",14}");
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+                Marching.CheckTheCheapProof = wasChecking;
+                Marching.ProveBlockedCheaply = wasProving;
+            }
+        }
+
+        private static readonly string[] AllProvingFields =
+            { "thecrowdedwing", "crucible", "brokencountry", "greatfield", "longmarch", "sidewaysmile" };
+
+        private static int OrdersOn(string field)
+        {
+            int many = 0;
+            foreach (UnitInstance unit in BenchScenariosTests.Load(field).UnitsOnField()) many++;
+            return many;
+        }
+
+        private static void PlanEveryOrder(string field)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+                Marching.PlanTo(battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+        }
+
+        /// <summary>Every order on a field, timed as one, with the routes kept.</summary>
+        private static double Clocked(string field, out List<Vec2[]> routes, out long sweeps)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            routes = new List<Vec2[]>();
+
+            var watch = Stopwatch.StartNew();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Plan plan = Marching.PlanTo(
+                    battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                routes.Add(plan.Path.Found ? plan.Path.Waypoints.ToArray() : Array.Empty<Vec2>());
+            }
+
+            watch.Stop();
+
+            // Counted on a separate instrumented pass, because a tally inside
+            // the timed one is a branch on every sweep and this is a clock.
+            PlanningProfile.Start();
+            PlanEveryOrder(field);
+            sweeps = PlanningProfile.CallsTo(PlanningProfile.Step.SweepTest);
+            PlanningProfile.Stop();
+
+            return watch.Elapsed.TotalMilliseconds / Math.Max(1, routes.Count);
+        }
+
+        /// <summary>One order, with the body that was ordered.</summary>
+        private readonly struct Sized
+        {
+            public Sized(string kind, float width, float depth, double milliseconds, long sweeps)
+            {
+                Kind = kind;
+                Width = width;
+                Depth = depth;
+                Milliseconds = milliseconds;
+                Sweeps = sweeps;
+            }
+
+            public readonly string Kind;
+            public readonly float Width;
+            public readonly float Depth;
+            public readonly double Milliseconds;
+            public readonly long Sweeps;
+        }
+
+        /// <summary>Every order on a field, timed one at a time.</summary>
+        /// <remarks>
+        /// The profile is on only for the sweep count, which is a tally rather
+        /// than a clock - but a tally still costs a branch a call, so the
+        /// milliseconds here are an instrumented figure and are only ever
+        /// compared against each other.
+        /// </remarks>
+        private static List<Sized> ByFootprint(string field)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            var orders = new List<Sized>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Vec2 to = BenchScenariosTests.OrderFor(battle, unit);
+
+                PlanningProfile.Start();
+
+                long began = Stopwatch.GetTimestamp();
+                Marching.PlanTo(battle, unit, pathfinder, to);
+                long spent = Stopwatch.GetTimestamp() - began;
+
+                long sweeps = PlanningProfile.CallsTo(PlanningProfile.Step.SweepTest);
+                PlanningProfile.Stop();
+
+                orders.Add(new Sized(
+                    unit.Def.DisplayName, unit.Footprint.Width, unit.Footprint.Depth,
+                    PlanningProfile.Milliseconds(spent), sweeps));
+            }
+
+            return orders;
+        }
+
         private static double Least(List<Row> rows, Func<Row, double> of)
         {
             double least = double.MaxValue;

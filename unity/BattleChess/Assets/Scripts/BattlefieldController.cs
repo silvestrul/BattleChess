@@ -460,6 +460,11 @@ namespace BattleChess.Unity
             // a number whose whole effect is on how an order feels.
             Marching.SearchBudgetMs = SearchBudgetMs;
 
+            // [M123]. With the harness, an order dearer than its own cap says
+            // which stage spent the time. Harness work like any other, and it
+            // is the harness that reads recordings.
+            Marching.ExplainSlowPlans = _options.Harness;
+
             _frame.Restart();
 
             if (Input.GetKeyDown(KeyCode.F1))

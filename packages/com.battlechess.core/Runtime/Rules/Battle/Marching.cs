@@ -200,7 +200,16 @@ namespace BattleChess.Rules
         /// <summary>Every dear geometric question this plan asked.</summary>
         public int Geometry => LineChecks + StandChecks + TurnChecks;
 
-        /// <summary>Whether a graph was built at all, or the cast answered.</summary>
+        /// <summary>Whether a graph of places was built at all.</summary>
+        /// <remarks>
+        /// <b>Only the graph.</b> The stages below it - the ladder, the ways
+        /// round, both grids, the pose search - fill none of these counters, so
+        /// this is false for an order that spent three hundred milliseconds
+        /// searching hard. It used to print "straight line, nothing searched",
+        /// which is how a played session came to report exactly that about all
+        /// 640 of its orders including a 381,7 ms one. See [M123], and the line
+        /// that now says where the time went.
+        /// </remarks>
         public bool Searched => Places > 0;
 
         /// <summary>
@@ -212,7 +221,7 @@ namespace BattleChess.Rules
                   $"geometry {Geometry,6} ({LineChecks} line, {StandChecks} stand, {TurnChecks} turn) | " +
                   $"legs {Legs,5} priced, {CacheHits,7} cached, {Pruned,7} pruned | " +
                   $"frontier {FrontierScans,9}"
-                : "straight line, nothing searched";
+                : "no graph of places built";
 
         public override string ToString() =>
             Searched
@@ -220,7 +229,7 @@ namespace BattleChess.Rules
                   $"{Legs} legs priced, {Expansions} expanded, " +
                   $"{Rounds} round{(Rounds == 1 ? string.Empty : "s")}" +
                   (AskedTheLadder ? ", asked the ladder too" : string.Empty)
-                : "straight line, nothing searched";
+                : "no graph of places built";
     }
 
     public readonly struct Plan
@@ -560,10 +569,95 @@ namespace BattleChess.Rules
         /// planning one before giving the order — see
         /// <see cref="RoutePlanners"/> for what that cost.
         /// </param>
+        /// <summary>
+        /// Whether an order dearer than its own budget says which stage spent
+        /// the time.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M123].</b> A played session recorded 640 orders, the worst at
+        /// 381,7 ms against a 5 ms cap, and every single one of them reported
+        /// <c>straight line, nothing searched</c> - a fact about whether the
+        /// tangent graph built any places, which for 640 orders in a row it did
+        /// not. Nothing in the recording could say whether that 381 ms went to
+        /// the ladder, to a way round, to the gate that verifies a route or to
+        /// the pass that clears the ground before any of them, and W7 says a
+        /// recording answers on its own.
+        /// </para>
+        /// <para>
+        /// So a slow order profiles itself, coarsely: the cascade's stages are
+        /// timed and every shared leaf under them is not, which is about a
+        /// dozen <see cref="System.Diagnostics.Stopwatch"/> reads an order
+        /// rather than the millions the full profile would take. Only orders
+        /// that break their own budget say anything, so a quiet field stays
+        /// quiet - in that session it would have been 147 lines out of 640.
+        /// </para>
+        /// <para>
+        /// Off unless a host turns it on, and the host that does is the harness.
+        /// Left off, this is one static bool read an order.
+        /// </para>
+        /// </remarks>
+        public static bool ExplainSlowPlans;
+
+        /// <summary>
+        /// How dear an order has to be before it explains itself, as a multiple
+        /// of the search budget.
+        /// </summary>
+        /// <remarks>
+        /// One, so the line appears exactly when the cap was broken - which is
+        /// the event worth reading about, and the same threshold the gate's own
+        /// message uses. With no budget set at all it falls back to
+        /// <see cref="ASlowPlanMs"/>, because "no cap" must not mean "explain
+        /// every order".
+        /// </remarks>
+        public static float ExplainOverBudgets = 1f;
+
+        /// <summary>What counts as a slow plan when no budget is set.</summary>
+        private const float ASlowPlanMs = 5f;
+
         public static Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
             IBattleLog? log = null, IWayRound? wayRound = null, IRoutePlanner? planner = null,
             Facing? arriveOn = null)
+        {
+            // Never over a profile somebody else opened: a bench measuring the
+            // whole tree would have it silently replaced by the coarse one and
+            // print a table missing every row it asked for.
+            if (!ExplainSlowPlans || PlanningProfile.Running)
+                return Planned(battle, unit, pathfinder, destination, log, wayRound, planner, arriveOn);
+
+            PlanningProfile.StartCoarse();
+
+            long opened = System.Diagnostics.Stopwatch.GetTimestamp();
+
+            try
+            {
+                return Planned(battle, unit, pathfinder, destination, log, wayRound, planner, arriveOn);
+            }
+            finally
+            {
+                // Outside the plan's own scope rather than inside it, because a
+                // step still open has no inclusive time yet and would read as a
+                // stage that cost less than nothing.
+                double ms =
+                    (System.Diagnostics.Stopwatch.GetTimestamp() - opened) * 1000.0 /
+                    System.Diagnostics.Stopwatch.Frequency;
+
+                float over = SearchBudgetMs > 0f ? SearchBudgetMs * ExplainOverBudgets : ASlowPlanMs;
+
+                if (ms >= over)
+                    log?.Info("Cost",
+                        $"{unit.Def.DisplayName} spent {ms:0.0} ms on that order: " +
+                        $"{PlanningProfile.WhereItWent()}.",
+                        unit.Id);
+
+                PlanningProfile.Stop();
+            }
+        }
+
+        private static Plan Planned(
+            BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
+            IBattleLog? log, IWayRound? wayRound, IRoutePlanner? planner, Facing? arriveOn)
         {
             // Counted here because this is the one door every plan comes
             // through, whoever opened it (M38) — and timed here for the same
@@ -1703,6 +1797,30 @@ namespace BattleChess.Rules
                             continue;
                     }
 
+                    // Provably blocked without the sweep, where it can be shown
+                    // cheaply. [M124], and it is the other half of [M120]: the
+                    // arch refuses 81,5-85,5% of the legs it asks about and the
+                    // straightening pass 95,8-97,7%, and every one of those
+                    // refusals pays five separating-axis tests over a hexagon
+                    // and a rectangle to be told what a distance could have
+                    // said.
+                    if (ProveBlockedCheaply && SurelyMeets(body, travel, along, length, other.Shape))
+                    {
+                        ProvedBlocked++;
+
+                        // The proof is only ever asked to agree, never to
+                        // disagree: it claims a block, and a claim the sweep
+                        // does not confirm is a route wrongly refused (W9 - a
+                        // check has to say what would make it fail).
+                        if (CheckTheCheapProof && !Sweep.Touches(body, travel, other.Shape))
+                            ProofDisagreed++;
+
+                        PlanningProfile.Tally(PlanningProfile.Step.ClearLineBlocked);
+                        Charge(blocked: true);
+                        blocker = other;
+                        return false;
+                    }
+
                     // Touches rather than FirstTouch: M36 wants to know *which*
                     // body refused the line, which is this loop variable, and never
                     // how far along it was met.
@@ -1739,6 +1857,108 @@ namespace BattleChess.Rules
             // pays for a terrain scan it was never going to need. Same answer,
             // asked in the order that settles it soonest.
             return GroundIsClear(battle, unit, from, travel, length, facing);
+        }
+
+        /// <summary>
+        /// Whether a test cheap enough to run before every sweep may refuse a
+        /// leg on its own.
+        /// </summary>
+        /// <remarks>See <see cref="SurelyMeets"/>. Measured in [M124].</remarks>
+        internal static bool ProveBlockedCheaply = true;
+
+        /// <summary>Whether every cheap refusal is put to the sweep as well.</summary>
+        /// <remarks>
+        /// Off in play, on in the bench that proves the two agree. It cannot make
+        /// the planner cheaper - it makes it dearer - and its only job is to turn
+        /// "the proof is sound" from an argument into a count.
+        /// </remarks>
+        internal static bool CheckTheCheapProof;
+
+        /// <summary>Legs refused by the proof rather than by the sweep.</summary>
+        [ThreadStatic] internal static long ProvedBlocked;
+
+        /// <summary>Times the sweep did not agree. Must stay nought.</summary>
+        [ThreadStatic] internal static long ProofDisagreed;
+
+        /// <summary>
+        /// Whether a body carried along a line <b>certainly</b> meets an
+        /// obstacle - never whether it might.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// One-sided on purpose. A rectangle <i>contains</i> the capsule drawn
+        /// round its long axis at half its short one: for a regiment 229 m by
+        /// 114, that is a 114 m-thick sausage 115 m long, which is most of the
+        /// body. Carried along a line without turning, the mover likewise
+        /// contains a capsule of its own half-breadth round the line it walks.
+        /// Two capsules meet exactly when their spines come within the sum of
+        /// their radii, so a segment-to-segment distance under that sum proves a
+        /// collision, and proves it in about a dozen multiplications against the
+        /// sweep's five separating axes over ten projected corners.
+        /// </para>
+        /// <para>
+        /// It can only ever say <i>yes</i>. A pair it cannot prove goes to the
+        /// sweep exactly as before, so a leg is never wrongly allowed - the
+        /// direction that matters, because a wrongly allowed leg is a regiment
+        /// walking through one of its own and a wrongly refused one is only a
+        /// detour. What it does not cover is a meeting corner to corner, which
+        /// the sweep still answers.
+        /// </para>
+        /// </remarks>
+        private static bool SurelyMeets(
+            in OrientedRect moving, Vec2 travel, Vec2 along, float length, in OrientedRect obstacle)
+        {
+            // The mover as a disc rather than a spine: it is swept, so its own
+            // long axis would make this a parallelogram against a segment and
+            // the arithmetic would stop being cheaper than the thing it replaces.
+            float mine = MathF.Min(moving.Footprint.Width, moving.Footprint.Depth) * 0.5f;
+
+            float wide = obstacle.Footprint.Width;
+            float deep = obstacle.Footprint.Depth;
+            float theirs = MathF.Min(wide, deep) * 0.5f;
+
+            float reach = mine + theirs;
+
+            // The obstacle's spine: half its long side less half its short one,
+            // either way along whichever axis is the longer.
+            float half = MathF.Abs(wide - deep) * 0.5f;
+
+            Vec2 spine = wide >= deep ? obstacle.Right : obstacle.Forward;
+
+            return SegmentsWithin(
+                moving.Centre, along, length,
+                obstacle.Centre - spine * half, obstacle.Centre + spine * half, reach);
+        }
+
+        /// <summary>
+        /// Whether two segments come within a distance of one another, without
+        /// working out how close they actually get.
+        /// </summary>
+        /// <remarks>
+        /// Sampled along the spine rather than solved. The stations are spaced
+        /// at the tolerance itself, so a crossing cannot fall between two of
+        /// them, and each station is the same point-to-segment distance the
+        /// broad phase already runs. Solving the closest approach of two
+        /// segments is exact and is where the parallel and degenerate cases
+        /// live; this only has to be safe in one direction, and a station it
+        /// misses costs a sweep rather than a wrong answer.
+        /// </remarks>
+        private static bool SegmentsWithin(
+            Vec2 from, Vec2 along, float length, Vec2 tail, Vec2 head, float reach)
+        {
+            float span = Vec2.Distance(tail, head);
+            float squared = reach * reach;
+
+            int stations = span <= reach ? 1 : (int)MathF.Ceiling(span / reach);
+
+            for (int i = 0; i <= stations; i++)
+            {
+                Vec2 at = Vec2.Lerp(tail, head, (float)i / stations);
+
+                if (DistanceSquaredToSegment(at, from, along, length) <= squared) return true;
+            }
+
+            return false;
         }
 
         /// <summary>

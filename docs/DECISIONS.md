@@ -1779,6 +1779,13 @@ the budget is now polled from *inside* the two searches that can overrun
 | 1 ms | 2,7–3,1 | 0,31–0,32 | 27–34 | 4–6 | 4–6 | 0 | 201–1 863 |
 | 0,5 ms | 1,1–1,2 | 0,24–0,25 | 90–124 | 9–11 | 8–9 | 0–1 | 2 472–6 954 |
 
+**Corrected by [M123], which read a played recording.** In play the cap fires 147
+times in 640 orders and bounds none of them: the worst order it allowed was
+381,7 ms, and 496 orders never reached a gate at all, one of them costing 129,8.
+Everything below is true of CoreCLR and true for the reason that made it useless
+as a guide - on the bench the work in front of the first gate is about two tenths
+of a millisecond, so a cap over it looked like a cap over everything.
+
 **At five the cap binds on its own.** Worst order 5,0 ms on both crowded fields,
 with the inner polls off and with them on — identical, and both give-up counters
 at zero. [M114]'s stage gates are enough at this setting; the "about twice the
@@ -1803,3 +1810,159 @@ places abandon nothing: the corner walk's predecessor chain holds only legs
 `IsClearLeg` has already passed, and straightening keeps every point it has not
 reached — which is a route that already passed the gate. A field left half raised
 would be stamped current and wrong, which is the [M104] bug class.
+
+### M123 — the stage no clock was on, and the field that could not have found it
+
+**The designer:** *"verify the logs from my run, i think i still had some FPS
+drop"*. A played session on The Great Field, 3 278 ticks, 640 orders logged.
+
+**Eighteen frames over 33 ms. Three are the load; fifteen are one route plan,
+and eleven of those are the same regiment.** The plan runs on the main thread
+inside `TrackOrders`, so it is billed to the harness's `tracking` clock and
+looked at first like the overlay. It is not the overlay.
+
+| type | footprint | orders | mean | worst | over 5 ms |
+|---|---|---:|---:|---:|---:|
+| Spearmen | 80x40 | 354 | 1,6 ms | 23,1 | 43 |
+| Swordsmen | 100x50 | 204 | 2,6 | 58,2 | 40 |
+| Horse Archers | 200x100 | 5 | 5,5 | 6,9 | 4 |
+| **Cavalry** | **229x114** | **77** | **50,7** | **381,7** | **63 of 77** |
+
+**Cavalry is 12,0% of the orders and 77,4% of every millisecond spent planning
+them.** Median order 1,0 ms, p90 6,9, p99 161,3: it is entirely a tail, and the
+tail is one kind of regiment. The obvious confounder is ruled out in the
+recording itself — cavalry costs 50,7 ms when the click landed on taken ground
+and 50,6 ms when it did not, so the placement search is not it. The aggregate
+3x for "aimed off" is cavalry being over-represented among those orders.
+
+**[M122] is corrected here. The five-millisecond cap fires 147 times and bounds
+nothing.**
+
+| | orders | mean | worst |
+|---|---:|---:|---:|
+| hit a gate | 144 | 30,5 ms | **381,7** |
+| never reached a gate | 496 | 1,3 | **129,8** |
+
+An order can cost 130 ms **without the cap being consulted at all**, because the
+gates stand in front of the grids and the tangent graph while `TryStageForDirectRun`
+and the whole of `ByTheLadder` run before the first of them. 141 of the 147 gates
+fired before a *grid*, meaning the five milliseconds were already gone. What the
+cap guarantees is "five milliseconds, plus one ungated ladder". The bench was not
+wrong, it was blind: on CoreCLR the pre-gate work is about two tenths of a
+millisecond, so the gates looked sufficient. **The cost in play is 66 declared
+press-throughs and 96 orders the search could not answer, out of 640** — 10,3%,
+against the 5% [M122] estimated from the bench's 2 ms row.
+
+**Two things the recording could not say, and both are now fixed.** Every one of
+the 640 orders reported `straight line, nothing searched`, including the 381,7 ms
+one: that string is `RouteEffort.Places > 0`, a fact about the tangent graph and
+nothing else. And automatic re-plans logged no cost line at all, so five
+sim-heavy frames had no attribution. `Marching.ExplainSlowPlans` now profiles any
+order that breaks its own budget, **coarsely** — the cascade's stages timed and
+every shared leaf under them not, about a dozen stopwatch reads an order instead
+of the millions the full profile would take — and says where the time went. Three
+stages that were never timed at all are timed now: `Staging`, `WalkCheck`,
+`Fronts`.
+
+**The bench could not reproduce it, and why not is the finding.** `greatfield` is
+the same order of battle as the played session, same 229x114 cavalry — and on
+greatfield the dear regiment is Swordsmen at 2,99 ms an order while Cavalry costs
+1,67. **Every bench field but `sidewaysmile` is a parade-ground deployment**, and
+on a start line the largest bodies are the ones standing in the most room. So the
+arrangement was taken out of the recording, at the tick of the 381,7 ms order, and
+kept as a field: **The Crowded Wing** (`thecrowdedwing`), where the West's wing has
+folded in on itself and two 229 m cavalry regiments stand seventy metres apart with
+a Swordsmen regiment between them. Same army, same footprints, same map:
+
+| | Cavalry mean | worst | share of the field |
+|---|---:|---:|---:|
+| greatfield, deployed | 0,42 ms | 1,2 | 11,0% |
+| **thecrowdedwing, an hour in** | **13,67** | **38,7** | **57,8%** |
+
+**Thirty-three times, for the same six regiments, from the pose alone.** It is not
+the footprint; it is a large body inside a crowd, which no deployment produces.
+
+**And the coarse profile names the stage on the first ask.** Four of the five
+dearest orders on that field:
+
+```
+105,6 ms  Swordsmen   Staging 103,4, rest 2,1                    |  218 sweeps
+ 90,5 ms  Cavalry     Staging 83,0, Plan 2,8, HybridSearch 1,8   |  135 sweeps
+ 85,0 ms  Cavalry     HybridSearch 59,6, SmoothRoute 8,7x3, ...  | 1906 sweeps
+ 83,8 ms  Cavalry     Staging 76,7, HybridSearch 2,0, Hunt 1,9   |  583 sweeps
+```
+
+`Staging` is `TryStageForDirectRun`, the pass that clears the bodies a regiment is
+standing inside before it sets off. **It is the stage that had no clock on it, it
+runs before the cascade's first gate so the cap can never touch it, and it only
+fires when the regiment is lapping somebody** — which is exactly why no bench field
+had ever seen it. On greatfield and the crucible it does not appear in the top five
+at all. Two hundred and eighteen sweeps for a hundred and three milliseconds, so it
+is not geometry volume either. Under the full profile it splits: `FormationFits`
+called **8 273 to 23 999 times in one order**.
+
+**The cause, exactly.** `TryStageForDirectRun` tries stand-off distances outward in
+two-metre steps to twice the mover's bounding radius, and asks
+`EscapesWithoutDeepening` about each — which re-walks the whole leg *from the
+start* at two-metre samples, testing `FormationFits` and an overlap fraction
+against every friendly regiment at each. The samples are a triangular sum:
+1 + 2 + ... + n. For an 80x40 spearman n is 45, for 229x114 cavalry n is 128, so the
+work is 8 256 samples a push direction against 1 035 — **eight times the samples,
+each dearer, against nineteen bodies, over four or five push directions.**
+
+**Not fixed here.** The candidate stages are collinear, so the whole triangle is one
+outward walk carrying the overlaps forward — 128 samples where there are now 8 256.
+But the sample *points* move unless the stand-off grid is anchored, which makes it a
+change to what the rule answers and not only to what it costs, and that is the
+designer's call ([W10], and the same gate [M121] wanted).
+
+### M124 — refusing a leg by distance, which is sound and worth about two per cent
+
+**The designer:** *"do 1 2 and 3"*, the third being [M120]'s untaken half — a
+cheap bounding test before the swept one, where the arch refuses 81,5-85,5% of
+the legs it asks about and the straightening pass 95,8-97,7%.
+
+`Marching.ProveBlockedCheaply`. A rectangle contains the capsule drawn round its
+long axis at half its short one, and a rectangle carried along a line without
+turning contains a capsule of its own half-breadth round that line. Two capsules
+meet exactly when their spines come within the sum of their radii, so a
+segment-to-segment distance under that sum **proves** a collision — in about a
+dozen multiplications against the sweep's five separating axes over ten projected
+corners.
+
+**One-sided, and that is the whole safety argument.** It can say yes and never no.
+A pair it cannot prove goes to the sweep exactly as before, so a leg is never
+wrongly *allowed* — and a wrongly allowed leg is a regiment walking through one of
+its own, while a wrongly refused one is a detour.
+
+**Measured, with the sweep run behind every cheap refusal to check it:**
+
+| field | orders | proved | **disagreed** | sweeps |
+|---|---:|---:|---:|---:|
+| thecrowdedwing | 40 | 3 301 | **0** | 9 270 |
+| crucible | 80 | 9 565 | **0** | 26 248 |
+| brokencountry | 80 | 11 564 | **0** | 27 261 |
+| greatfield | 40 | 3 148 | **0** | 8 071 |
+| longmarch | 80 | 5 876 | **0** | 13 732 |
+| sidewaysmile | 40 | 2 655 | **0** | 7 259 |
+
+**Nought disagreements in 36 109 proofs, and 360 routes of 360 identical.**
+
+| field | by sweep | by distance | change | sweeps left |
+|---|---:|---:|---:|---:|
+| thecrowdedwing | 2,527 ms | 2,464 | **-2,5%** | 64,4% |
+| crucible | 0,448 | 0,429 | -4,1% | 63,6% |
+| brokencountry | 0,491 | 0,487 | -0,9% | 57,6% |
+| greatfield | 0,358 | 0,354 | -0,9% | 61,0% |
+| longmarch | 0,180 | 0,175 | -2,9% | 57,2% |
+| sidewaysmile | 0,362 | 0,362 | +0,2% | 63,4% |
+
+**A third to two fifths of the sweeps gone, for one to four per cent of the clock**
+— and one field slightly the worse, because a body the proof cannot settle now pays
+the distance *and* the sweep. **Kept on**, because it is provably sound, provably
+route-identical and never much worse; but it is the same lesson as [M121] for the
+third time: **the sweep count is not the bill**. [M120] found two stages holding
+93-99% of every refusal, and both halves of what it proposed have now been built
+and both are worth nothing much. The bill was never in the geometry those stages
+ask for. It was in a stage [M120] could not see, because the profile charged
+clearance checks to stages and `Staging` asked none.
