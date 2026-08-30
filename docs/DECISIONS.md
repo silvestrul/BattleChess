@@ -1524,3 +1524,49 @@ what needs stopping. **The clearance loops are, and they are safe to abandon**:
 
 Not built — it changes what a regiment does when the clock beats it, which is the
 designer's rule to set, not a cost question.
+
+### M118 — a query hands back thirteen, not three hundred, and tightening it loses
+
+**The designer:** *"but bodyscan doesnt have to be used against 300 bodies, only
+the ones in the radius right?"* Right, and it never was — but the numbers behind
+that are worth having, because they say where the remaining slack is.
+
+Counted per clearance query on the crucible:
+
+| | per query | in the worst order |
+|---|---:|---:|
+| buckets touched | 16,75 | 16,16 |
+| buckets visited | 7,27 | 6,71 |
+| **bodies handed back** | **12,80** | **13,50** |
+| **sweep tests actually done** | **1,48** | **1,28** |
+
+So the radius filter works, and **seven bodies in eight are handed back and then
+thrown away by the caller**. The gap is the bucket: at 128 m a query keeps a
+bucket if its *square* reaches the corridor, so a body in the far corner of a kept
+bucket comes back although it is nowhere near the line.
+
+**Built, measured, refused.** `UnitIndex.SiftAtTheIndex` tests each body against
+the segment before handing it back — conservative by construction, since the
+bounding radius circumscribes the footprint.
+
+| field | ms/order off | on | change | yield/query off → on | routes |
+|---|---:|---:|---:|---:|---|
+| crucible | 2,319 | 2,681 | **+15,6%** | 12,80 → 3,35 | identical |
+| broken country | 2,633 | 3,009 | +14,3% | 10,62 → 3,07 | identical |
+| long march | 1,068 | 1,223 | +14,5% | 9,82 → 2,58 | identical |
+| great field | 2,080 | 2,277 | +9,5% | 7,14 → 3,60 | identical |
+| sideways mile | 2,115 | 2,322 | +9,8% | 7,06 → 3,54 | identical |
+
+**It does exactly what it was built to do and costs 9–16% for it.** The yield
+falls by three quarters, every route on every field is unchanged, every field is
+slower. The rejection was cheaper where it already was: the caller refuses a body
+on a bounding test of a few compares, and this refuses it on a projection onto the
+segment, a clamp and a squared distance — asked 171 537 times a field.
+
+**Third time this lesson.** [M111] cached the query and lost; [M116] bounded the
+search and lost; this narrowed the answer and lost. **The clearance query's cost
+is not the size of the list it returns.** At 2,3 µs a call over 12,8 bodies it is
+already about 180 ns a body, and the remaining work is not in bodies anybody can
+avoid looking at.
+
+Kept behind the switch, off, as a measurement rather than deleted.

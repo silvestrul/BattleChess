@@ -179,6 +179,103 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// What testing a body against the line, rather than only its bucket,
+        /// costs and saves.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [M118]. The designer: <i>"but bodyscan doesnt have to be used against
+        /// 300 bodies, only the ones in the radius right?"</i>. It never was
+        /// against three hundred - a query hands back 12,8 - but only 1,48 of
+        /// those earn a sweep test, so seven in eight are handed back and thrown
+        /// away by the caller.
+        /// </para>
+        /// <para>
+        /// <b>This is a question about where a rejection happens, not whether
+        /// it happens.</b> The caller already refuses those bodies; the index
+        /// can refuse them a step earlier for the price of a projection and a
+        /// squared distance. Whether that is cheaper is exactly the kind of
+        /// thing that cannot be reasoned out, because [M111] lost the same
+        /// argument from the other side.
+        /// </para>
+        /// <para>
+        /// Both directions are run in one process and alternated, because [W12]
+        /// says two builds across two processes cannot be trusted on this
+        /// machine at margins under about three per cent.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatSiftingAtTheIndexCosts()
+        {
+            bool was = UnitIndex.SiftAtTheIndex;
+            float wasBudget = Marching.SearchBudgetMs;
+
+            try
+            {
+                Marching.SearchBudgetMs = 0f;
+
+                foreach (string warm in AllFields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"field",-16}{"sift",-8}{"ms/order",10}{"worst ms",10}" +
+                    $"{"yield/query",13}{"sifted",10}{"routed",8}{"pressed",9}{"route s",10}");
+                _out.WriteLine(new string('-', 94));
+
+                foreach (string field in AllFields)
+                {
+                    for (int pass = 0; pass < 2; pass++)
+                    {
+                        // Alternated within the field so a warming or thermal
+                        // drift falls on both arms rather than on one.
+                        foreach (bool sift in pass == 0
+                            ? new[] { false, true }
+                            : new[] { true, false })
+                        {
+                            if (pass == 1) continue;
+
+                            UnitIndex.SiftAtTheIndex = sift;
+
+                            double worst = 0d, perOrder = double.MaxValue;
+                            Row last = null!;
+                            long yielded = 0L, asked = 0L, sifted = 0L;
+
+                            for (int repeat = 0; repeat < 3; repeat++)
+                            {
+                                last = Measure(field, planner: null, passes: 2);
+
+                                worst = Math.Max(worst, last.Worst);
+                                perOrder = Math.Min(perOrder, last.MsPerOrder);
+                            }
+
+                            // Counted on one profiled pass, since a counter is
+                            // deterministic and does not need the least of three.
+                            BattleState probed = BenchScenariosTests.Load(field);
+                            PlanningProfile.Start();
+                            BenchScenariosTests.OrderEverybody(probed, null);
+                            PlanningProfile.Stop();
+
+                            yielded = PlanningProfile.CallsTo(PlanningProfile.Step.NearYield);
+                            asked = PlanningProfile.CallsTo(PlanningProfile.Step.NearQuery);
+                            sifted = PlanningProfile.CallsTo(PlanningProfile.Step.NearSifted);
+
+                            _out.WriteLine(
+                                $"{field,-16}{(sift ? "on" : "off"),-8}" +
+                                $"{perOrder,10:0.000}{worst,10:0.0}" +
+                                $"{(double)yielded / Math.Max(1L, asked),13:0.00}" +
+                                $"{sifted,10:N0}{last.Routed,8}{last.Pressed,9}" +
+                                $"{last.Seconds,10:0}");
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                UnitIndex.SiftAtTheIndex = was;
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+        /// <summary>
         /// What bounding the grid search to a corridor round the straight line
         /// costs, retried generously and after the gates.
         /// </summary>
@@ -428,6 +525,26 @@ namespace BattleChess.Tests.Battle
                 _out.WriteLine(
                     $"{"total",-18}{string.Empty,12}{average,9:0.000}{1d,8:0.0%}" +
                     $"{worstTotal,10:0.000}{1d,9:0.0%}");
+
+                long asked = calls[(int)PlanningProfile.Step.NearQuery];
+                long askedWorst = worstCalls[(int)PlanningProfile.Step.NearQuery];
+
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(
+                    $"{"counted, not timed",-18}{"per order",12}{"per query",11}" +
+                    $"{"worst order",13}{"per query",11}");
+
+                foreach (PlanningProfile.Step step in Counted)
+                {
+                    int i = (int)step;
+                    if (calls[i] == 0L) continue;
+
+                    _out.WriteLine(
+                        $"{step,-18}{(double)calls[i] / Math.Max(1, orders),12:N1}" +
+                        $"{(double)calls[i] / Math.Max(1L, asked),11:0.00}" +
+                        $"{worstCalls[i],13:N0}" +
+                        $"{(double)worstCalls[i] / Math.Max(1L, askedWorst),11:0.00}");
+                }
             }
             }
             }
@@ -491,6 +608,29 @@ namespace BattleChess.Tests.Battle
                 PlanningProfile.Step.GroundClear,
                 PlanningProfile.Step.PassableTable,
             }),
+        };
+
+        /// <summary>
+        /// What the clearance steps found to do, counted rather than timed.
+        /// </summary>
+        /// <remarks>
+        /// <c>NearYield</c> against <c>NearQuery</c> is the question the
+        /// designer asked - <i>"bodyscan doesnt have to be used against 300
+        /// bodies, only the ones in the radius right?"</i> - and it can only be
+        /// answered by dividing one by the other. <c>SweepTest</c> against
+        /// <c>NearYield</c> then says how many of the bodies handed back were
+        /// worth the expensive test, which is the difference between a query
+        /// that is too wide and a scan that is too slow.
+        /// </remarks>
+        private static readonly PlanningProfile.Step[] Counted =
+        {
+            PlanningProfile.Step.NearBucketsSeen,
+            PlanningProfile.Step.NearBuckets,
+            PlanningProfile.Step.NearYield,
+            PlanningProfile.Step.NearEmpty,
+            PlanningProfile.Step.OverlapTest,
+            PlanningProfile.Step.SweepTest,
+            PlanningProfile.Step.ClearLineRepeat,
         };
 
         /// <summary>

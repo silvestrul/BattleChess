@@ -284,7 +284,7 @@ namespace BattleChess.Rules
                     marks.Visited[bucket] = marks.Sweep;
                     PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
 
-                    Hand(bucket, into, marks);
+                    Hand(bucket, into, marks, from, along, length, corridor);
                 }
             }
         }
@@ -293,7 +293,9 @@ namespace BattleChess.Rules
         /// Empties one bucket into an answer, once per body however many buckets
         /// it is filed in.
         /// </summary>
-        private void Hand(int bucket, List<UnitInstance> into, Marks marks)
+        private void Hand(
+            int bucket, List<UnitInstance> into, Marks marks,
+            Vec2 from, Vec2 along, float length, float reach)
         {
             List<int> held = _buckets[bucket];
 
@@ -303,10 +305,74 @@ namespace BattleChess.Rules
 
                 if (marks.Handed[who] == marks.Sweep) continue;
 
+                // Stamped before the test, not after. A body rejected against
+                // this line is rejected against it from every bucket it is filed
+                // in, so the stamp saves the repeats as well as the duplicates.
                 marks.Handed[who] = marks.Sweep;
-                into.Add(_filed[who]);
+
+                UnitInstance body = _filed[who];
+
+                if (SiftAtTheIndex)
+                {
+                    // The bucket test admits a body because its *bucket* reaches
+                    // the corridor; this asks whether the body does. Conservative
+                    // by construction - the bounding radius circumscribes the
+                    // footprint, so nothing the sweep would have touched is
+                    // refused here.
+                    float allowed = reach + body.Footprint.BoundingRadius;
+
+                    if (FarFromSegment(body.Position, from, along, length) > allowed * allowed)
+                    {
+                        PlanningProfile.Tally(PlanningProfile.Step.NearSifted);
+                        continue;
+                    }
+                }
+
+                into.Add(body);
             }
         }
+
+        /// <summary>
+        /// Whether a body is tested against the line before being handed back,
+        /// rather than only its bucket being tested.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M118.</b> The designer: <i>"but bodyscan doesnt have to be used
+        /// against 300 bodies, only the ones in the radius right?"</i>. It is not
+        /// used against three hundred - measured, a query hands back <b>12,8</b>
+        /// - but only <b>1,48</b> of those are worth a sweep test, so seven in
+        /// eight are handed back and then thrown away by the caller.
+        /// </para>
+        /// <para>
+        /// The gap is the bucket. A bucket is 128 m and a query keeps it if its
+        /// <i>square</i> reaches the corridor, so a body sitting in the far
+        /// corner of a kept bucket comes back although it is nowhere near the
+        /// line. Testing the body itself costs a projection and a squared
+        /// distance - the same arithmetic already spent on the bucket centre -
+        /// and saves the caller a list entry and a rejection.
+        /// </para>
+        /// <para>
+        /// A lever rather than a constant, because the honest question is
+        /// whether moving a rejection earlier is cheaper than doing it later.
+        /// </para>
+        /// <para>
+        /// <b>Measured, and it loses. Off.</b> It does exactly what it was built
+        /// to do - the yield falls from 12,80 bodies a query to <b>3,35</b>, and
+        /// every route on every field is unchanged - and an order costs
+        /// <b>9% to 16% more</b> on all five fields. The rejection it moves
+        /// earlier was cheaper where it was: the caller refuses a body on a
+        /// bounding test of a few compares, and this refuses it on a projection
+        /// onto the segment, a clamp and a squared distance, asked 171 537 times
+        /// a field. <b>Kept behind the switch as a measurement rather than
+        /// deleted, so the idea is not had again.</b>
+        /// </para>
+        /// <para>
+        /// Third time the same lesson: [M111] and [M116] both lost by trying to
+        /// make the clearance query more precise. The list was never the cost.
+        /// </para>
+        /// </remarks>
+        public static bool SiftAtTheIndex;
 
         /// <summary>How far a point lies off a segment, squared.</summary>
         private static float FarFromSegment(Vec2 point, Vec2 from, Vec2 along, float length)
@@ -367,7 +433,7 @@ namespace BattleChess.Rules
                 marks.Visited[bucket] = marks.Sweep;
                 PlanningProfile.Tally(PlanningProfile.Step.NearBuckets);
 
-                Hand(bucket, into, marks);
+                Hand(bucket, into, marks, at, new Vec2(1f, 0f), 0f, halo);
             }
         }
 

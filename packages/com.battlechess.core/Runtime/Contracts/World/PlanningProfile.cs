@@ -324,6 +324,11 @@ namespace BattleChess.Contracts
             NearEmpty,
 
             /// <summary>
+            /// Bodies a bucket offered that the line itself refused - M118.
+            /// </summary>
+            NearSifted,
+
+            /// <summary>
             /// One bucket the index opened to answer a query. Counted only.
             /// </summary>
             /// <remarks>
