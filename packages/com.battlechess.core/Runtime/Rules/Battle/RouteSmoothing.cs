@@ -72,6 +72,9 @@ namespace BattleChess.Rules
         /// <summary>Whether the cast-ahead pass runs. A measurement lever.</summary>
         internal static bool SmoothTheRoute = true;
 
+        /// <summary>Stretches left unsmoothed because the order ran out of time.</summary>
+        [System.ThreadStatic] internal static long GaveUpSmoothing;
+
         /// <summary>
         /// What the furthest-first scan costs, against what a scan that
         /// extended outwards while clear would have cost.
@@ -106,6 +109,54 @@ namespace BattleChess.Rules
 
         /// <summary>Stretches where no cast at all was clear.</summary>
         [System.ThreadStatic] internal static long NothingClear;
+
+        /// <summary>
+        /// Whether the scan extends outwards from the near point and stops at
+        /// the first refusal, instead of walking back from the last waypoint
+        /// and taking the first success.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The two find the same point wherever clearance is monotone along the
+        /// route - which is the ordinary case, because a route that bent did so
+        /// round something, and past that something nothing gets clearer again.
+        /// Where clearance is <i>not</i> monotone they differ, and the outward
+        /// scan keeps a waypoint the furthest-first one would have dropped: a
+        /// slightly wobblier route for a much cheaper pass.
+        /// </para>
+        /// <para>
+        /// <b>Off, and measured off.</b> [M121] built it and counted both sides.
+        /// It cuts the casts to 34-40% exactly as predicted, and <b>the clock
+        /// does not move</b>: 0,425 against 0,419 ms an order on the crucible,
+        /// 0,501 against 0,491 on Broken Country. The prediction was made from
+        /// a share of clearance <i>checks</i> and this pass's checks are the
+        /// cheap kind - long casts down open ground, where the near query hands
+        /// back nothing to sweep.
+        /// </para>
+        /// <para>
+        /// And it is not free. It changes 26 routes in 80 on the crucible, 21
+        /// in 80 on Broken Country, and 21 of those 26 are dearer to walk: +1,2%
+        /// of the field's marching, +3,2% on Sideways Mile, with one route there
+        /// <b>160% dearer</b>. Kept as a lever because the measurement is worth
+        /// more than the code is, and because a future arrangement may make the
+        /// casts dear enough to be worth a wobble.
+        /// </para>
+        /// </remarks>
+        internal static bool ExtendOutwards;
+
+        /// <summary>
+        /// Whether the pass stops looking for shortcuts once the order has spent
+        /// its search budget.
+        /// </summary>
+        /// <remarks>
+        /// Safe in a way most gates are not: it abandons no half-built state and
+        /// discards nothing already proved. Every point it has not reached is
+        /// kept exactly as the search left it, which is a route that already
+        /// passed the gate - so the worst this can do is hand back the wound
+        /// route, which is the route that would have been walked had this pass
+        /// never existed at all.
+        /// </remarks>
+        internal static bool StopSmoothingWhenOutOfTime = true;
 
         /// <summary>
         /// Drops every waypoint the regiment can see past, keeping the fronts
@@ -171,32 +222,70 @@ namespace BattleChess.Rules
                 Facing reached = FrontAt(fronts, furthest) ?? Marching.AlongTheLine(
                     points[at], points[furthest], unit.Facing);
 
-                // Furthest first: the point of the pass is the long cast, and
-                // stopping at the first one that happens to be clear would
-                // keep most of the wobble it exists to remove.
                 bool tookOne = false;
 
-                for (int to = points.Count - 1; to > at + 1; to--)
+                // Nothing below is load-bearing: every point this pass does not
+                // reach is kept as the search left it, so giving up here hands
+                // back a route that has already passed the gate.
+                bool spent = Marching.StopSearchingWhenOutOfTime &&
+                             StopSmoothingWhenOutOfTime && Marching.StopNow();
+
+                if (spent)
                 {
-                    CastsTried++;
+                    GaveUpSmoothing++;
+                }
+                else if (ExtendOutwards)
+                {
+                    // Outwards, stopping at the first refusal - so a stretch
+                    // with no shortcut in it costs one cast rather than the
+                    // whole rest of the route.
+                    for (int to = at + 2; to < points.Count; to++)
+                    {
+                        CastsTried++;
 
-                    Facing front = Marching.AlongTheLine(points[at], points[to], unit.Facing);
+                        Facing front = Marching.AlongTheLine(
+                            points[at], points[to], unit.Facing);
 
-                    // A cast that starts where the regiment stands is asked
-                    // with the leaving rule, the same one IsClearLeg uses, so
-                    // the body it is already touching does not refuse a line
-                    // that walks away from it.
-                    if (!Marching.IsClearLine(
-                            battle, unit, points[at], points[to], front, leaving: at == 0))
-                        continue;
+                        if (!Marching.IsClearLine(
+                                battle, unit, points[at], points[to], front, leaving: at == 0))
+                            break;
 
-                    if (!CheaperStraight(battle, unit, points, fronts, at, to, front))
-                        continue;
+                        if (!CheaperStraight(battle, unit, points, fronts, at, to, front))
+                            break;
 
-                    furthest = to;
-                    reached = front;
-                    tookOne = true;
-                    break;
+                        furthest = to;
+                        reached = front;
+                        tookOne = true;
+                    }
+                }
+                else
+                {
+                    // Furthest first: the point of the pass is the long cast, and
+                    // stopping at the first one that happens to be clear would
+                    // keep most of the wobble it exists to remove.
+                    for (int to = points.Count - 1; to > at + 1; to--)
+                    {
+                        CastsTried++;
+
+                        Facing front = Marching.AlongTheLine(
+                            points[at], points[to], unit.Facing);
+
+                        // A cast that starts where the regiment stands is asked
+                        // with the leaving rule, the same one IsClearLeg uses, so
+                        // the body it is already touching does not refuse a line
+                        // that walks away from it.
+                        if (!Marching.IsClearLine(
+                                battle, unit, points[at], points[to], front, leaving: at == 0))
+                            continue;
+
+                        if (!CheaperStraight(battle, unit, points, fronts, at, to, front))
+                            continue;
+
+                        furthest = to;
+                        reached = front;
+                        tookOne = true;
+                        break;
+                    }
                 }
 
                 if (tookOne)

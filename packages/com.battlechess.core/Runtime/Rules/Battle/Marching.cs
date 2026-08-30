@@ -382,6 +382,42 @@ namespace BattleChess.Rules
         public static float SearchBudgetMs;
 
         /// <summary>
+        /// Whether the budget is also polled <i>inside</i> the searches, and not
+        /// only between the stages of the cascade.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [M114] made the cap bind on the cascade by gating each stage before
+        /// it starts, which bounds an order at about twice the cap: a stage that
+        /// has begun runs to its end. [M114a] then found the residue is not
+        /// spread evenly - it is the ladder, and within the ladder the corner
+        /// walk, which is a Dijkstra over two dozen nodes asking a swept
+        /// clearance question at every relaxation.
+        /// </para>
+        /// <para>
+        /// So the two places that can overrun are polled from within. Both were
+        /// chosen because giving up in them abandons nothing: the corner walk's
+        /// predecessor chain holds only legs already proved clear, and
+        /// straightening keeps every point it has not reached. <b>Nothing that
+        /// caches, stamps or half-raises a field is ever polled</b> - that is
+        /// the M104 bug class, and a field left half raised is stamped current
+        /// and wrong.
+        /// </para>
+        /// <para>
+        /// <b>And at five milliseconds it buys nothing, because the cap already
+        /// binds without it.</b> [M122] measured the worst order at 5,0 ms with
+        /// the polls off and 5,0 ms with them on, and both give-up counters at
+        /// zero: no order on either crowded field ever reaches the corner walk
+        /// or the straightening pass already out of time. They are live - at a
+        /// tenth of a millisecond the corner walk gives up 137 times a field -
+        /// so a zero here is a real zero and not a dead gate (W9). Kept on
+        /// because Mono is where the cap bites, and Mono at five behaves like
+        /// this bench at one or two, where they do fire.
+        /// </para>
+        /// </remarks>
+        public static bool StopSearchingWhenOutOfTime = true;
+
+        /// <summary>
         /// When the plan on this thread runs out of time, or zero for never.
         /// </summary>
         /// <remarks>

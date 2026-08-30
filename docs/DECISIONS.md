@@ -1699,7 +1699,9 @@ casts.** That is a **60–66% cut in smoothing casts**, which is 36–42% of all
 clearance checks, which are 31–50% of an order: **roughly 7–12% of every order,
 for a change of loop direction.**
 
-**Not taken here.** It is not free: the two scans differ wherever clearance is
+**Not taken here** — and then taken, measured and left off in [M121], which also
+corrects the 7–12% below: it is a share of *checks*, and this pass's checks are
+the cheap kind. It is not free: the two scans differ wherever clearance is
 non-monotone along a route, and where they differ the outward one keeps a
 waypoint the furthest-first one would have dropped. That is a route-quality
 question — [W10] says a cheaper number is not a better route — and it wants the
@@ -1711,3 +1713,93 @@ shape, different cause: the smoother tries too many *ends* for one start, and th
 arch proposes too many *arcs*. Cheaper pruning before the swept test — a bounding
 test on whether the arc's corridor can clear the blocker at all — is the obvious
 first thing to measure there, and it has not been measured.
+
+### M121 — the outward scan, built, measured, and left off
+
+**The designer:** *"do it behind a lever and see what routes change"*. [M120]
+predicted an outward scan at a third of the casts and put it at 7–12% of an
+order. The lever is `RouteSmoothing.ExtendOutwards`. Both halves were measured:
+what it changes, and what it saves.
+
+**What it changes.** Both arms plan the same orders against the same
+arrangement, budget off, routes compared point by point.
+
+| field | orders | same | changed | of those, dearer | extra points | walking | worst one route |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| crucible | 80 | 54 | **26** | 21 of 26 | +68 | **+1,2%** | **+17,7%** |
+| broken country | 80 | 59 | **21** | 14 of 21 | +79 | +0,3% | +12,7% |
+| great field | 40 | 29 | **11** | 7 of 11 | +9 | +0,7% | +14,2% |
+| long march | 80 | 74 | 6 | 0 of 6 | +10 | −0,1% | 0,0% |
+| sideways mile | 40 | 31 | **9** | 5 of 9 | +16 | **+3,2%** | **+160,1%** |
+
+**A third of every route on the crowded fields changes, and four in five of the
+changed ones are dearer to walk.** One route on Sideways Mile costs 2,6 times
+what it did. That is what the furthest-first scan was buying and nobody had
+priced: the wobble it removes is real ground.
+
+**What it saves: nothing measurable.** The casts fall to 34–40% exactly as
+predicted, and the clock does not move.
+
+| field | furthest first | outward | casts |
+|---|---:|---:|---:|
+| crucible | 0,425 ms/order | 0,419 | 40,1% |
+| broken country | 0,501 | 0,491 | 35,4% |
+| great field | 0,346 | 0,306 | 34,0% |
+
+**[M120]'s 7–12% is wrong and is corrected here.** It was derived from a share of
+clearance *checks*, and this pass's checks are the cheap kind: long casts down
+open ground where the near query hands back nothing to sweep. **A count of checks
+is not a cost.** That is the same mistake as [M114c]'s inclusive column read as a
+self time, in a different disguise, and it is the third time this session that a
+proxy has been mistaken for the clock.
+
+**An unwarmed first row nearly hid it.** The first pass reported furthest-first
+on the crucible at 1,800 ms/order against 0,441 — a fourfold win that was the
+JIT, not the loop. Warming both arms before the table removed it entirely. [W12]
+again, and the table now warms four times, alternating arms.
+
+**Left off.** A third of the routes, +1,2% of every regiment's march and one
+route at 2,6×, for a saving inside the noise. Kept as a lever because the
+measurement is worth more than the code, and because an arrangement that made
+these casts dear would change the answer.
+
+### M122 — the cap at five, which already bound
+
+**The designer:** *"implement the 5ms gate we discussed"*. Two things were done:
+the budget is now polled from *inside* the two searches that can overrun
+(`Marching.StopSearchingWhenOutOfTime`), and the host's setting drops from ten to
+**five**. The measurement says the first was unnecessary.
+
+| cap | worst ms | ms/order | over budget | pressed | won't walk | corner walk gave up | smoothing gave up |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| off | 6–18 | 0,50–0,61 | 0 | 0 | 0 | — | — |
+| 10 ms | 5,7–6,3 | 0,42–0,48 | 0 | 0 | 0 | 0 | 0 |
+| **5 ms** | **5,0** | 0,41–0,46 | 4 | **1** | **1** | **0** | **0** |
+| 2 ms | 3,4–3,5 | 0,36–0,38 | 16 | 4 | 4 | 0 | 0–90 |
+| 1 ms | 2,7–3,1 | 0,31–0,32 | 27–34 | 4–6 | 4–6 | 0 | 201–1 863 |
+| 0,5 ms | 1,1–1,2 | 0,24–0,25 | 90–124 | 9–11 | 8–9 | 0–1 | 2 472–6 954 |
+
+**At five the cap binds on its own.** Worst order 5,0 ms on both crowded fields,
+with the inner polls off and with them on — identical, and both give-up counters
+at zero. [M114]'s stage gates are enough at this setting; the "about twice the
+cap" they were measured to leave is a property of a slower run, and the uncapped
+tail here swings between 6 and 18 ms across repeats, which is the same [W12]
+factor of two by itself.
+
+**The polls are live, not dead** — at a tenth of a millisecond the corner walk
+gives up 137 times a field and straightening thousands — so the zeros above are
+real zeros and not an unreachable gate ([W9]). They are kept on, because Mono is
+where the cap actually bites: a played session measured its dearest order at
+287 ms, and Mono at five behaves like this bench at one or two, where they fire.
+
+**What five costs is one route in eighty**, and the price is not linear: one
+press-through and one route the executor refuses at 5 ms, four and four at 2 ms,
+nine and nine at half a millisecond. **The four-in-eighty row is the better guide
+to what a player sees than the one-in-eighty row measured here**, and a route the
+executor refuses is the "gets stuck" report ([M30]).
+
+**Nothing that caches, stamps or half-raises a field is polled.** Both polled
+places abandon nothing: the corner walk's predecessor chain holds only legs
+`IsClearLeg` has already passed, and straightening keeps every point it has not
+reached — which is a route that already passed the gate. A field left half raised
+would be stamped current and wrong, which is the [M104] bug class.

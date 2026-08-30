@@ -91,17 +91,26 @@ namespace BattleChess.Unity
         /// reproduce its own numbers is not a bench.
         /// </para>
         /// <para>
-        /// <b>Ten, and it is a gameplay setting rather than a performance one.</b>
-        /// Measured on the bench it never fires at all - the dearest order
-        /// there is five or six milliseconds - so nothing in the test suite
-        /// changes. In a played session under Mono, with a wing planned across
-        /// twelve threads, the dearest order measured 287 ms, so here it will
-        /// fire and fire often. What it buys is a bounded freeze; what it costs
-        /// is that the hardest orders get the ladder's answer, which may be a
-        /// declared press-through instead of a way round.
+        /// <b>Five, and it is a gameplay setting rather than a performance one.</b>
+        /// At ten it never fired on the bench at all - the dearest order there
+        /// is five or six milliseconds - so it was a ceiling over an empty
+        /// room. At five it binds: [M122] measured the worst order at exactly
+        /// 5,0 ms on both crowded fields, against 6 to 18 ms uncapped, and the
+        /// bound held across repeats where the uncapped tail swung by a factor
+        /// of two.
+        /// </para>
+        /// <para>
+        /// <b>What it costs is one route in eighty.</b> Of 80 orders on the
+        /// crucible the cap turns one into a declared press-through and leaves
+        /// one the executor will not walk. That price is not linear: at 2 ms it
+        /// is four of eighty and at half a millisecond it is nine. In a played
+        /// session under Mono, with a wing planned across twelve threads, the
+        /// dearest order measured 287 ms - so it fires far more often there
+        /// than here, and the four-in-eighty row is the better guide to what a
+        /// player sees than the one-in-eighty row measured on CoreCLR.
         /// </para>
         /// </remarks>
-        public float SearchBudgetMs = 10f;
+        public float SearchBudgetMs = 5f;
 
         private BattleState _battle;
         private BattleMapDefinition _map;

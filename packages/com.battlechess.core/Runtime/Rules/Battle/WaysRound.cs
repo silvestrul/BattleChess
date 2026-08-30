@@ -38,6 +38,9 @@ namespace BattleChess.Rules
     /// <summary>The ways of getting round something, and the one used by default.</summary>
     public static class WaysRound
     {
+        /// <summary>Corner walks cut short by the order's search budget - M122.</summary>
+        [ThreadStatic] internal static int GaveUpWalkingCorners;
+
         /// <summary>Room to spare when aiming past a corner (M19a).</summary>
         internal const float MarginMetres = 8f;
 
@@ -353,6 +356,19 @@ namespace BattleChess.Rules
 
                 for (int step = 0; step < count; step++)
                 {
+                    // The dearest loop in the cascade, and the one that makes a
+                    // cap on the whole order impossible to honour: [M120]
+                    // charged 41-49% of every clearance check in the game to
+                    // this walk. Stopping here is safe because nothing is half
+                    // built - cameFrom holds only legs IsClearLeg has already
+                    // passed, so the route that comes back is a real one that
+                    // merely may not be the cheapest. See [M122].
+                    if (Marching.StopSearchingWhenOutOfTime && Marching.StopNow())
+                    {
+                        GaveUpWalkingCorners++;
+                        break;
+                    }
+
                     int at = -1;
                     float leading = float.MaxValue;
 

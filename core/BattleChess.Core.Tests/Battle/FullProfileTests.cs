@@ -179,6 +179,283 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
+        /// What the outward scan changes, in routes and not only in casts.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [M120] measured what furthest-first costs - 43 casts to make one
+        /// shortcut on the crucible - and predicted an outward scan at a third
+        /// of it. That is the cheap half of the question. The dear half is
+        /// [W10]: a cheaper number is not a better route, and the two scans
+        /// differ wherever clearance is not monotone along a route.
+        /// </para>
+        /// <para>
+        /// So both arms plan the same eighty orders against the same
+        /// arrangement, and the routes are compared point by point. The budget
+        /// is off throughout, because a cap makes an answer depend on how fast
+        /// the machine was and this is a comparison of answers.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatTheOutwardScanChanges()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            bool wasOutward = RouteSmoothing.ExtendOutwards;
+
+            try
+            {
+                Marching.SearchBudgetMs = 0f;
+
+                _out.WriteLine(
+                    $"{"field",-15}{"orders",7}{"same",6}{"changed",9}{"dearer",8}" +
+                    $"{"points",8}{"seconds",12}{"worst one",11}{"unwalk",8}" +
+                    $"{"casts",9}{"of them",9}");
+                _out.WriteLine(new string('-', 104));
+
+                foreach (string field in new[]
+                         { "crucible", "brokencountry", "greatfield", "longmarch", "sidewaysmile" })
+                {
+                    List<Route> back = RoutesUnder(field, outward: false, out long backCasts);
+                    List<Route> ahead = RoutesUnder(field, outward: true, out long aheadCasts);
+
+                    int same = 0, changed = 0, extraPoints = 0, dearer = 0;
+                    double extraSeconds = 0d, worstShare = 0d, walked = 0d;
+                    int backUnwalkable = 0, aheadUnwalkable = 0;
+
+                    for (int i = 0; i < back.Count; i++)
+                    {
+                        if (!back[i].Walks) backUnwalkable++;
+                        if (!ahead[i].Walks) aheadUnwalkable++;
+
+                        walked += back[i].Seconds;
+
+                        if (SameRoute(back[i].Points, ahead[i].Points)) { same++; continue; }
+
+                        changed++;
+                        extraPoints += ahead[i].Points.Length - back[i].Points.Length;
+
+                        double delta = ahead[i].Seconds - back[i].Seconds;
+                        extraSeconds += delta;
+
+                        if (delta > 0d) dearer++;
+
+                        if (back[i].Seconds > 0d)
+                            worstShare = Math.Max(worstShare, delta / back[i].Seconds);
+                    }
+
+                    _out.WriteLine(
+                        $"{field,-15}{back.Count,7}{same,6}{changed,9}" +
+                        $"{$"{dearer}/{changed}",8}{extraPoints,8:+0;-0;0}" +
+                        $"{$"{extraSeconds / Math.Max(1d, walked):+0.0%;-0.0%;0.0%}",12}" +
+                        $"{worstShare,11:+0.0%;-0.0%;0.0%}" +
+                        $"{$"{backUnwalkable}/{aheadUnwalkable}",8}" +
+                        $"{backCasts,9:N0}{(double)aheadCasts / Math.Max(1L, backCasts),9:0.0%}");
+                }
+
+                // And what it is worth on the clock, which is the half [M120]
+                // already predicted and this only has to confirm.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine($"{"field",-15}{"scan",-12}{"ms/order",10}{"worst ms",10}" +
+                               $"{"routed",8}{"pressed",9}{"unwalk",8}{"seconds",10}");
+                _out.WriteLine(new string('-', 82));
+
+                // Warmed under both scans first. The first row of a table is
+                // otherwise charged with compiling what the rest of it reuses,
+                // and it reads as a difference between the arms: one unwarmed
+                // pass here reported the furthest-first crucible at 1,800
+                // ms/order against 0,441, a fourfold gap that was not there.
+                foreach (bool warm in new[] { false, true, false, true })
+                {
+                    RouteSmoothing.ExtendOutwards = warm;
+                    foreach (string field in new[] { "crucible", "brokencountry", "greatfield" })
+                        Measure(field, planner: null, passes: 2);
+                }
+
+                foreach (string field in new[] { "crucible", "brokencountry", "greatfield" })
+                {
+                    foreach (bool outward in new[] { false, true })
+                    {
+                        RouteSmoothing.ExtendOutwards = outward;
+
+                        double perOrder = double.MaxValue, worst = 0d;
+                        Row last = null!;
+
+                        for (int repeat = 0; repeat < 3; repeat++)
+                        {
+                            last = Measure(field, planner: null, passes: 2);
+                            perOrder = Math.Min(perOrder, last.MsPerOrder);
+                            worst = Math.Max(worst, last.Worst);
+                        }
+
+                        _out.WriteLine(
+                            $"{field,-15}{(outward ? "outward" : "furthest first"),-12}" +
+                            $"{perOrder,10:0.000}{worst,10:0.0}" +
+                            $"{last.Routed,8}{last.Pressed,9}{last.Unwalkable,8}{last.Seconds,10:0}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+                RouteSmoothing.ExtendOutwards = wasOutward;
+            }
+        }
+
+        private readonly struct Route
+        {
+            public Route(Vec2[] points, double seconds, bool walks)
+            {
+                Points = points;
+                Seconds = seconds;
+                Walks = walks;
+            }
+
+            public Vec2[] Points { get; }
+            public double Seconds { get; }
+            public bool Walks { get; }
+        }
+
+        /// <summary>Every route on a field, planned under one scan.</summary>
+        private static List<Route> RoutesUnder(string field, bool outward, out long casts)
+        {
+            RouteSmoothing.ExtendOutwards = outward;
+
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            // Warm, then count - the first order through pays for compiling the
+            // planner and would swamp a cast count as it swamps a clock.
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            RouteSmoothing.CastsTried = 0L;
+
+            var routes = new List<Route>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Plan plan = Marching.PlanTo(
+                    battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                routes.Add(plan.Path.Found
+                    ? new Route(
+                        plan.Path.Waypoints.ToArray(),
+                        Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold),
+                        StagedRoutePlanner.WalksCleanly(battle, unit, plan))
+                    : new Route(Array.Empty<Vec2>(), 0d, walks: true));
+            }
+
+            casts = RouteSmoothing.CastsTried;
+
+            return routes;
+        }
+
+        /// <summary>
+        /// Whether two routes are the same one, to within the tolerance a
+        /// waypoint is worth.
+        /// </summary>
+        /// <remarks>
+        /// A centimetre. The two scans either return the same waypoint or a
+        /// different one from the same list, so nothing here turns on where the
+        /// threshold sits - it is a guard against float arithmetic, not a
+        /// judgement about how close is close enough.
+        /// </remarks>
+        private static bool SameRoute(Vec2[] one, Vec2[] other)
+        {
+            if (one.Length != other.Length) return false;
+
+            for (int i = 0; i < one.Length; i++)
+                if (Vec2.Distance(one[i], other[i]) > 0.01f) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a cap on the whole order is honoured once the searches poll
+        /// it from within, and what that costs in routes.
+        /// </summary>
+        /// <remarks>
+        /// [M114] made the cap bind on the cascade and bounded an order at about
+        /// twice it, because a gate can only stop a stage <i>starting</i>. This
+        /// asks whether polling inside the two places that overrun - the corner
+        /// walk and the straightening pass - closes that factor of two, and what
+        /// it costs the routes to close it.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhetherTheCapBindsAtFive()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            bool wasInner = Marching.StopSearchingWhenOutOfTime;
+
+            string[] fields = { "crucible", "brokencountry" };
+
+            try
+            {
+                foreach (string warm in fields) Measure(warm, planner: null, passes: 1);
+
+                _out.WriteLine(
+                    $"{"cap",-8}{"inner",-8}{"field",-15}{"worst ms",9}{"ms/order",9}{"over",6}" +
+                    $"{"routed",8}{"pressed",8}{"unwalk",7}{"seconds",9}" +
+                    $"{"corners",9}{"smoothing",11}");
+                _out.WriteLine(new string('-', 107));
+
+                foreach (float cap in new[] { 0f, 10f, 5f, 2f, 1f, 0.5f })
+                {
+                    Marching.SearchBudgetMs = cap;
+
+                    foreach (bool inner in new[] { false, true })
+                    {
+                        Marching.StopSearchingWhenOutOfTime = inner;
+
+                        foreach (string field in fields)
+                        {
+                            // Worst of the repeats, least of the means - [M113].
+                            // A claim that a cap *bounds* an order is a claim
+                            // about the tail, so it is tested against the worst
+                            // seen and never the kindest.
+                            double worst = 0d, perOrder = double.MaxValue;
+                            int over = 0;
+                            long corners = 0L, gaveUp = 0L;
+                            Row last = null!;
+
+                            for (int repeat = 0; repeat < 3; repeat++)
+                            {
+                                Marching.OrdersOverBudget = 0;
+                                WaysRound.GaveUpWalkingCorners = 0;
+                                RouteSmoothing.GaveUpSmoothing = 0L;
+
+                                last = Measure(field, planner: null, passes: 2);
+
+                                worst = Math.Max(worst, last.Worst);
+                                perOrder = Math.Min(perOrder, last.MsPerOrder);
+                                over = Math.Max(over, Marching.OrdersOverBudget);
+                                corners = Math.Max(corners, WaysRound.GaveUpWalkingCorners);
+                                gaveUp = Math.Max(gaveUp, RouteSmoothing.GaveUpSmoothing);
+                            }
+
+                            _out.WriteLine(
+                                $"{(cap <= 0f ? "off" : $"{cap:0.##} ms"),-8}" +
+                                $"{(inner ? "polled" : "gates"),-8}{field,-15}" +
+                                $"{worst,9:0.0}{perOrder,9:0.000}{over,6}" +
+                                $"{last.Routed,8}{last.Pressed,8}{last.Unwalkable,7}" +
+                                $"{last.Seconds,9:0}{corners,9:N0}{gaveUp,11:N0}");
+                        }
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+                Marching.StopSearchingWhenOutOfTime = wasInner;
+            }
+        }
+
+        /// <summary>
         /// Which stage asks the clearance checks, and which stage's are refused.
         /// </summary>
         /// <remarks>
@@ -921,7 +1198,18 @@ namespace BattleChess.Tests.Battle
 
             try
             {
-                foreach (string warm in fields) Measure(warm, planner: null, passes: 1);
+                // Warmed under both arms and at a cap, because the first row of a
+                // sweep is otherwise charged with compiling everything the rest
+                // of it reuses - which lands on whichever arm happens to be
+                // measured first and reads as a difference between the arms.
+                Marching.SearchBudgetMs = 5f;
+
+                foreach (bool arm in new[] { false, true, false, true })
+                {
+                    Marching.StopSearchingWhenOutOfTime = arm;
+
+                    foreach (string warm in fields) Measure(warm, planner: null, passes: 2);
+                }
 
                 _out.WriteLine(
                     $"{"cap",-8}{"field",-15}{"worst ms",9}{"ms/order",9}{"over",6}" +
