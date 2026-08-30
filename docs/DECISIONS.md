@@ -1545,28 +1545,72 @@ thrown away by the caller**. The gap is the bucket: at 128 m a query keeps a
 bucket if its *square* reaches the corridor, so a body in the far corner of a kept
 bucket comes back although it is nowhere near the line.
 
-**Built, measured, refused.** `UnitIndex.SiftAtTheIndex` tests each body against
-the segment before handing it back — conservative by construction, since the
-bounding radius circumscribes the footprint.
+**Built, measured, refused — and the first measurement of it was wrong in the
+usual direction.** `UnitIndex.SiftAtTheIndex` tests each body against the segment
+before handing it back. The first run reported +9% to +16%, and that number
+included a mistake of mine: `Marching`'s body scan **already applies exactly this
+test** — `span = reach + BoundingRadius`, the same projection onto the same
+segment — so the sift was *added* rather than *moved*, and every body paid the
+arithmetic twice. Skipping the caller's copy when the sift is on is the honest
+comparison:
 
 | field | ms/order off | on | change | yield/query off → on | routes |
 |---|---:|---:|---:|---:|---|
-| crucible | 2,319 | 2,681 | **+15,6%** | 12,80 → 3,35 | identical |
-| broken country | 2,633 | 3,009 | +14,3% | 10,62 → 3,07 | identical |
-| long march | 1,068 | 1,223 | +14,5% | 9,82 → 2,58 | identical |
-| great field | 2,080 | 2,277 | +9,5% | 7,14 → 3,60 | identical |
-| sideways mile | 2,115 | 2,322 | +9,8% | 7,06 → 3,54 | identical |
+| crucible | 2,231 | 2,538 | **+13,8%** | 12,80 → 3,35 | identical |
+| broken country | 2,548 | 2,795 | +9,7% | 10,62 → 3,07 | identical |
+| long march | 1,056 | 1,169 | +10,7% | 9,82 → 2,58 | identical |
+| great field | 2,065 | 2,186 | +5,9% | 7,14 → 3,60 | identical |
+| sideways mile | 2,011 | 2,120 | +5,4% | 7,06 → 3,54 | identical |
 
-**It does exactly what it was built to do and costs 9–16% for it.** The yield
-falls by three quarters, every route on every field is unchanged, every field is
-slower. The rejection was cheaper where it already was: the caller refuses a body
-on a bounding test of a few compares, and this refuses it on a projection onto the
-segment, a clamp and a squared distance — asked 171 537 times a field.
+**Still a loss, and now for a reason worth keeping.** The test did not get dearer,
+it got **asked more often and colder**. The caller applies it after `IsOnField`
+and `IsInTheWayOf` have already thrown bodies out, against a list it has just
+built and is walking in order; the index applies it to every body in every visited
+bucket, each one a dereference into the order of battle. Moving a rejection
+earlier only helps if the thing it rejects was going to cost something, and here
+the caller's version of the same rejection was already the cheap one.
 
-**Third time this lesson.** [M111] cached the query and lost; [M116] bounded the
-search and lost; this narrowed the answer and lost. **The clearance query's cost
-is not the size of the list it returns.** At 2,3 µs a call over 12,8 bodies it is
-already about 180 ns a body, and the remaining work is not in bodies anybody can
-avoid looking at.
+**Fourth time this lesson.** [M111] cached the query and lost; [M116] bounded the
+search and lost; this narrowed the answer and lost; and [M95] swept the bucket
+width and found a flat basin. **The clearance query's cost is not the size of the
+list it returns.** At 2,3 µs a call over 12,8 bodies it is already about 180 ns a
+body, and there is no fat left in *which* bodies it looks at.
 
 Kept behind the switch, off, as a measurement rather than deleted.
+
+### M119 — the unified map already exists, twice, and the two halves do not talk
+
+**The designer:** *"maybe we have some kind of map with the state of all the game
+(all the terrain, obstacles, and units) and we could somehow extract out of it just
+the units in a radius"*.
+
+Both halves of that are built, which is worth writing down because the idea will
+keep recurring:
+
+- **`UnitIndex`** is the extract-by-radius half: a bucket grid over every unit on
+  the field, asked by point or by segment, 128 m buckets, refiled when the
+  arrangement changes. It is what [M118] just measured.
+- **`SharedField`** is the whole-state half: a hex field over the whole map
+  carrying terrain going cost *and* body coverage together, cached per footprint
+  and spacing, and since [M104] patched incrementally as regiments move rather
+  than raised again.
+
+**The gap the designer's framing exposes is real, though, and it is not the one
+the question asks about.** These two are separate representations of the same
+information, and the cascade uses them separately: the grid stages reason over
+`SharedField`, while every clearance check goes to `UnitIndex` and then sweeps
+rectangles. **The field already knows where the bodies are, and the clearance
+check re-derives it.**
+
+Untried, and worth naming precisely so it can be tried or refused on purpose. A
+field cell is regiment-sized and marked for a particular footprint and facing, so
+it cannot *replace* the swept-rectangle test — it is coarse where the sweep is
+exact, and the whole reason a grid route still has to pass `WalksCleanly`. What it
+could do is answer the easy cases without a query at all: if every cell along a
+leg is wholly unmarked, no body is near it and there is nothing to scan.
+
+**The prior is poor and should be said out loud.** That would be the fifth attempt
+in this family. What would make it different from the four that lost is that it
+removes the query rather than narrowing it — but the ceiling on it is exactly the
+share of clearance checks that touch no marked cell, and **nobody has measured
+that share.** Measure the ceiling before building anything.

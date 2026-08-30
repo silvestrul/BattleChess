@@ -1579,9 +1579,19 @@ namespace BattleChess.Rules
                     // were anywhere near the march, because every clearance check
                     // on every leg was asking Sweep.FirstTouch and OverlapFraction
                     // about bodies the segment could not geometrically reach.
-                    float span = reach + other.Footprint.BoundingRadius;
-                    if (DistanceSquaredToSegment(other.Position, from, along, length) > span * span)
-                        continue;
+                    // Skipped when the index has already applied it. M118's
+                    // first measurement had the sift *added* here rather than
+                    // moved, so it paid this projection twice a body and was
+                    // reported as the sift costing 15% - which was the cost of
+                    // doing the same arithmetic twice, not of doing it earlier
+                    // (W5: a measurement reports what actually happened).
+                    if (!UnitIndex.SiftAtTheIndex)
+                    {
+                        float span = reach + other.Footprint.BoundingRadius;
+                        if (DistanceSquaredToSegment(other.Position, from, along, length) >
+                            span * span)
+                            continue;
+                    }
 
                     if (WhereItIsStanding(body, travel, other)) continue;
 

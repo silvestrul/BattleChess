@@ -360,12 +360,15 @@ namespace BattleChess.Rules
         /// <b>Measured, and it loses. Off.</b> It does exactly what it was built
         /// to do - the yield falls from 12,80 bodies a query to <b>3,35</b>, and
         /// every route on every field is unchanged - and an order costs
-        /// <b>9% to 16% more</b> on all five fields. The rejection it moves
-        /// earlier was cheaper where it was: the caller refuses a body on a
-        /// bounding test of a few compares, and this refuses it on a projection
-        /// onto the segment, a clamp and a squared distance, asked 171 537 times
-        /// a field. <b>Kept behind the switch as a measurement rather than
-        /// deleted, so the idea is not had again.</b>
+        /// <b>5% to 14% more</b> on all five fields.
+        /// </para>
+        /// <para>
+        /// It loses because the index sees more bodies than the caller did.
+        /// <c>Marching</c>'s scan applies the same projection, but only after
+        /// <c>IsOnField</c> and <c>IsInTheWayOf</c> have thrown bodies out, and
+        /// against a list already fetched; this applies it to every body in every
+        /// visited bucket, each one a dereference into the order of battle. The
+        /// test did not get dearer, it got asked more often and colder.
         /// </para>
         /// <para>
         /// Third time the same lesson: [M111] and [M116] both lost by trying to
