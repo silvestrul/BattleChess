@@ -1199,3 +1199,66 @@ yet: move the escape so it is asked *between* stages rather than once, and make 
 search that gives up on the clock say so, so the cascade can stop rather than
 step down. `OutOfTimeAtTheGrid` also never reset with the other counters, so any
 earlier table that read it was reading every pass since the process began; fixed.
+
+### M114 — the cap asked at every stage boundary, and never inside one
+
+**The designer, after M113:** *"when i said the cap i meant for the overall search
+i think you understood it wrong."*
+
+**The scope was already right and the enforcement was not**, which is worth
+separating because it changes what needed building. `Marching.PlanTo` opens the
+budget from the same timestamp the order is charged against and closes it in the
+`finally`, so it already spans the whole cascade — ladder, crab, coarse grid, fine
+grids, tangents, lattice, smoothing. What it lacked was any power to stop one.
+[M113] measured the single door it had and found the count of orders arriving at
+it out of time was **zero at every budget**: it sat after the cheap coarse grid
+while the milliseconds go in the dear stages past it.
+
+**So the clock is now asked at five stage boundaries** — before the coarse grid,
+before the fine tier, before *each* finer spacing, before the visibility graphs,
+and before the pose search — each handing back the answer already in hand and
+already proved: the ladder's route, or the press it declared ([M98]).
+
+**Asked between stages and never inside one, and that is a correctness
+requirement rather than a preference.** A field is raised once and thereafter
+patched, so a raise abandoned half way would be stamped current and read wrong by
+every later order — exactly the fault [M104] shipped. A stage either runs or does
+not start.
+
+| cap | worst ms | ms/order | over | routed | pressed | before M114: worst / ms-order |
+|---|---:|---:|---:|---:|---:|---:|
+| off | 36,5 / 32,7 | 2,27 / 2,60 | 0 | 80 | 0 | — |
+| 20 ms | **20,1 / 20,1** | 2,19 / 2,43 | 4 / 6 | 80 | 1 / 1 | 32,6 / 2,41 |
+| 10 ms | **18,1 / 17,8** | **1,98 / 2,12** | 16 / 20 | 80 | 4 / 4 | **44,5 / 3,20** |
+| 5 ms | 14,2 / 14,7 | 1,76 / 1,78 | 30 / 26 | 80 | 4 / 6 | 41,0 / 3,03 |
+| 2 ms | 3,7 / 3,2 | 1,11 / 1,02 | 130 / 132 | 80 | 22 / 28 | — |
+
+*(crucible / brokencountry; worst is the **worst** of the repeats, not the least,
+because a claim that something is bounded must be tested against the worst seen.)*
+
+**The inversion is gone.** A 10 ms cap used to make an order dearer than no cap at
+all — 3,20 ms against 2,27. It now makes it **cheaper**, 1,98, which is what a cap
+was always supposed to do. Every order still routes at every budget.
+
+**It bounds an order to about twice the cap, not to the cap.** 18,1 ms under 10,
+20,1 under 20. That is the gate's design showing through honestly: it stops a
+stage *starting*, so the overshoot is whatever single stage was already running,
+and the coarse grid's raise-and-search is itself ten-odd milliseconds on a bad
+order. Cutting it further means making a field raise resumable, which is a much
+larger change than this one and is not taken.
+
+**What it costs is press-throughs, and the editor will pay more than this table.**
+Four of eighty at 10 ms against none uncapped. The bench is CoreCLR and the editor
+is Mono at two to four times slower, so **10 ms in play buys what 2 to 5 ms buys
+here** — the 2 ms row presses 22 to 28 of 80. `BattlefieldController` ships
+`SearchBudgetMs = 10f`, so this is live in the next play-test and the symptom it
+would produce is *"cavalry goes through units"*, which is the report this whole
+line of work began from. **Raise the setting before reading a play-test as a
+routing fault.**
+
+`OutOfTimeWithNothing` counts orders that ran out holding neither a route nor a
+press, which have nothing to leave with and so carry on past every gate. **It is
+zero on both fields at every budget**, so the hole is real but unreached. Refusing
+those orders outright would leave a regiment standing still because planning was
+slow — a rule about what the game does rather than what it costs, and the
+designer's to settle.

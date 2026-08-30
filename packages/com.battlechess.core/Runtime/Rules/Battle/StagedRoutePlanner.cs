@@ -52,6 +52,25 @@ namespace BattleChess.Rules
         /// </summary>
         internal static int OutOfTimeReachedTheGrid;
 
+        /// <summary>
+        /// Orders that ran out of time holding nothing, and so carried on.
+        /// </summary>
+        /// <remarks>
+        /// <b>The remaining hole in the cap, kept visible on purpose.</b> A gate
+        /// can only leave with an answer somebody proved, and an order whose
+        /// ladder found neither a route nor a press has none - so it carries on
+        /// past every gate and is bounded by nothing. Refusing it instead would
+        /// leave a regiment standing still because planning was slow, which is a
+        /// rule about what the game does rather than about what it costs, and
+        /// [W-ask] says that is the designer's to settle. Counted so the size of
+        /// the hole is a number rather than a worry.
+        /// </remarks>
+        internal static int OutOfTimeWithNothing;
+
+        /// <summary>Which gate the clock stopped an order at, for the record.</summary>
+        internal static int StoppedBeforeCoarse, StoppedBeforeFine, StoppedBeforeGraphs,
+            StoppedBeforePose;
+
         /// <summary>How far the pose search may stray from the route guiding it.</summary>
         /// <summary>What a corridor-bounded pose search may spend before widening.</summary>
         internal static int BoundedBudget = 4000;
@@ -400,7 +419,9 @@ namespace BattleChess.Rules
                     TangentTooDear = WayRoundTooDear = CrabTooLong =
                     TangentAsked = BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
-            OutOfTimeAtTheGrid = OutOfTimeReachedTheGrid = 0;
+            OutOfTimeAtTheGrid = OutOfTimeReachedTheGrid = OutOfTimeWithNothing = 0;
+            StoppedBeforeCoarse = StoppedBeforeFine = StoppedBeforeGraphs =
+                StoppedBeforePose = 0;
             HybridPlanning.HybridAStarPlanner.RanOutOfTime = 0;
             GridPlanning.GridRoutePlanner.ResetCounters();
         }
@@ -560,6 +581,59 @@ namespace BattleChess.Rules
 
             Plan ladder = Marching.ByTheLadder(battle, unit, pathfinder, destination, log, wayRound);
 
+            // M114. The clock, asked at every stage boundary rather than once.
+            //
+            // [M113] measured the single door this cascade used to have and
+            // found it never opened: the count of orders arriving at it already
+            // out of time was <b>zero at every budget</b>, because it sat after
+            // the cheap coarse grid while the milliseconds go in the dear stages
+            // past it. A cap checked before the expensive work cannot bound the
+            // expensive work, so it is now checked before each piece of it.
+            //
+            // What a gate hands back is what is already in hand and already
+            // proved: the ladder's route, or the press it declared. M98 - a
+            // declared press is a legitimate answer. What is never returned here
+            // is a route no stage checked.
+            //
+            // The clock is asked between stages and never inside one. A field is
+            // cached and thereafter patched, so a raise abandoned half way would
+            // be stamped current and read wrong by every later order - which is
+            // exactly the fault [M104] shipped and [M113]'s gate must not
+            // reintroduce. A stage either runs or does not start.
+            bool NoTimeLeft(ref int gate, string before)
+            {
+                if (!Marching.StopNow()) return false;
+
+                OutOfTimeReachedTheGrid++;
+
+                // Nothing proved to leave with. Carrying on is the conservative
+                // reading: the alternative is refusing the order outright, and a
+                // regiment standing still because planning was slow is a change
+                // to what the game does, not to what it costs.
+                if (!ladder.Path.Found)
+                {
+                    OutOfTimeWithNothing++;
+                    return false;
+                }
+
+                OutOfTimeAtTheGrid++;
+                gate++;
+
+                // Said only when the answer is still wanted. A superseded order
+                // is thrown away on arrival, so a line explaining what it
+                // settled for would be a line about a route nobody walks - and
+                // M80's whole point is that the click which superseded it is
+                // the event worth reading about.
+                if (Marching.OutOfTime())
+                    log?.Info("Path",
+                        $"{unit.Def.DisplayName} ran out of its search budget " +
+                        $"({Marching.SearchBudgetMs:0} ms) before {before} — taking the ladder's " +
+                        $"{(ladder.PressedThrough ? "press-through" : "route")}.",
+                        unit.Id);
+
+                return true;
+            }
+
             // A direct cast is already the exact shape the executor will walk.
             // A ladder detour is only a coarse topology proposal: its bends
             // leave the mover to arrive on a new front while other regiments
@@ -592,6 +666,8 @@ namespace BattleChess.Rules
             // poses and costs a hex A* across a field of about 2 700 cells -
             // three orders of magnitude under the lattice, whose worst case is
             // set by the arrangement rather than by the map.
+            if (NoTimeLeft(ref StoppedBeforeCoarse, "the regiment grid")) return ladder;
+
             IReadOnlyList<Vec2>? gridRoute = null;
 
             if (GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Off)
@@ -622,40 +698,7 @@ namespace BattleChess.Rules
             // order to all three, which is how the first measurement of this
             // made the Crucible slower rather than faster - 81 ms to 98, and the
             // worst order from 6 to 23.
-            //
-            // So running out of time leaves the cascade rather than stepping
-            // down it, and takes the answer already in hand: the ladder's, which
-            // is either a route it proved or a press-through it declared. M98:
-            // a declared press is a legitimate answer. What is never returned
-            // here is something nobody checked.
-            bool spent = Marching.StopNow();
-
-            // Counted apart from the escape itself, because "the door never
-            // opened" has two quite different causes and they want opposite
-            // fixes: a clock that has not run out yet by the time the order
-            // reaches this line means the door is in the wrong place, and a
-            // ladder holding nothing means the door is barred.
-            if (spent) OutOfTimeReachedTheGrid++;
-
-            if (spent && ladder.Path.Found)
-            {
-                OutOfTimeAtTheGrid++;
-
-                // Said only when the answer is still wanted. A superseded order
-                // is thrown away on arrival, so a line explaining what it
-                // settled for would be a line about a route nobody walks - and
-                // M80's whole point is that the click which superseded it is
-                // the event worth reading about.
-                if (Marching.OutOfTime())
-                    log?.Info("Path",
-                        $"{unit.Def.DisplayName} ran out of its search budget " +
-                        $"({Marching.SearchBudgetMs:0} ms) after the grid — taking the ladder's " +
-                        $"{(ladder.PressedThrough ? "press-through" : "route")} rather than asking " +
-                        "the finer grids, the tangents and the pose search.",
-                        unit.Id);
-
-                return ladder;
-            }
+            if (NoTimeLeft(ref StoppedBeforeFine, "the finer grids")) return ladder;
 
             // ---- the fine tier, M87 -----------------------------------------
             //
@@ -678,6 +721,12 @@ namespace BattleChess.Rules
                 foreach (float finer in FineSpacings)
                 {
                     if (finer <= 0f) continue;
+
+                    // Asked per spacing, not per tier. Half and quarter are four
+                    // and sixteen times the field, so an order that has time for
+                    // one of them has not thereby got time for the other.
+                    if (NoTimeLeft(ref StoppedBeforeFine, $"the grid at {finer:0.##}"))
+                        return ladder;
 
                     GridPlanning.GridRoutePlanner.FineAsked++;
 
@@ -771,6 +820,8 @@ namespace BattleChess.Rules
                 return true;
             }
 
+            if (NoTimeLeft(ref StoppedBeforeGraphs, "the tangent graph")) return ladder;
+
             // ---- the tangent graph, M86 ------------------------------------
             //
             // Below the grid since M86, and drawn only if this line is reached.
@@ -837,6 +888,8 @@ namespace BattleChess.Rules
             // only for the orders that would otherwise press, and Mx2c says a
             // press is Priority 3: what a way round costs is not a reason to
             // prefer walking through your own men.
+            if (NoTimeLeft(ref StoppedBeforePose, "the pose search")) return ladder;
+
             if (PoseSearchBeforePressing && GridPlanning.GridRoutePlanner.Use != GridPlanning.GridUse.Replace)
             {
                 using var _pose = PlanningProfile.Measure(PlanningProfile.Step.PoseSearch);

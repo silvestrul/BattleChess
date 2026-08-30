@@ -207,7 +207,7 @@ namespace BattleChess.Tests.Battle
         /// </para>
         /// </remarks>
         [Fact(Skip = "A record of a measurement rather than a check on one - " +
-                     "it orders two bench fields thirty-two times over at four budgets.")]
+                     "it orders two bench fields sixty times over at five budgets.")]
         public void WhyATighterCapCostsMore()
         {
             float was = Marching.SearchBudgetMs;
@@ -219,28 +219,46 @@ namespace BattleChess.Tests.Battle
                 foreach (string warm in fields) Measure(warm, planner: null, passes: 1);
 
                 _out.WriteLine(
-                    $"{"cap",-8}{"field",-16}{"worst ms",10}{"ms/order",10}" +
-                    $"{"spent",8}{"escaped",9}{"coarse won",12}{"fine asked",12}" +
-                    $"{"fine won",10}{"pose asked",12}");
-                _out.WriteLine(new string('-', 99));
+                    $"{"cap",-8}{"field",-15}{"worst ms",9}{"ms/order",9}{"over",6}" +
+                    $"{"routed",8}{"pressed",8}{"unwalk",7}" +
+                    $"{"coarse",7}{"fine",6}{"graphs",7}{"pose",6}{"nothing",8}");
+                _out.WriteLine(new string('-', 108));
 
-                foreach (float cap in new[] { 0f, 20f, 10f, 5f })
+                foreach (float cap in new[] { 0f, 20f, 10f, 5f, 2f })
                 {
                     Marching.SearchBudgetMs = cap;
 
                     foreach (string field in fields)
                     {
-                        Row row = Measure(field, planner: null, passes: 3);
+                        // The worst of the repeats, not the least. [M113]: a
+                        // maximum is one sample of a tail and swings by half its
+                        // own value, so a claim that the cap *bounds* an order
+                        // has to be tested against the worst seen and not the
+                        // kindest.
+                        double worst = 0d, perOrder = double.MaxValue;
+                        int over = 0;
+                        Row last = null!;
+
+                        for (int repeat = 0; repeat < 3; repeat++)
+                        {
+                            Marching.OrdersOverBudget = 0;
+
+                            last = Measure(field, planner: null, passes: 2);
+
+                            worst = Math.Max(worst, last.Worst);
+                            perOrder = Math.Min(perOrder, last.MsPerOrder);
+                            over = Math.Max(over, Marching.OrdersOverBudget);
+                        }
 
                         _out.WriteLine(
-                            $"{(cap <= 0f ? "off" : $"{cap:0} ms"),-8}{field,-16}" +
-                            $"{row.Worst,10:0.0}{row.MsPerOrder,10:0.000}" +
-                            $"{StagedRoutePlanner.OutOfTimeReachedTheGrid,8}" +
-                            $"{StagedRoutePlanner.OutOfTimeAtTheGrid,9}" +
-                            $"{GridRoutePlanner.Found,12}" +
-                            $"{GridRoutePlanner.FineAsked,12}" +
-                            $"{GridRoutePlanner.FineFound,10}" +
-                            $"{StagedRoutePlanner.PoseAsked,12}");
+                            $"{(cap <= 0f ? "off" : $"{cap:0} ms"),-8}{field,-15}" +
+                            $"{worst,9:0.0}{perOrder,9:0.000}{over,6}" +
+                            $"{last.Routed,8}{last.Pressed,8}{last.Unwalkable,7}" +
+                            $"{StagedRoutePlanner.StoppedBeforeCoarse,7}" +
+                            $"{StagedRoutePlanner.StoppedBeforeFine,6}" +
+                            $"{StagedRoutePlanner.StoppedBeforeGraphs,7}" +
+                            $"{StagedRoutePlanner.StoppedBeforePose,6}" +
+                            $"{StagedRoutePlanner.OutOfTimeWithNothing,8}");
                     }
 
                     _out.WriteLine(string.Empty);
