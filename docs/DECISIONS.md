@@ -2093,6 +2093,14 @@ unfixed code is not a gate ([W9]).
 **And `WalkTheStagingOnce` ships on**, on [M125]'s measurement: 360 routes of 360
 identical across six fields, the played arrangement's orders halved.
 
+**Confirmed in play, which is the only place it could be.** The designer, on the
+next session: *"performance is finally OK"*. Nothing on the bench could have said
+that - `thecrowdedwing` measures an order and the fault was a frame waiting on
+one, which is a host behaviour with no test in this repo that reaches it. The
+bench's part was to make the plan being waited for half as long and to prove the
+scan gives up when nobody wants it; the rest of the claim rests on the recording
+and on playing it.
+
 **What is still open is the rule, not the machinery.** With the freeze gone and
 the scan cheap, the cap can be made to bind - but the far end of that is a
 question only the designer can answer: **when planning runs out of time and the
