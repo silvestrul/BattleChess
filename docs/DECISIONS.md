@@ -2110,3 +2110,62 @@ session is 66 press-throughs and 96 orders the search could not answer out of
 640. A third option is on the table - take the press only inside a ceiling, as
 `WayRoundCostCeiling` already does for a neighbouring question - and it is the
 one worth measuring first.
+
+### M127 — the closest place it can actually get to
+
+**The designer:** *"i want always to go to the closest destination possible"*,
+answering [M126]'s open question, and it is a better answer than either option
+that was offered: neither shoulder through nor stand still, but **end up as near
+as you can get**.
+
+**The rule, as settled.**
+
+1. A declared press-through is taken only while it costs no more than a ceiling
+   against the same march across an empty field. A regiment squeezing past a
+   neighbour presses; a regiment ploughing through a formed line does not.
+2. Above the ceiling the regiment marches to the furthest point along its ordered
+   line that it can reach without pressing, and stands there.
+3. **The order is not finished.** It stays live, re-plans on the existing stuck
+   cadence, and creeps on as the field clears - until it arrives, or a new order
+   replaces it. A new order overriding the old one is already how orders work
+   ([M80]'s supersession and `GiveOrder`), so that half needed nothing built.
+
+**It composes with [M88a] rather than contradicting it, and the direction is
+worth stating because it is the mirror image.** `WayRoundCostCeiling` at 3,1 says
+a *detour* loses to a press once it is more than 3,1 times dearer - it exists
+because a regiment walked 1 325 m to dodge a press priced at 151 s. This says a
+*press* loses to stopping short once it is more than some multiple dearer than
+walking. So the order of preference becomes: go round if it is not absurd, else
+press if it is only a squeeze, else stop as close as you can and keep trying.
+
+**The dial the designer was shown cannot read, and this is the correction.** The
+choice was put with an illustration of 1,2x for a squeeze and 4,0x for a plough.
+Neither can occur, because **`Marching.SecondsToWalk` does not model
+`PaceWhileInsideItsOwn`**: only `MovementSystem` does, at 0,6, and
+`RouteSearch`. The ladder's own comment says so outright - *"pressing through
+**is** the straight line, so '62 s against 62 s straight' says nothing twice"* -
+and it is right about today's arithmetic. Under the planner's costing the ratio
+of a press to its own straight line is **identically 1,0**, so a ceiling on it
+would never fire at any value.
+
+**Which makes the first pass a [W5] fix rather than a new rule.** The planner
+under-prices every press-through by up to the full 0,6 factor against what the
+executor will actually charge, and plan and walk disagreeing about what a route
+costs is the thing [W5] exists to forbid. Pricing the pressed stretches at the
+pace they are really walked is needed for any version of this rule, and is
+correct on its own.
+
+**And it puts the ceiling in a much narrower band than 3,1 or 4.** At 0,6 pace,
+a march pressed end to end costs 1/0,6 = **1,67x** its straight line, and that is
+the hard maximum. So the useful range is 1,0 to 1,67 and the dial is far more
+sensitive than the neighbouring ceilings: 8 m of press on a 300 m march is
+1,018x, and 180 m of it is 1,40x. The number is to be set from the measured
+distribution over the bench and the two recorded arrangements, not from an
+example.
+
+**Not built yet.** The pass order is: price a press honestly, behind a lever,
+with the route-identity gate every cost change in this file has had; measure what
+presses actually cost once priced; then set the ceiling and truncate above it.
+Changing `SecondsToWalk` moves every comparison in the cascade - both ceilings,
+`CostsMoreThan`, the ladder's own choice between the arch and the crab - so it is
+the widest blast radius of anything touched this session and gets the widest gate.
