@@ -1975,6 +1975,157 @@ namespace BattleChess.Tests.Battle
         private static readonly string[] AllProvingFields =
             { "thecrowdedwing", "crucible", "brokencountry", "greatfield", "longmarch", "sidewaysmile" };
 
+
+        /// <summary>
+        /// What shape the routes actually come out, and which stage drew them.
+        /// </summary>
+        /// <remarks>
+        /// The measurement behind [M129]. Three questions the designer asked
+        /// about the grid, each of which has an arithmetic answer rather than an
+        /// architectural one: how sharp the turns are, how much of the field the
+        /// halo bans, and how many orders the grid answers at all.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatShapeTheRoutesComeOut()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                // The halo, as arithmetic. Every regiment on the bench is the
+                // same rectangle at full strength, so one line covers them all.
+                var print = new Footprint(40f, 20f);
+                float fraction = Math.Clamp(RegimentGrid.ClearanceFraction, 0f, 1f);
+                float reach =
+                    print.HalfDepth + (print.BoundingRadius - print.HalfDepth) * fraction +
+                    Math.Max(0f, RegimentGrid.MarginMetres);
+                float spacing = Math.Max(1f, print.BoundingRadius * 2f * RegimentGrid.SpacingMultiple);
+
+                _out.WriteLine($"regiment          {print.Width:0}x{print.Depth:0} m, " +
+                               $"bounding radius {print.BoundingRadius:0.0} m");
+                _out.WriteLine($"coarse cell       {spacing:0.0} m across");
+                _out.WriteLine("fine cells        " + string.Join(", ",
+                    StagedRoutePlanner.FineSpacings.Select(f => $"{spacing * f:0.0} m")));
+                _out.WriteLine($"terrain hex       {HexPathfinder.DefaultCellSpacingMetres:0.0} m");
+                _out.WriteLine($"halo per body     {reach:0.0} m ({RegimentGrid.Halo})");
+                _out.WriteLine($"gap needed        {2f * reach:0.0} m of clear air between two bodies " +
+                               "before any point in it is unbanned");
+                _out.WriteLine(string.Empty);
+
+                _out.WriteLine(
+                    $"{"field",-16}{"orders",8}{"legs",7}{"detour",9}{"worst",8}" +
+                    $"{">60deg",8}{">90deg",8}{"worst turn",12}");
+                _out.WriteLine(new string('-', 76));
+
+                foreach (string field in AllProvingFields)
+                {
+                    BattleState battle = BenchScenariosTests.Load(field);
+                    IPathfinder pathfinder = new DirectPathfinder(
+                        battle.Terrain, new TerrainMovementModel(TestContent.Terrain),
+                        TestContent.Terrain);
+
+                    int orders = 0, legs = 0, sharp = 0, reversed = 0;
+                    double detour = 0d, worstDetour = 0d, worstTurn = 0d;
+
+                    foreach (UnitInstance unit in battle.UnitsOnField())
+                    {
+                        Plan plan = Marching.PlanTo(
+                            battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                        if (!plan.Path.Found) continue;
+
+                        IReadOnlyList<Vec2> way = plan.Path.Waypoints;
+                        if (way.Count < 2) continue;
+
+                        orders++;
+                        legs += way.Count - 1;
+
+                        float walked = 0f;
+                        for (int i = 1; i < way.Count; i++)
+                            walked += Vec2.Distance(way[i - 1], way[i]);
+
+                        float straight = Vec2.Distance(way[0], way[way.Count - 1]);
+
+                        if (straight > 1f)
+                        {
+                            double over = walked / (double)straight;
+                            detour += over;
+                            worstDetour = Math.Max(worstDetour, over);
+                        }
+
+                        // The turn at each interior waypoint, which is what the
+                        // eye reads as a corner.
+                        bool anySharp = false, anyReversed = false;
+
+                        for (int i = 1; i < way.Count - 1; i++)
+                        {
+                            Vec2 into = way[i] - way[i - 1];
+                            Vec2 outOf = way[i + 1] - way[i];
+
+                            if (into.IsNearZero || outOf.IsNearZero) continue;
+
+                            double turn = Math.Abs(
+                                Facing.FromVector(outOf).Radians - Facing.FromVector(into).Radians);
+
+                            if (turn > Math.PI) turn = 2d * Math.PI - turn;
+
+                            double degrees = turn * 180d / Math.PI;
+                            worstTurn = Math.Max(worstTurn, degrees);
+
+                            if (degrees > 60d) anySharp = true;
+                            if (degrees > 90d) anyReversed = true;
+                        }
+
+                        if (anySharp) sharp++;
+                        if (anyReversed) reversed++;
+                    }
+
+                    _out.WriteLine(
+                        $"{field,-16}{orders,8}{legs / (double)Math.Max(1, orders),7:0.0}" +
+                        $"{detour / Math.Max(1, orders),9:0.000}{worstDetour,8:0.00}" +
+                        $"{sharp,8}{reversed,8}{worstTurn,12:0}");
+                }
+
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("Which stage drew them");
+                _out.WriteLine(
+                    $"{"field",-16}{"staged",8}{"ladder",8}{"bent",7}{"grid",7}" +
+                    $"{"fine",7}{"tangent",9}{"pose",7}{"press",7}");
+                _out.WriteLine(new string('-', 76));
+
+                foreach (string field in AllProvingFields)
+                {
+                    BattleState battle = BenchScenariosTests.Load(field);
+                    IPathfinder pathfinder = new DirectPathfinder(
+                        battle.Terrain, new TerrainMovementModel(TestContent.Terrain),
+                        TestContent.Terrain);
+
+                    foreach (UnitInstance warm in battle.UnitsOnField())
+                        Marching.PlanTo(
+                            battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                    StagedRoutePlanner.ResetCounters();
+
+                    foreach (UnitInstance unit in battle.UnitsOnField())
+                        Marching.PlanTo(
+                            battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    _out.WriteLine(
+                        $"{field,-16}{StagedRoutePlanner.Staged,8}" +
+                        $"{StagedRoutePlanner.LadderClean,8}{StagedRoutePlanner.LadderBent,7}" +
+                        $"{GridRoutePlanner.Found,7}" +
+                        $"{GridRoutePlanner.FineFound,7}" +
+                        $"{StagedRoutePlanner.TangentClean,9}{StagedRoutePlanner.PoseWon,7}" +
+                        $"{StagedRoutePlanner.Pressed,7}");
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
         private static int OrdersOn(string field)
         {
             int many = 0;

@@ -23,14 +23,60 @@ namespace BattleChess.Unity
         public bool WheelBeforeMarching;
 
         /// <summary>
-        /// Battle seconds per real second while running.
+        /// Battle seconds per real second at <c>x1</c>.
         /// </summary>
         /// <remarks>
-        /// Deliberately modest. Manoeuvres worth watching happen over seconds of
-        /// battle time — a pike block needs nine of them to wheel about — and at
-        /// x8 that is over before the eye registers it as a turn at all.
+        /// <para>
+        /// <b>[M128], and it was settled by playing rather than by argument.</b>
+        /// The old x1 was one battle second per real second, and the remark that
+        /// used to sit here argued from a single manoeuvre: a pike block needs
+        /// nine seconds to wheel about, so anything quick loses the wheel. That
+        /// is true of the wheel and wrong about the battle. A regiment walks at
+        /// 1,59 m/s, so crossing four hundred metres of field is four minutes of
+        /// watching nothing happen - and the designer played every session at
+        /// x32 instead, which is a measurement and outranks the argument.
+        /// </para>
+        /// <para>
+        /// So x1 <i>is</i> the old x32, and the slow end is still reachable: the
+        /// band runs down to a thirty-second, which is the old x1 exactly.
+        /// Nothing that could be watched before has stopped being watchable, and
+        /// the wheel is still there at <c>x1/8</c> where it always was.
+        /// </para>
         /// </remarks>
-        public float TimeScale = 3f;
+        public const float NormalBattleSecondsPerSecond = 32f;
+
+        /// <summary>Slowest and fastest the clock may be set to, as multiples of x1.</summary>
+        /// <remarks>
+        /// The reachable band is deliberately the same one as before [M128] -
+        /// one to sixty-four battle seconds per real second - so this is a
+        /// relabelling of the ladder rather than an extension of it. Sixty-four
+        /// is where it stops because that is a tick a frame at sixty frames, and
+        /// past it the catch-up cap in <c>AdvanceClock</c> begins quietly eating
+        /// the ticks it is being asked for.
+        /// </remarks>
+        public const float SlowestScale = 1f / 32f;
+
+        /// <inheritdoc cref="SlowestScale"/>
+        public const float FastestScale = 2f;
+
+        /// <summary>How fast the clock runs, as a multiple of x1.</summary>
+        public float TimeScale = 1f;
+
+        /// <summary>Battle seconds per real second, as the clock actually reads it.</summary>
+        public float BattleSecondsPerSecond => TimeScale * NormalBattleSecondsPerSecond;
+
+        /// <summary>
+        /// The speed as it is written on the screen.
+        /// </summary>
+        /// <remarks>
+        /// The ladder is exact powers of two, so below x1 a fraction reads far
+        /// better than the decimals that would otherwise print x1/32 as "x0.03",
+        /// a number nobody can tell from nought at a glance.
+        /// </remarks>
+        public string SpeedLabel =>
+            TimeScale >= 1f
+                ? $"x{TimeScale:0.##}"
+                : $"x1/{1f / TimeScale:0.##}";
 
         /// <summary>Whether the clock is running.</summary>
         public bool Running = true;
@@ -331,11 +377,13 @@ namespace BattleChess.Unity
 
             GUILayout.Space(6);
 
-            GUILayout.Label($"Clock   x{TimeScale:0}   {(Running ? "running" : "PAUSED")}");
+            GUILayout.Label(
+                $"Clock   {SpeedLabel}   ({BattleSecondsPerSecond:0} battle s/s)   " +
+                $"{(Running ? "running" : "PAUSED")}");
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(Running ? "Pause" : "Run")) Running = !Running;
-            if (GUILayout.Button("Slower")) TimeScale = Mathf.Max(1f, TimeScale * 0.5f);
-            if (GUILayout.Button("Faster")) TimeScale = Mathf.Min(64f, TimeScale * 2f);
+            if (GUILayout.Button("Slower")) TimeScale = Mathf.Max(SlowestScale, TimeScale * 0.5f);
+            if (GUILayout.Button("Faster")) TimeScale = Mathf.Min(FastestScale, TimeScale * 2f);
             GUILayout.EndHorizontal();
 
             GUILayout.Space(6);

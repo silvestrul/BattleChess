@@ -1480,10 +1480,12 @@ namespace BattleChess.Unity
             }
 
             if (Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.KeypadPlus))
-                _options.TimeScale = Mathf.Min(64f, _options.TimeScale * 2f);
+                _options.TimeScale =
+                    Mathf.Min(DebugOptions.FastestScale, _options.TimeScale * 2f);
 
             if (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))
-                _options.TimeScale = Mathf.Max(1f, _options.TimeScale * 0.5f);
+                _options.TimeScale =
+                    Mathf.Max(DebugOptions.SlowestScale, _options.TimeScale * 0.5f);
         }
 
         /// <summary>
@@ -1512,7 +1514,7 @@ namespace BattleChess.Unity
                 return;
             }
 
-            _tickAccumulator += Time.deltaTime * _options.TimeScale;
+            _tickAccumulator += Time.deltaTime * _options.BattleSecondsPerSecond;
 
             // Cap the catch-up so a stall cannot fast-forward the battle.
             int budget = 8;
@@ -3038,10 +3040,15 @@ namespace BattleChess.Unity
                     // A big wheel is the most interesting thing about to happen, and
                     // at speed it is over in a second of wall time. Say so, and
                     // suggest slowing down rather than leaving it to be missed.
-                    if (offBy > 45f && _options.TimeScale > 4f)
+                    // An eighth is the old x4, which is where this threshold
+                    // was set and where a wheel stops being watchable. [M128]
+                    // moved the numbers under it, not the judgement.
+                    if (offBy > 45f && _options.TimeScale > 0.125f)
                         _console.Decision("Move",
-                            $"That is a {offBy:0}° wheel taking {wheelSeconds:0} ticks — at x{_options.TimeScale:0} it will be over in " +
-                            $"{wheelSeconds / _options.TimeScale:0.0} s. Press '-' or use '.' to step through it.",
+                            $"That is a {offBy:0}° wheel taking {wheelSeconds:0} ticks — at " +
+                            $"{_options.SpeedLabel} it will be over in " +
+                            $"{wheelSeconds / _options.BattleSecondsPerSecond:0.0} s. " +
+                            "Press '-' or use '.' to step through it.",
                             unit.Id);
                 }
             }
@@ -3172,7 +3179,7 @@ namespace BattleChess.Unity
 
             string clock = _clock != null
                 ? $"[turn {_clock.Turn}  tick {_clock.TickInTurn}/{BattleClock.TicksPerTurn}  " +
-                  $"x{_options.TimeScale:0}{(_options.Running ? "" : "  PAUSED")}]   "
+                  $"{_options.SpeedLabel}{(_options.Running ? "" : "  PAUSED")}]   "
                 : string.Empty;
 
             // Right of the status line rather than in the debug panel, because

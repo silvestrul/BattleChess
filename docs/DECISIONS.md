@@ -2314,3 +2314,139 @@ eight cadences whether anything is still standing on the line to where it was
 sent - one clearance cast - and goes on if the answer is no. Measured on the wall
 arrangement before the guard began firing: stopped 183 m short, four tries, gave
 up saying so; the wall marched away; it saw its way again and finished the order.
+
+### M128 - x32 is the new x1
+
+**The designer's rule, and it was settled by playing rather than by argument.**
+The old x1 was one battle second per real second, and the remark that used to sit
+on `DebugOptions.TimeScale` argued the case from a single manoeuvre: a pike block
+needs nine seconds to wheel about, so anything quick loses the wheel. That is true
+of the wheel and wrong about the battle. A regiment walks at 1,59 m/s, so crossing
+four hundred metres of field is four minutes of watching nothing happen - and every
+session has been played at x32 regardless of what the default said. **A default
+nobody uses is not a default.**
+
+So `x1` **is** the old x32: `DebugOptions.NormalBattleSecondsPerSecond = 32`, and
+`TimeScale` is now a multiple of that rather than the rate itself.
+
+**The reachable band is deliberately unchanged** - `SlowestScale = 1/32`,
+`FastestScale = 2`, which is one to sixty-four battle seconds per real second
+exactly as before. This is a relabelling of the ladder, not an extension of it.
+Sixty-four is where it stops because that is a tick a frame at sixty frames, and
+past it `AdvanceClock`'s catch-up cap of eight begins quietly eating the ticks it
+is being asked for - a clock that lies about how fast it is running.
+
+Below x1 the label is a fraction (`x1/8`) rather than a decimal, because `x0.03`
+is a number nobody can tell from nought at a glance. The wheel hint's threshold
+moved with the numbers and not with the judgement: it fired above the old x4 and
+now fires above `x1/8`, which is the same speed.
+
+**What this costs, stated plainly.** Nothing in the simulation changed - a tick is
+still one battle second and a battle still reproduces from its seed. What changed
+is how many ticks a wall second contains, and every cadence in `OrderSystem` is
+counted in ticks: `RepathIntervalTicks = 5` was a replan opportunity every 1,7
+real seconds at the old default and is now one every 0,16. **Planning load per
+real second is about ten times what the default used to admit to** - which is the
+load the last twenty commits were tuned against anyway, because that is the speed
+the game was being played at while the default said otherwise.
+
+### M129 - what the grid actually does, measured before changing it
+
+Four symptoms were reported together - sharp turns, regiments competing for ground
+they should queue for, collisions, and perfectly good moves refused - along with
+three proposals for a different grid. `FullProfileTests.WhatShapeTheRoutesComeOut`
+was written to price them before any of them was built. **Three of the four
+symptoms turn out not to be about the grid's shape at all.**
+
+**The geometry, for a regiment at full strength.**
+
+| | |
+|---|---|
+| regiment | 40 x 20 m, bounding radius 22,4 m |
+| coarse cell | 44,7 m across |
+| fine cells | 22,4 m, 11,2 m |
+| terrain hex | 5,0 m |
+| **halo round every body** | **21,3 m, a circle** |
+| **clear air needed between two bodies** | **42,5 m** |
+
+**The refused moves are the halo, and the halo is not a mistake.** It is a
+Minkowski inflation: the grid plans over *ground* and not over *(place, front)*,
+so it does not know which way the mover will be facing when it arrives, and the
+only sound bound on an unknown front is the mover's circumscribed circle. Hence
+21,3 m round a body whose own half-depth is 10. A gap of 40 m between two
+regiments - which a 40 m regiment can walk through - has no un-haloed ground down
+its middle at all.
+
+**And a finer grid does not unban banned ground.** At 11,2 m cells the 21,3 m halo
+still closes the same corridor. This is the whole answer to the third proposal:
+resolution and clearance are different quantities, and only one of them is the
+problem.
+
+**The halo has already been swept and cannot simply be shrunk.** At 1,00 / 0,75 /
+0,50 / 0,25 / 0,00 the routes *held* were 42/45/34/35/33, 52/55/54/50/47 and
+73/73/73/58/43 - shrinking it finds more routes and holds fewer, because **A* hands
+back one route and not a menu**. An optimistic grid does not offer a route that
+might work; it threads a gap the regiment cannot use, and `WalksCleanly` then
+refuses the whole order. The refusal lives in the interface between the search and
+the gate, not in the cell.
+
+**The route shapes.**
+
+| field | orders | legs | detour | worst | >60 deg | >90 deg | worst turn |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | 40 | 2,2 | 1,243 | 2,65 | 12 | 7 | 120 |
+| crucible | 80 | 2,7 | 1,427 | 2,42 | 34 | 21 | 119 |
+| brokencountry | 80 | 2,8 | 1,287 | 1,88 | 32 | 8 | 103 |
+| greatfield | 40 | 2,7 | 1,486 | 2,73 | 15 | 4 | 94 |
+| longmarch | 80 | 2,1 | 1,028 | 1,32 | 7 | 0 | 82 |
+| sidewaysmile | 40 | 2,4 | 1,399 | 2,69 | 15 | 5 | 148 |
+
+A mean detour of 1,43 on the Crucible is a route half again as long as the line the
+player drew, and twenty-one orders there turn through more than ninety degrees at
+some waypoint - a regiment reversing its direction of travel mid-march. **That is
+the sharp-turn report, and it is worse than the grid's own resolution can explain**:
+120 degrees is two hex steps, but 148 is not a hex angle at all and comes from the
+stages that work in continuous space.
+
+**Which stage draws them.** Warmed, counters reset, one plan per regiment.
+
+| field | staged | ladder | bent | grid | fine | tangent | pose | press |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | 2 | 7 | 16 | 15 | 14 | 0 | 0 | 1 |
+| crucible | 0 | 30 | 18 | 32 | 11 | 0 | 0 | 0 |
+| brokencountry | 0 | 34 | 14 | 32 | 10 | 0 | 0 | 0 |
+| greatfield | 0 | 10 | 12 | 18 | 7 | 0 | 0 | 0 |
+| longmarch | 0 | 40 | 32 | 8 | 0 | 0 | 0 | 0 |
+| sidewaysmile | 2 | 11 | 12 | 15 | 6 | 0 | 0 | 1 |
+
+The columns sum to the order count on every field, so this is an attribution and
+not a tally of attempts. **The ladder and the grid answer everything.** Tangents,
+the pose search, corners and rings answer *nothing* on any of the six - which is
+the measured case for the third proposal's demolition half, and a much stronger
+case than the argument for it was.
+
+**Nothing prices a turn.** The grid's A* step cost is `Spacing / going * penalty`
+and has no term for changing direction, so a dog-leg and a straight line of the
+same length are the same price and the search picks between them arbitrarily. On a
+hex grid they are *not* the same length - travelling 30 degrees off an axis costs
+2/sqrt(3), **15,5% more than the straight line**, so the search actively prefers to
+run along an axis and then turn. That is a real artefact and it is the grid's
+shape; it is also far smaller than the 43% mean detour it sits inside.
+
+**On hex against square, since the reason for choosing hex is already gone.**
+`Facing` is a free continuous bearing with a remark of its own saying that snapping
+to sixty-degree increments would look wrong, and `Facing.FromHexDirection` has
+**zero runtime callers** - the sides that were meant to help with rotation are used
+by one test and nothing else. Terrain is already authored on a square 25 m grid.
+The worst-case metric error is 15,5% for hex-6 and 8,2% for square-8, and the
+turn granularity is 60 degrees against 45 - so **a square grid is slightly better
+on both axes the symptoms name**, which is not the answer the question expected and
+is far too small a prize to pay a migration for.
+
+**The one symptom no grid addresses.** Regiments competing for a corridor they
+should queue in is not a routing fault. Every plan in this codebase is a
+single-agent search against a snapshot of where everybody happens to be standing;
+none of them reserves ground in *time*, so two regiments handed the same gap both
+plan through it and both are right. `HybridAStarPlanner`'s own remarks name the
+missing piece - space-time reservation, "the multi-agent layer" - and it has never
+been built. No cell shape, no cell size and no cascade change fixes it.
