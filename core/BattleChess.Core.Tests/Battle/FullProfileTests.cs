@@ -2427,6 +2427,170 @@ namespace BattleChess.Tests.Battle
             return watch.Elapsed.TotalMilliseconds / Math.Max(1, ways.Count);
         }
 
+
+        /// <summary>Every way of deciding a grid route wants a second opinion.</summary>
+        /// <remarks>
+        /// [M131]. [M130] found the grid buys coverage with shape and nothing
+        /// afterwards asks whether the shape was worth it. This is the sweep of
+        /// the four ways to ask, against the arm that does not ask at all.
+        /// Every arm warmed before any is read, three passes, least kept [W12].
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void EveryWayOfAskingAgain()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            StagedRoutePlanner.SecondOpinion wasAsking = StagedRoutePlanner.AskAgainWhenBent;
+
+            Marching.SearchBudgetMs = 0f;
+
+            var arms = new[]
+            {
+                StagedRoutePlanner.SecondOpinion.Off,
+                StagedRoutePlanner.SecondOpinion.ByTurn,
+                StagedRoutePlanner.SecondOpinion.ByDetour,
+                StagedRoutePlanner.SecondOpinion.ByEither,
+                StagedRoutePlanner.SecondOpinion.Always,
+            };
+
+            try
+            {
+                foreach (StagedRoutePlanner.SecondOpinion arm in arms)
+                {
+                    StagedRoutePlanner.AskAgainWhenBent = arm;
+                    foreach (string warm in AllProvingFields)
+                        Shaped(warm, out _, out _, out _, out _, out _, out _);
+                }
+
+                _out.WriteLine(
+                    $"turn > {StagedRoutePlanner.SecondOpinionTurnDegrees:0} deg, " +
+                    $"detour > {StagedRoutePlanner.SecondOpinionDetour:0.00}x");
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(
+                    $"{"arm",-10}{"walks",8}{"ms/order",10}{"worst ms",10}{"detour",9}" +
+                    $"{">90deg",8}{"worst turn",12}{"asked",8}{"took",7}{"refused",9}");
+                _out.WriteLine(new string('-', 91));
+
+                foreach (StagedRoutePlanner.SecondOpinion arm in arms)
+                {
+                    StagedRoutePlanner.AskAgainWhenBent = arm;
+
+                    int walks = 0, sharp = 0, routed = 0, asked = 0, took = 0, refused = 0;
+                    double spent = 0d, worstMs = 0d, detour = 0d, worstTurn = 0d;
+
+                    foreach (string field in AllProvingFields)
+                    {
+                        double least = double.MaxValue, leastWorst = double.MaxValue;
+                        int theseWalk = 0, theseSharp = 0, theseRouted = 0;
+                        double theseDetour = 0d, theseTurn = 0d;
+
+                        for (int again = 0; again < 3; again++)
+                        {
+                            StagedRoutePlanner.ResetCounters();
+
+                            double ms = Shaped(
+                                field, out theseRouted, out theseDetour, out theseSharp,
+                                out theseTurn, out double worstOrder, out theseWalk);
+
+                            least = Math.Min(least, ms);
+                            leastWorst = Math.Min(leastWorst, worstOrder);
+                        }
+
+                        walks += theseWalk;
+                        sharp += theseSharp;
+                        routed += theseRouted;
+                        detour += theseDetour;
+                        worstTurn = Math.Max(worstTurn, theseTurn);
+                        worstMs = Math.Max(worstMs, leastWorst);
+                        spent += least;
+
+                        asked += StagedRoutePlanner.SecondOpinionAsked;
+                        took += StagedRoutePlanner.SecondOpinionTook;
+                        refused += StagedRoutePlanner.SecondOpinionRefused;
+                    }
+
+                    _out.WriteLine(
+                        $"{arm,-10}{walks,8}{spent / AllProvingFields.Length,10:0.00}" +
+                        $"{worstMs,10:0.0}{detour / Math.Max(1, routed),9:0.000}" +
+                        $"{sharp,8}{worstTurn,12:0}{asked,8}{took,7}{refused,9}");
+                }
+
+                // And the dial itself, on the arm that wins above. A rule is not
+                // chosen until its number is.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("ByTurn, sweeping the angle");
+                _out.WriteLine(
+                    $"{"turn >",-10}{"walks",8}{"ms/order",10}{"worst ms",10}{"detour",9}" +
+                    $"{">90deg",8}{"asked",8}{"took",7}{"refused",9}");
+                _out.WriteLine(new string('-', 79));
+
+                float wasDegrees = StagedRoutePlanner.SecondOpinionTurnDegrees;
+                StagedRoutePlanner.AskAgainWhenBent = StagedRoutePlanner.SecondOpinion.ByTurn;
+
+                foreach (float degrees in new[] { 30f, 45f, 60f, 75f, 90f, 105f, 120f })
+                {
+                    StagedRoutePlanner.SecondOpinionTurnDegrees = degrees;
+
+                    foreach (string warm in AllProvingFields)
+                        Shaped(warm, out _, out _, out _, out _, out _, out _);
+
+                    int walks = 0, sharp = 0, routed = 0, asked = 0, took = 0, refused = 0;
+                    double spent = 0d, worstMs = 0d, detour = 0d;
+
+                    foreach (string field in AllProvingFields)
+                    {
+                        double least = double.MaxValue, leastWorst = double.MaxValue;
+                        int theseWalk = 0, theseSharp = 0, theseRouted = 0;
+                        double theseDetour = 0d;
+
+                        for (int again = 0; again < 3; again++)
+                        {
+                            StagedRoutePlanner.ResetCounters();
+
+                            double ms = Shaped(
+                                field, out theseRouted, out theseDetour, out theseSharp,
+                                out _, out double worstOrder, out theseWalk);
+
+                            least = Math.Min(least, ms);
+                            leastWorst = Math.Min(leastWorst, worstOrder);
+                        }
+
+                        walks += theseWalk;
+                        sharp += theseSharp;
+                        routed += theseRouted;
+                        detour += theseDetour;
+                        worstMs = Math.Max(worstMs, leastWorst);
+                        spent += least;
+
+                        asked += StagedRoutePlanner.SecondOpinionAsked;
+                        took += StagedRoutePlanner.SecondOpinionTook;
+                        refused += StagedRoutePlanner.SecondOpinionRefused;
+                    }
+
+                    _out.WriteLine(
+                        $"{$"{degrees:0} deg",-10}{walks,8}{spent / AllProvingFields.Length,10:0.00}" +
+                        $"{worstMs,10:0.0}{detour / Math.Max(1, routed),9:0.000}" +
+                        $"{sharp,8}{asked,8}{took,7}{refused,9}");
+                }
+
+                StagedRoutePlanner.SecondOpinionTurnDegrees = wasDegrees;
+
+                // Non-vacuity. If no arm ever asked, every row above is the Off
+                // row wearing five different names. W9.
+                StagedRoutePlanner.AskAgainWhenBent = StagedRoutePlanner.SecondOpinion.Always;
+                StagedRoutePlanner.ResetCounters();
+                Shaped("crucible", out _, out _, out _, out _, out _, out _);
+
+                Assert.True(StagedRoutePlanner.SecondOpinionAsked > 0,
+                    "No arm asked for a second opinion even on Always, so the five rows above are " +
+                    "one row printed five times and nothing here is a comparison.");
+            }
+            finally
+            {
+                StagedRoutePlanner.AskAgainWhenBent = wasAsking;
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
         private static int OrdersOn(string field)
         {
             int many = 0;

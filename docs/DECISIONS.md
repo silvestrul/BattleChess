@@ -2544,3 +2544,80 @@ grid's route, so coverage cannot drop by construction**. One dial, the bend a gr
 route may have before it is worth a second opinion, in the same family as
 `WayRoundCostCeiling`. On the Crucible that would put nineteen of the twenty-one
 worst-turning routes through a planner that walks all eighty.
+
+### M131 - a bent grid route gets a second opinion, and it ships on
+
+[M130] located the sharp-turn report: the grid buys coverage with shape - it
+answers one order in nine that nothing else can walk, and charges a mean detour of
+1,43 on the Crucible and twenty-one routes of eighty turning through more than
+ninety degrees - **and nothing afterwards asks whether the shape it bought was
+worth it**. This is the stage that asks.
+
+**The rule.** Where a grid route is about to be accepted, if it is bent past a
+threshold, run the pose search and take its answer **only if it walks**. The grid's
+route stays in hand as the fallback.
+
+**Coverage cannot drop by construction, and the measurement confirms it never
+does.** `walks` is 353 of 360 in every arm below, including the one that asks on
+every single order. That property is the whole reason this was safe to try, and it
+is what separates it from [M127], whose ceiling refused answers rather than
+replacing them and broke twenty-three tests for it. **This one breaks none.**
+
+All four ways of asking, plus the arm that does not ask. Every arm warmed before
+any is read, three passes, least kept [W12].
+
+| arm | walks | ms/order | worst ms | detour | >90 deg | asked | took | refused |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Off | 353 | 0,51 | 25,3 | 1,290 | 45 | 0 | 0 | 0 |
+| **ByTurn** | 353 | **0,86** | 25,8 | 1,258 | **21** | 41 | 28 | 13 |
+| ByDetour | 353 | 1,53 | 25,1 | **1,221** | 23 | 103 | 66 | 37 |
+| ByEither | 353 | 1,51 | 26,1 | **1,221** | 23 | 103 | 66 | 37 |
+| Always | 353 | 1,70 | 25,1 | 1,220 | 23 | 114 | 74 | 40 |
+
+**ByTurn wins on the symptom that was reported and costs half what the others do.**
+It cuts routes turning through more than ninety degrees from 45 to 21 for
++0,35 ms an order. The detour arms spend twice as much to end up *worse* on turns
+(23) while buying 0,037 of mean detour. `ByEither` is identical to `ByDetour` to
+every digit, because the turn test's routes are a strict subset of the detour
+test's. And `Always` - the upper bound on what this rule can buy - is within one
+route of `ByDetour`, so the filter is already capturing everything worth capturing.
+
+**Then the dial, because a rule is not chosen until its number is.**
+
+| turn > | walks | ms/order | detour | >90 deg | asked | took |
+|---|---:|---:|---:|---:|---:|---:|
+| 30 deg | 353 | 1,72 | 1,220 | 23 | 114 | 74 |
+| 45 deg | 353 | 1,68 | 1,220 | 23 | 111 | 71 |
+| 60 deg | 353 | 1,57 | 1,220 | 23 | 108 | 69 |
+| 75 deg | 353 | 1,49 | 1,223 | 22 | 99 | 66 |
+| **90 deg** | 353 | **0,86** | 1,258 | **21** | 41 | 28 |
+| 105 deg | 353 | 0,73 | 1,269 | 27 | 22 | 18 |
+| 120 deg | 353 | 0,51 | 1,290 | 45 | 2 | 0 |
+
+**Ninety is a knee and not a preference.** Going from 75 to 90 cuts the bill by 42%
+and the sharp turns get *better* rather than worse, 22 to 21. Everything below 90
+pays roughly double for a route count that does not move. Everything above it
+degrades fast - 105 is already worse on turns than 90 is, and 120 asks twice in
+three hundred and sixty orders and is the Off arm with extra arithmetic.
+
+**So it ships on**: `AskAgainWhenBent = SecondOpinion.ByTurn`,
+`SecondOpinionTurnDegrees = 90`. Nothing in the suite changes - the same eleven
+failures before and after, being the nine long-standing ones and the two
+`StoppingShortTests` [M127c] deliberately holds red.
+
+**Two things this does not do, said plainly.**
+
+- **The worst turn on the bench is 148 degrees and stays 148 in every arm.** Four
+  of the forty-five sharp routes are never asked about, because they are not grid
+  routes - they come from the ladder or from the terminal tangent fallback, and
+  this rule only guards the door the grid comes through. The worst corner in the
+  game is not the grid's.
+- **It changes twenty-eight routes and no test noticed.** That is worth knowing
+  either way: it means nothing pins those routes, so it is not evidence that they
+  improved. The evidence for that is the table, not the suite.
+
+**And it does not touch the halo.** [M129]'s 21,3 m circle is still there, still
+banning a corridor two regiments can walk down, because the *grid* still plans over
+ground. What this buys is that the ground plan's worst answers get replaced by a
+planner that knows the front. The halo itself waits on the designer's call about
+what replaces it.

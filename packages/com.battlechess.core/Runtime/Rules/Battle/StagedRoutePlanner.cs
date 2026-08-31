@@ -411,6 +411,91 @@ namespace BattleChess.Rules
         /// </summary>
         internal static int TangentAsked;
 
+        /// <summary>When a grid route is bent enough to be worth asking the pose search about.</summary>
+        /// <remarks>
+        /// [M131]. <see cref="SecondOpinion.Always"/> is the upper bound on what
+        /// the rule can buy rather than a shipping candidate: it runs the pose
+        /// search on every order the grid answers.
+        /// </remarks>
+        internal enum SecondOpinion
+        {
+            /// <summary>Take the grid's route whatever shape it is, as before [M131].</summary>
+            Off,
+
+            /// <summary>Ask when a waypoint turns through more than <see cref="SecondOpinionTurnDegrees"/>.</summary>
+            ByTurn,
+
+            /// <summary>Ask when the route is longer than <see cref="SecondOpinionDetour"/> times its straight line.</summary>
+            ByDetour,
+
+            /// <summary>Ask when either fires.</summary>
+            ByEither,
+
+            /// <summary>Ask on every grid route.</summary>
+            Always,
+        }
+
+        /// <inheritdoc cref="SecondOpinion"/>
+        internal static SecondOpinion AskAgainWhenBent = SecondOpinion.ByTurn;
+
+        /// <summary>The turn a grid route may contain before it is worth a second opinion.</summary>
+        internal static float SecondOpinionTurnDegrees = 90f;
+
+        /// <summary>What a grid route may cost against its own straight line before the same.</summary>
+        internal static float SecondOpinionDetour = 1.25f;
+
+        internal static int SecondOpinionAsked, SecondOpinionTook, SecondOpinionRefused;
+
+        /// <summary>Whether this route is bent enough to be worth asking again about.</summary>
+        /// <remarks>
+        /// Measured on the route as it will be walked, after smoothing and after
+        /// the fronts are settled - not on the raw chain of cell centres, which
+        /// zigzags by construction and would fire on everything.
+        /// </remarks>
+        private static bool WorthASecondOpinion(IReadOnlyList<Vec2> way)
+        {
+            if (AskAgainWhenBent == SecondOpinion.Always) return true;
+            if (way == null || way.Count < 2) return false;
+
+            bool byTurn =
+                AskAgainWhenBent == SecondOpinion.ByTurn ||
+                AskAgainWhenBent == SecondOpinion.ByEither;
+
+            bool byDetour =
+                AskAgainWhenBent == SecondOpinion.ByDetour ||
+                AskAgainWhenBent == SecondOpinion.ByEither;
+
+            if (byTurn && SecondOpinionTurnDegrees > 0f)
+            {
+                for (int i = 1; i < way.Count - 1; i++)
+                {
+                    Vec2 into = way[i] - way[i - 1];
+                    Vec2 outOf = way[i + 1] - way[i];
+
+                    if (into.IsNearZero || outOf.IsNearZero) continue;
+
+                    float turn = MathF.Abs(
+                        Facing.FromVector(outOf).Radians - Facing.FromVector(into).Radians);
+
+                    if (turn > MathF.PI) turn = 2f * MathF.PI - turn;
+
+                    if (turn * 180f / MathF.PI > SecondOpinionTurnDegrees) return true;
+                }
+            }
+
+            if (byDetour && SecondOpinionDetour > 0f)
+            {
+                float walked = 0f;
+                for (int i = 1; i < way.Count; i++) walked += Vec2.Distance(way[i - 1], way[i]);
+
+                float straight = Vec2.Distance(way[0], way[way.Count - 1]);
+
+                if (straight > 1f && walked > straight * SecondOpinionDetour) return true;
+            }
+
+            return false;
+        }
+
         /// <summary>Why the pose search did not win: no route, a press, a route that will not walk.</summary>
         /// <remarks>[M130]. <see cref="PoseTooDear"/> is the fourth door and was already counted.</remarks>
         internal static int PoseNoRoute, PosePressed, PoseDirty;
@@ -424,6 +509,7 @@ namespace BattleChess.Rules
                     TangentAsked = BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
             PoseNoRoute = PosePressed = PoseDirty = 0;
+            SecondOpinionAsked = SecondOpinionTook = SecondOpinionRefused = 0;
             OutOfTimeAtTheGrid = OutOfTimeReachedTheGrid = OutOfTimeWithNothing = 0;
             StoppedBeforeCoarse = StoppedBeforeFine = StoppedBeforeGraphs =
                 StoppedBeforePose = 0;
@@ -830,8 +916,149 @@ namespace BattleChess.Rules
                     $"- the lattice was not asked.",
                     unit.Id));
 
+                // [M131]. The grid buys coverage with shape: it answers one
+                // order in nine that nothing else can walk, and charges a mean
+                // detour of 1,43 and twenty-one routes of eighty turning through
+                // more than ninety degrees [M130]. Until here nothing asked
+                // whether the shape it bought was worth it.
+                //
+                // So a bent grid route gets a second opinion, and the pose
+                // search's answer is taken only if it walks. **The grid's route
+                // stays in hand as the fallback, so coverage cannot drop by
+                // construction** - which is the property that makes this safe to
+                // turn on at all.
+                if (AskAgainWhenBent != SecondOpinion.Off &&
+                    WorthASecondOpinion(gridded.Path.Waypoints) &&
+                    !Marching.StopNow())
+                {
+                    SecondOpinionAsked++;
+
+                    using var _again = PlanningProfile.Measure(PlanningProfile.Step.PoseSearch);
+
+                    Plan better = PoseSearched();
+
+                    bool dearer =
+                        WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough &&
+                        CostsMoreThan(battle, unit, better, ladder, WayRoundCostCeiling);
+
+                    if (better.Path.Found && !better.PressedThrough && !dearer &&
+                        WalksCleanly(battle, unit, better))
+                    {
+                        SecondOpinionTook++;
+                        GridClean++;
+
+                        log?.Record(new BattleLogEntry(
+                            LogLevel.Decision, "Path",
+                            $"{unit.Def.DisplayName} had a grid route that bent too far, so the " +
+                            "pose search was asked for a second opinion and its route was taken " +
+                            "instead.",
+                            unit.Id));
+
+                        taken = better;
+                        return true;
+                    }
+
+                    SecondOpinionRefused++;
+                }
+
                 taken = gridded;
                 return true;
+            }
+
+            // The pose search itself, written once and asked from two places
+            // since [M131] - the stage below, and the second opinion inside
+            // TookGridRoute above. Extracted rather than copied because the two
+            // callers must ask the *same* planner the same way: a second opinion
+            // that searched differently from the stage would make the comparison
+            // between them meaningless.
+            Plan PoseSearched()
+            {
+                // The tangent route is already computed and already known to be
+                // the wrong answer - but it is the right neighbourhood, and
+                // bounding the lattice to a tube around it is what makes a
+                // pose search affordable on an ordinary order.
+                // The grid route first, where there is one. The tube was turned
+                // off because the cheap route it was drawn round was a
+                // press-through on 74 of 94 orders, so it enclosed a line
+                // through the middle of a regiment and there was no answer near
+                // it to find. A grid route cannot be a press-through: cells
+                // holding a body are not enterable, so going round them is the
+                // only thing it can express.
+                IReadOnlyList<Vec2>? tube = null;
+
+                if (GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor &&
+                    gridRoute != null && gridRoute.Count >= 2)
+                {
+                    tube = gridRoute;
+                }
+                else if (CorridorFromCheapRoute)
+                {
+                    Plan cheap = Tangents();
+
+                    if (cheap.Path.Found && cheap.Path.Waypoints.Count >= 2)
+                        tube = cheap.Path.Waypoints;
+                }
+
+                // What the way round is allowed to cost, told to the search
+                // rather than applied to its answer. M65 was throwing away
+                // routes that took 888 to 1080 ms to find; a limit the search
+                // knows about turns that into a refusal it can reach in a
+                // fraction of the time, because the turn field's estimate is
+                // admissible and can rule the whole thing out at the start.
+                float limit = 0f;
+
+                if (WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough)
+                {
+                    float pressed = Marching.SecondsToWalk(
+                        battle, unit, ladder.Path.Waypoints, ladder.Hold);
+
+                    if (pressed > 1f) limit = pressed * WayRoundCostCeiling;
+                }
+
+                // With no press to price against, the empty field is the
+                // yardstick. Told to the search rather than applied to its
+                // answer, for the same reason as above.
+                if (limit <= 0f && StraightLineCostCeiling > 0f)
+                {
+                    float straight = StraightSeconds(battle, unit, destination);
+                    if (straight > 1f) limit = straight * StraightLineCostCeiling;
+                }
+
+                Plan found;
+
+                if (tube != null)
+                {
+                    found = HybridAStarRoutePlanner.PlanAlong(
+                        battle, unit, destination, arriveOn,
+                        tube, CheapCorridorHalfWidthMetres, log, BoundedBudget, limit);
+                }
+                else if (CorridorHalfWidthMetres > 0f)
+                {
+                    found = HybridAStarRoutePlanner.PlanAlong(
+                        battle, unit, destination, arriveOn,
+                        corridor: null, CorridorHalfWidthMetres, log, BoundedBudget, limit);
+                }
+                else
+                {
+                    found = HybridAStarRoutePlanner.PlanAlong(
+                        battle, unit, destination, arriveOn, corridor: null, 0f, log,
+                        expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
+                        secondsLimit: limit);
+                }
+
+                bool bounded = tube != null || CorridorHalfWidthMetres > 0f;
+
+                if (bounded &&
+                    (!found.Path.Found || found.PressedThrough || !WalksCleanly(battle, unit, found)))
+                {
+                    PoseWidened++;
+                    found = HybridAStarRoutePlanner.PlanAlong(
+                        battle, unit, destination, arriveOn, corridor: null, 0f, log,
+                        expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
+                        secondsLimit: limit);
+                }
+
+                return found;
             }
 
             if (NoTimeLeft(ref StoppedBeforeGraphs, "the tangent graph")) return ladder;
@@ -927,80 +1154,7 @@ namespace BattleChess.Rules
                 // is the only thing it can express. That is the one defect
                 // this fixes, and the reason the tube is worth asking about
                 // again at all.
-                IReadOnlyList<Vec2>? tube = null;
-
-                if (GridPlanning.GridRoutePlanner.Use == GridPlanning.GridUse.Corridor &&
-                    gridRoute != null && gridRoute.Count >= 2)
-                {
-                    tube = gridRoute;
-                }
-                else if (CorridorFromCheapRoute)
-                {
-                    Plan cheap = Tangents();
-
-                    if (cheap.Path.Found && cheap.Path.Waypoints.Count >= 2)
-                        tube = cheap.Path.Waypoints;
-                }
-
-                // What the way round is allowed to cost, told to the search
-                // rather than applied to its answer. M65 was throwing away
-                // routes that took 888 to 1080 ms to find; a limit the search
-                // knows about turns that into a refusal it can reach in a
-                // fraction of the time, because the turn field's estimate is
-                // admissible and can rule the whole thing out at the start.
-                float limit = 0f;
-
-                if (WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough)
-                {
-                    float pressed = Marching.SecondsToWalk(
-                        battle, unit, ladder.Path.Waypoints, ladder.Hold);
-
-                    if (pressed > 1f) limit = pressed * WayRoundCostCeiling;
-                }
-
-                // With no press to price against, the empty field is the
-                // yardstick. Told to the search rather than applied to its
-                // answer, for the same reason as above: an admissible estimate
-                // can rule the whole thing out before the first expansion.
-                if (limit <= 0f && StraightLineCostCeiling > 0f)
-                {
-                    float straight = StraightSeconds(battle, unit, destination);
-                    if (straight > 1f) limit = straight * StraightLineCostCeiling;
-                }
-
-                Plan posed;
-
-                if (tube != null)
-                {
-                    posed = HybridAStarRoutePlanner.PlanAlong(
-                        battle, unit, destination, arriveOn,
-                        tube, CheapCorridorHalfWidthMetres, log, BoundedBudget, limit);
-                }
-                else if (CorridorHalfWidthMetres > 0f)
-                {
-                    posed = HybridAStarRoutePlanner.PlanAlong(
-                        battle, unit, destination, arriveOn,
-                        corridor: null, CorridorHalfWidthMetres, log, BoundedBudget, limit);
-                }
-                else
-                {
-                    posed = HybridAStarRoutePlanner.PlanAlong(
-                        battle, unit, destination, arriveOn, corridor: null, 0f, log,
-                        expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
-                        secondsLimit: limit);
-                }
-
-                bool bounded = tube != null || CorridorHalfWidthMetres > 0f;
-
-                if (bounded &&
-                    (!posed.Path.Found || posed.PressedThrough || !WalksCleanly(battle, unit, posed)))
-                {
-                    PoseWidened++;
-                    posed = HybridAStarRoutePlanner.PlanAlong(
-                        battle, unit, destination, arriveOn, corridor: null, 0f, log,
-                        expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
-                        secondsLimit: limit);
-                }
+                Plan posed = PoseSearched();
 
                 // [M130]. The stage is asked six times in three hundred and
                 // sixty orders and wins none of them, and until now the four
