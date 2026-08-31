@@ -2664,3 +2664,77 @@ banning a corridor two regiments can walk down, because the *grid* still plans o
 ground. What this buys is that the ground plan's worst answers get replaced by a
 planner that knows the front. The halo itself waits on the designer's call about
 what replaces it.
+
+### M132 - the lattice cannot route a big regiment
+
+[M131a] found the second opinion takes twenty-seven of twenty-seven on two fields
+and none of thirteen on the other four, every refusal being `NoRouteExists`. This
+is why.
+
+**What it is not.** Each of these was tested rather than argued, and the first four
+were my hypotheses in order of confidence:
+
+| suspect | test | result |
+|---|---|---|
+| the expansion budget | `LastStop` | "nothing left to expand" - about 34 states of 4 096 |
+| the clock | `LastStop` | never |
+| the cost limit told to the search | ceilings at 3,1x/4x, 6x/8x, 12x/16x, off | 13, 13, 13, **12** |
+| the stray bound | floor at 60, 120, 200, 300, 500 m | 13, 13, 13, 13, **13** |
+| a start already lapping its own | counted | **3 of 13** |
+
+The open set genuinely empties, after about thirty-four states, with roughly seven
+primitives tried per state and nineteen bodies in play. Nothing was throttling it.
+
+**What it is.** Footprint, and the separation is total.
+
+| | mean footprint | frontage |
+|---|---|---|
+| every second opinion **taken** (27) | **800 m2** | 40 m |
+| every one **refused** (13) | **5 000 m2** | 100 m |
+
+Not one exception in forty cases. **Six and a quarter times the area, and a clean
+break with nothing in between.**
+
+**But that was confounded, and the confound was perfect.** The Crucible and Broken
+Country hold nothing but strength 600 to 800; the Great Field, the Sideways Mile
+and `thecrowdedwing` hold nothing but 2 000. Every success was a small regiment on
+one pair of fields and every failure a large one on the others, so the correlation
+could have been the ground rather than the body.
+
+**Broken with two authored controls, one of which failed to say anything.**
+
+- `greatfieldsmall` - the Great Field at 800, not a position or order changed -
+  is **vacuous**: at that size the grid is never reached at all, so there is no
+  bent route to ask about. Worth knowing, because it says the whole chain starts
+  with regiment size, but it cannot isolate this link.
+- `cruciblebig` - **the Crucible at 2 000, not a position or order changed** - is
+  decisive:
+
+| field | strength | grid routes | asked | **took** | no route |
+|---|---|---:|---:|---:|---:|
+| crucible | 600-800 | 51 | 20 | **20** | 0 |
+| **cruciblebig** | **2 000** | 11 | 3 | **0** | **3** |
+
+**Twenty of twenty becomes none of three on identical ground.** The only thing that
+changed is how much room a regiment takes up. The field is innocent.
+
+**Why, mechanically.** The lattice sweeps the mover's true rectangle along arc
+primitives and refuses any that meets a body. A 40x20 regiment has a circumradius
+of 22,4 m; a 100x50 one has 55,9 m, and a 2 000-strong cavalry regiment 127,9 m. A
+big body swinging through an arc sweeps an enormous area, so among nineteen bodies
+almost every primitive collides, and a frontier that cannot produce successors dies
+in a few dozen states - which is exactly what the counters show.
+
+**And it explains [M129]'s halo from the other side.** The two planners fail as a
+matched pair: **the one that knows the front cannot handle a big body, and the one
+that handles a big body does not know the front.** The grid succeeds here only
+because it never asks whether a rectangle can sweep an arc - it names ground,
+prices held cells at sixty times, and lets `Sidewalked` settle the fronts
+afterwards. That is a weaker claim, which is why its routes bend.
+
+**What this does not license.** It is not a reason to stop asking for a second
+opinion on big regiments - that would save thirteen searches and cure nothing.
+Large regiments are precisely the ones whose routes look worst, so the honest
+reading is that **[M131] helps least where help is most wanted, for a reason that
+is now named**. The fix is in the lattice's primitive set or in what it refuses,
+and it is a real piece of work rather than a lever.

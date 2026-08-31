@@ -446,6 +446,47 @@ namespace BattleChess.Rules
 
         internal static int SecondOpinionAsked, SecondOpinionTook, SecondOpinionRefused;
 
+        /// <summary>Why a second opinion was refused. [M131a].</summary>
+        internal static int SecondOpinionNoRoute, SecondOpinionPressed,
+            SecondOpinionTooDear, SecondOpinionDirty;
+
+        /// <summary>Refusals by <see cref="PathFailure"/>, and states expanded before them.</summary>
+        internal static readonly int[] SecondOpinionWhy = new int[16];
+
+        /// <inheritdoc cref="SecondOpinionWhy"/>
+        internal static long SecondOpinionExpansions;
+
+        /// <summary>How many second opinions were asked by a mover already lapping its own.</summary>
+        internal static int SecondOpinionStartedLapping;
+
+        /// <summary>Primitives tried and bodies avoided, across the refusals.</summary>
+        internal static long SecondOpinionPrimitives, SecondOpinionBodies;
+
+        /// <summary>Footprints on each side of the verdict. [M132].</summary>
+        internal static float SecondOpinionTookArea, SecondOpinionNoRouteArea,
+            SecondOpinionTookWidest, SecondOpinionNoRouteNarrowest = float.MaxValue;
+
+        /// <summary>Where the lattice stopped, by <see cref="StopSlot"/>.</summary>
+        internal static readonly int[] SecondOpinionStops = new int[6];
+
+        /// <summary>The names of those slots, in order.</summary>
+        internal static readonly string[] StopNames =
+        {
+            "found it", "past the limit at the start", "nothing left to expand",
+            "the expansion budget", "the clock", "superseded",
+        };
+
+        private static int StopSlot(string? stop) => stop switch
+        {
+            null => 0,
+            "refused at the start: even the best case is past the limit" => 1,
+            "nothing left to expand" => 2,
+            "nothing left to expand (bounded)" => 2,
+            "the expansion budget" => 3,
+            "the clock" => 4,
+            _ => 5,
+        };
+
         /// <summary>Whether this route is bent enough to be worth asking again about.</summary>
         /// <remarks>
         /// Measured on the route as it will be walked, after smoothing and after
@@ -510,6 +551,15 @@ namespace BattleChess.Rules
 
             PoseNoRoute = PosePressed = PoseDirty = 0;
             SecondOpinionAsked = SecondOpinionTook = SecondOpinionRefused = 0;
+            SecondOpinionNoRoute = SecondOpinionPressed =
+                SecondOpinionTooDear = SecondOpinionDirty = 0;
+            SecondOpinionExpansions = 0L;
+            SecondOpinionStartedLapping = 0;
+            SecondOpinionPrimitives = SecondOpinionBodies = 0L;
+            SecondOpinionTookArea = SecondOpinionNoRouteArea = SecondOpinionTookWidest = 0f;
+            SecondOpinionNoRouteNarrowest = float.MaxValue;
+            Array.Clear(SecondOpinionWhy, 0, SecondOpinionWhy.Length);
+            Array.Clear(SecondOpinionStops, 0, SecondOpinionStops.Length);
             OutOfTimeAtTheGrid = OutOfTimeReachedTheGrid = OutOfTimeWithNothing = 0;
             StoppedBeforeCoarse = StoppedBeforeFine = StoppedBeforeGraphs =
                 StoppedBeforePose = 0;
@@ -935,7 +985,23 @@ namespace BattleChess.Rules
 
                     using var _again = PlanningProfile.Measure(PlanningProfile.Step.PoseSearch);
 
+                    HybridPlanning.HybridAStarPlanner.LastStop = null;
+
                     Plan better = PoseSearched();
+
+                    // Where the lattice stopped, in its own words. Tallied into
+                    // fixed slots rather than a dictionary because planning runs
+                    // off the main thread and a diagnostic must not be the thing
+                    // that introduces a race.
+                    SecondOpinionStops[StopSlot(HybridPlanning.HybridAStarPlanner.LastStop)]++;
+
+                    // [M132]. Whether the mover was lapping one of its own when
+                    // it asked. The lattice's leaving rule is stricter than
+                    // Marching.IsClearLine's - it excuses a body only while the
+                    // mover is getting out of it, never for the whole leg - so a
+                    // regiment that starts in contact is the case where the two
+                    // planners most plainly disagree about what is walkable.
+                    if (StartsInsideOwn(battle, unit, unit.Facing)) SecondOpinionStartedLapping++;
 
                     bool dearer =
                         WayRoundCostCeiling > 0f && ladder.Path.Found && ladder.PressedThrough &&
@@ -945,6 +1011,9 @@ namespace BattleChess.Rules
                         WalksCleanly(battle, unit, better))
                     {
                         SecondOpinionTook++;
+                        SecondOpinionTookArea += unit.Footprint.Width * unit.Footprint.Depth;
+                        SecondOpinionTookWidest =
+                            MathF.Max(SecondOpinionTookWidest, unit.Footprint.Width);
                         GridClean++;
 
                         log?.Record(new BattleLogEntry(
@@ -957,6 +1026,35 @@ namespace BattleChess.Rules
                         taken = better;
                         return true;
                     }
+
+                    // Split by door, for the same reason the pose stage's are
+                    // [M130]: "refused" without a cause is a fact with nothing
+                    // to act on, and [M131a] found thirteen of these on four
+                    // fields where the rule never once succeeds.
+                    if (!better.Path.Found)
+                    {
+                        SecondOpinionNoRoute++;
+
+                        // Which door the lattice came back through, and how far
+                        // it got before it did. "No route" covers an arrangement
+                        // with no answer, a budget spent, and a cost limit that
+                        // ruled everything out before the first expansion - and
+                        // those three want three different fixes.
+                        int why = (int)better.Path.Failure;
+
+                        if (why >= 0 && why < SecondOpinionWhy.Length) SecondOpinionWhy[why]++;
+
+                        SecondOpinionNoRouteArea += unit.Footprint.Width * unit.Footprint.Depth;
+                        SecondOpinionNoRouteNarrowest =
+                            MathF.Min(SecondOpinionNoRouteNarrowest, unit.Footprint.Width);
+
+                        SecondOpinionExpansions += better.Path.CellsExplored;
+                        SecondOpinionPrimitives += better.Effort.Legs;
+                        SecondOpinionBodies += better.Effort.Bodies;
+                    }
+                    else if (better.PressedThrough) SecondOpinionPressed++;
+                    else if (dearer) SecondOpinionTooDear++;
+                    else SecondOpinionDirty++;
 
                     SecondOpinionRefused++;
                 }

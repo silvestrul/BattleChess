@@ -2535,19 +2535,132 @@ namespace BattleChess.Tests.Battle
 
             try
             {
+                // [M132]. Why the lattice comes back with no route: the stray
+                // bound, swept. The second opinion is asked exactly when a grid
+                // route bends, which is exactly when a detour is needed - and a
+                // detour is sideways travel, which is what this bound refuses.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("ByTurn, sweeping the stray floor");
+                _out.WriteLine(
+                    $"{"floor",-10}{"asked",8}{"took",7}{"no route",10}{"ms/order",10}" +
+                    $"{">90deg",8}{"walks",8}");
+                _out.WriteLine(new string('-', 61));
+
+                float wasFloor = HybridAStarPlanner.StrayFloorMetres;
+                Marching.SearchBudgetMs = 5f;
+                StagedRoutePlanner.AskAgainWhenBent = StagedRoutePlanner.SecondOpinion.ByTurn;
+
+                foreach (float floor in new[] { 60f })
+                {
+                    HybridAStarPlanner.StrayFloorMetres = floor;
+
+                    foreach (string warm in AllProvingFields)
+                        Shaped(warm, out _, out _, out _, out _, out _, out _);
+
+                    int asked = 0, took = 0, none = 0, sharp = 0, walks = 0;
+                    double spent = 0d;
+
+                    foreach (string field in AllProvingFields)
+                    {
+                        double least = double.MaxValue;
+                        int theseSharp = 0, theseWalk = 0;
+
+                        for (int again = 0; again < 3; again++)
+                        {
+                            StagedRoutePlanner.ResetCounters();
+                            least = Math.Min(least, Shaped(
+                                field, out _, out _, out theseSharp, out _, out _, out theseWalk));
+                        }
+
+                        asked += StagedRoutePlanner.SecondOpinionAsked;
+                        took += StagedRoutePlanner.SecondOpinionTook;
+                        none += StagedRoutePlanner.SecondOpinionNoRoute;
+                        sharp += theseSharp;
+                        walks += theseWalk;
+                        spent += least;
+                    }
+
+                    _out.WriteLine(
+                        $"{$"{floor:0} m",-10}{asked,8}{took,7}{none,10}" +
+                        $"{spent / AllProvingFields.Length,10:0.00}{sharp,8}{walks,8}");
+                }
+
+                HybridAStarPlanner.StrayFloorMetres = wasFloor;
+
+                // And the other thing that empties an open set without spending
+                // expansions: the cost limit, pruned at the pop. A node past it
+                // is dropped without being counted, so a search strangled by the
+                // ceiling and one with genuinely nowhere to go look identical
+                // from outside - both report NoRouteExists after a handful of
+                // states.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("ByTurn, sweeping the ceilings told to the search");
+                _out.WriteLine(
+                    $"{"wayround",-10}{"straight",10}{"asked",8}{"took",7}{"no route",10}" +
+                    $"{"ms/order",10}{">90deg",8}{"walks",8}");
+                _out.WriteLine(new string('-', 71));
+
+                float wasWay = StagedRoutePlanner.WayRoundCostCeiling;
+                float wasStraight = StagedRoutePlanner.StraightLineCostCeiling;
+
+                foreach ((float way, float straight) in
+                         new[] { (3.1f, 4f), (6f, 8f), (12f, 16f), (0f, 0f) })
+                {
+                    StagedRoutePlanner.WayRoundCostCeiling = way;
+                    StagedRoutePlanner.StraightLineCostCeiling = straight;
+
+                    foreach (string warm in AllProvingFields)
+                        Shaped(warm, out _, out _, out _, out _, out _, out _);
+
+                    int asked = 0, took = 0, none = 0, sharp = 0, walks = 0;
+                    double spent = 0d;
+
+                    foreach (string field in AllProvingFields)
+                    {
+                        double least = double.MaxValue;
+                        int theseSharp = 0, theseWalk = 0;
+
+                        for (int again = 0; again < 3; again++)
+                        {
+                            StagedRoutePlanner.ResetCounters();
+                            least = Math.Min(least, Shaped(
+                                field, out _, out _, out theseSharp, out _, out _, out theseWalk));
+                        }
+
+                        asked += StagedRoutePlanner.SecondOpinionAsked;
+                        took += StagedRoutePlanner.SecondOpinionTook;
+                        none += StagedRoutePlanner.SecondOpinionNoRoute;
+                        sharp += theseSharp;
+                        walks += theseWalk;
+                        spent += least;
+                    }
+
+                    _out.WriteLine(
+                        $"{(way <= 0f ? "off" : $"{way:0.0}x"),-10}" +
+                        $"{(straight <= 0f ? "off" : $"{straight:0}x"),10}" +
+                        $"{asked,8}{took,7}{none,10}" +
+                        $"{spent / AllProvingFields.Length,10:0.00}{sharp,8}{walks,8}");
+                }
+
+                StagedRoutePlanner.WayRoundCostCeiling = wasWay;
+                StagedRoutePlanner.StraightLineCostCeiling = wasStraight;
+                Marching.SearchBudgetMs = 0f;
+
                 // Per field, on the shipping arm. The played recording asked
                 // twice in forty-three grid routes where the bench asks in
                 // thirty-six of every hundred, and the fields are not alike.
                 _out.WriteLine(string.Empty);
                 _out.WriteLine("ByTurn per field, budget 5 ms");
                 _out.WriteLine(
-                    $"{"field",-16}{"grid",7}{"asked",8}{"took",7}{"refused",9}{">90deg",8}");
-                _out.WriteLine(new string('-', 55));
+                    $"{"field",-16}{"grid",7}{"asked",8}{"took",7}{"no route",10}" +
+                    $"{"pressed",9}{"too dear",10}{"dirty",7}{"lapping",9}");
+                _out.WriteLine(new string('-', 85));
 
                 Marching.SearchBudgetMs = 5f;
                 StagedRoutePlanner.AskAgainWhenBent = StagedRoutePlanner.SecondOpinion.ByTurn;
 
-                foreach (string field in AllProvingFields)
+                foreach (string field in
+                         AllProvingFields.Concat(new[] { "greatfieldsmall", "cruciblebig" }))
                 {
                     Shaped(field, out _, out _, out _, out _, out _, out _);
                     StagedRoutePlanner.ResetCounters();
@@ -2557,7 +2670,41 @@ namespace BattleChess.Tests.Battle
                         $"{field,-16}{StagedRoutePlanner.GridClean,7}" +
                         $"{StagedRoutePlanner.SecondOpinionAsked,8}" +
                         $"{StagedRoutePlanner.SecondOpinionTook,7}" +
-                        $"{StagedRoutePlanner.SecondOpinionRefused,9}{theseSharp,8}");
+                        $"{StagedRoutePlanner.SecondOpinionNoRoute,10}" +
+                        $"{StagedRoutePlanner.SecondOpinionPressed,9}" +
+                        $"{StagedRoutePlanner.SecondOpinionTooDear,10}" +
+                        $"{StagedRoutePlanner.SecondOpinionDirty,7}" +
+                        $"{StagedRoutePlanner.SecondOpinionStartedLapping,9}");
+                    _ = theseSharp;
+
+                    if (StagedRoutePlanner.SecondOpinionTook > 0)
+                        _out.WriteLine(
+                            $"{string.Empty,16}    took: mean footprint " +
+                            $"{StagedRoutePlanner.SecondOpinionTookArea / StagedRoutePlanner.SecondOpinionTook:N0} m2, " +
+                            $"widest frontage {StagedRoutePlanner.SecondOpinionTookWidest:0} m");
+
+                    if (StagedRoutePlanner.SecondOpinionNoRoute > 0)
+                        _out.WriteLine(
+                            $"{string.Empty,16}    no route: mean footprint " +
+                            $"{StagedRoutePlanner.SecondOpinionNoRouteArea / StagedRoutePlanner.SecondOpinionNoRoute:N0} m2, " +
+                            $"narrowest frontage {StagedRoutePlanner.SecondOpinionNoRouteNarrowest:0} m");
+
+                    for (int why = 0; why < StagedRoutePlanner.SecondOpinionWhy.Length; why++)
+                        if (StagedRoutePlanner.SecondOpinionWhy[why] > 0)
+                            _out.WriteLine(
+                                $"{string.Empty,16}    {(PathFailure)why} x " +
+                                $"{StagedRoutePlanner.SecondOpinionWhy[why]}, " +
+                                $"{StagedRoutePlanner.SecondOpinionExpansions} states expanded " +
+                                $"across them, {StagedRoutePlanner.SecondOpinionPrimitives} " +
+                                $"primitives tried, {StagedRoutePlanner.SecondOpinionBodies} " +
+                                "bodies avoided");
+
+                    for (int slot = 0; slot < StagedRoutePlanner.SecondOpinionStops.Length; slot++)
+                        if (StagedRoutePlanner.SecondOpinionStops[slot] > 0)
+                            _out.WriteLine(
+                                $"{string.Empty,16}    stopped: " +
+                                $"{StagedRoutePlanner.StopNames[slot]} x " +
+                                $"{StagedRoutePlanner.SecondOpinionStops[slot]}");
                 }
 
                 Marching.SearchBudgetMs = 0f;
@@ -2631,6 +2778,107 @@ namespace BattleChess.Tests.Battle
                 Assert.True(StagedRoutePlanner.SecondOpinionAsked > 0,
                     "No arm asked for a second opinion even on Always, so the five rows above are " +
                     "one row printed five times and nothing here is a comparison.");
+            }
+            finally
+            {
+                StagedRoutePlanner.AskAgainWhenBent = wasAsking;
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+
+        /// <summary>The orders the lattice cannot route, one at a time.</summary>
+        /// <remarks>
+        /// [M132]. The aggregate counters ruled out the budget, the clock, the
+        /// cost ceilings, the stray bound and a lapped start, and said only that
+        /// the open set empties after about thirty states. That is where a table
+        /// stops being able to answer and a trace has to start.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void TheOrdersTheLatticeCannotRoute()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            StagedRoutePlanner.SecondOpinion wasAsking = StagedRoutePlanner.AskAgainWhenBent;
+
+            Marching.SearchBudgetMs = 0f;
+            StagedRoutePlanner.AskAgainWhenBent = StagedRoutePlanner.SecondOpinion.ByTurn;
+
+            try
+            {
+                foreach (string field in new[] { "greatfield", "sidewaysmile", "thecrowdedwing" })
+                {
+                    BattleState battle = BenchScenariosTests.Load(field);
+                    IPathfinder pathfinder = new DirectPathfinder(
+                        battle.Terrain, new TerrainMovementModel(TestContent.Terrain),
+                        TestContent.Terrain);
+
+                    foreach (UnitInstance warm in battle.UnitsOnField())
+                        Marching.PlanTo(
+                            battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                    _out.WriteLine(string.Empty);
+                    _out.WriteLine(field);
+
+                    foreach (UnitInstance unit in battle.UnitsOnField())
+                    {
+                        StagedRoutePlanner.ResetCounters();
+
+                        Vec2 goal = BenchScenariosTests.OrderFor(battle, unit);
+                        Plan plan = Marching.PlanTo(battle, unit, pathfinder, goal);
+
+                        if (StagedRoutePlanner.SecondOpinionNoRoute == 0) continue;
+
+                        IReadOnlyList<Vec2> way = plan.Path.Waypoints;
+
+                        float walked = 0f;
+                        for (int i = 1; i < way.Count; i++)
+                            walked += Vec2.Distance(way[i - 1], way[i]);
+
+                        float straight = Vec2.Distance(unit.Position, goal);
+
+                        double worst = 0d;
+                        for (int i = 1; i < way.Count - 1; i++)
+                        {
+                            Vec2 into = way[i] - way[i - 1];
+                            Vec2 outOf = way[i + 1] - way[i];
+                            if (into.IsNearZero || outOf.IsNearZero) continue;
+
+                            double turn = Math.Abs(
+                                Facing.FromVector(outOf).Radians - Facing.FromVector(into).Radians);
+                            if (turn > Math.PI) turn = 2d * Math.PI - turn;
+                            worst = Math.Max(worst, turn * 180d / Math.PI);
+                        }
+
+                        // How much room the goal actually has: the nearest of its
+                        // own to where it was sent, against the 20 m the lattice
+                        // must finish inside and the 11 degrees it must finish on.
+                        float nearestOther = float.MaxValue;
+                        string crowding = string.Empty;
+
+                        foreach (UnitInstance other in battle.UnitsOnField())
+                        {
+                            if (other.Id == unit.Id) continue;
+
+                            float apart = Vec2.Distance(other.Position, goal);
+                            if (apart < nearestOther)
+                            {
+                                nearestOther = apart;
+                                crowding = other.Def.DisplayName;
+                            }
+                        }
+
+                        _out.WriteLine(
+                            $"  {unit.Def.DisplayName,-14} {unit.Footprint.Width:0}x" +
+                            $"{unit.Footprint.Depth:0} m  " +
+                            $"{straight,5:0} m order, walked {walked,5:0} m " +
+                            $"({walked / Math.Max(1f, straight):0.00}x), worst turn {worst,3:0} deg, " +
+                            $"{way.Count} waypoints");
+                        _out.WriteLine(
+                            $"  {string.Empty,14} nearest body to the goal: {crowding} at " +
+                            $"{nearestOther:0} m; the lattice must finish within " +
+                            $"20 m and 11 deg of that goal.");
+                    }
+                }
             }
             finally
             {

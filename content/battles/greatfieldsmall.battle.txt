@@ -1,0 +1,316 @@
+# The Great Field at eight hundred - the same battle, smaller regiments.
+#
+# [M132]. Every second opinion the lattice REFUSES is a 100x50 m regiment and
+# every one it TAKES is 40x20 m, with no overlap in forty cases - but footprint
+# and field were perfectly confounded, because the Crucible and Broken Country
+# hold nothing but strength 600 to 800 and the Great Field nothing but 2 000.
+# The correlation could have been either.
+#
+# This is the Great Field with every regiment at 800 instead of 2 000 and not
+# one position, facing or order changed, so the only thing that differs from
+# greatfield.battle.txt is how much ground a regiment covers. If the lattice
+# starts answering here, the cause is the body. If it still refuses, the cause
+# was the field all along and M132 is wrong.
+#
+# The Great Field - forty thousand a side.
+#
+# The largest order of battle in this project, and built to be exactly that:
+# twenty regiments an army at two thousand men each, eighty thousand on the
+# field between them, on ground with room for all of it.
+#
+#   3 cavalry        6 000    on the wings, where horse is worth having
+#   2 horse archers  4 000    outside them again, free to swing
+#   8 spearmen      16 000    the front line
+#   7 swordsmen     14 000    the second line
+#  ------------------------
+#  20 regiments     40 000    each side, identical
+#
+# The infantry split is 16 000 spears to 14 000 swords rather than an even
+# 15 000 apiece: fifteen regiments cannot halve, and holding every regiment to
+# exactly two thousand was worth more than splitting the difference. Change the
+# eight to seven and the seven to eight to lean the other way.
+#
+# TWO THOUSAND IS NOT A NORMAL REGIMENT. units.cfg caps cavalry at 700 and
+# horse archers at 800, for the good reason that a two-thousand-strong body of
+# horse is 229 m across its front and 114 m deep - a quarter of a kilometre of
+# cavalry in one rectangle. This battle raises its own ceiling rather than
+# editing the shared catalogue, so nothing else in content inherits it. What it
+# looks like on the field is worth watching before it is copied.
+#
+# Both armies stand about a kilometre apart, in the clear, with their northern
+# flank on a range of small mountains and their southern on the river. The two
+# knolls in between are a march from either start line.
+#
+# Positions are authored map cells (column,row), matching what `map greatfield`
+# draws, and were computed from the built footprints rather than estimated:
+# nothing here overlaps at deployment.
+
+name        = The Great Field
+map         = greatfield
+seed        = 20260818
+
+[army 0]
+name        = Army of the West
+# Two thousand to a regiment, across the board. The ceiling lives here
+# rather than in units.cfg so that this scenario can field bodies of a
+# size no other battle has to inherit.
+maxStrength = 2000
+
+# ---- Army of the West: horse on both wings -------------------------------
+
+[deploy 0]
+type     = cavalry
+strength = 800
+at       = 14,10
+facing   = east
+
+[deploy 0]
+type     = horsearchers
+strength = 800
+at       = 14,19
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 800
+at       = 14,61
+facing   = east
+
+[deploy 0]
+type     = cavalry
+strength = 800
+at       = 14,71
+facing   = east
+
+[deploy 0]
+type     = horsearchers
+strength = 800
+at       = 14,80
+facing   = east
+
+# ---- Army of the West: the spear line, eight regiments -------------------
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,26
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,30
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,34
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,38
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,42
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,46
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,50
+facing   = east
+
+[deploy 0]
+type     = spearmen
+strength = 800
+at       = 14,54
+facing   = east
+
+# ---- Army of the West: swords in the second line, behind the spears ------
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,25
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,30
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,35
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,40
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,45
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,49
+facing   = east
+
+[deploy 0]
+type     = swordsmen
+strength = 800
+at       = 10,54
+facing   = east
+
+[army 1]
+name        = Army of the East
+# Two thousand to a regiment, across the board. The ceiling lives here
+# rather than in units.cfg so that this scenario can field bodies of a
+# size no other battle has to inherit.
+maxStrength = 2000
+
+# ---- Army of the East: horse on both wings -------------------------------
+
+[deploy 1]
+type     = cavalry
+strength = 800
+at       = 57,10
+facing   = west
+
+[deploy 1]
+type     = horsearchers
+strength = 800
+at       = 57,19
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 800
+at       = 57,61
+facing   = west
+
+[deploy 1]
+type     = cavalry
+strength = 800
+at       = 57,71
+facing   = west
+
+[deploy 1]
+type     = horsearchers
+strength = 800
+at       = 57,80
+facing   = west
+
+# ---- Army of the East: the spear line, eight regiments -------------------
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,26
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,30
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,34
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,38
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,42
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,46
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,50
+facing   = west
+
+[deploy 1]
+type     = spearmen
+strength = 800
+at       = 57,54
+facing   = west
+
+# ---- Army of the East: swords in the second line, behind the spears ------
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,25
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,30
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,35
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,40
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,45
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,49
+facing   = west
+
+[deploy 1]
+type     = swordsmen
+strength = 800
+at       = 61,54
+facing   = west
