@@ -528,6 +528,30 @@ namespace BattleChess.Rules
         {
             if (OutOfTime()) return true;
 
+            return Abandoned();
+        }
+
+        /// <summary>
+        /// Whether the order this plan is answering has been replaced - the
+        /// clock left out of it.
+        /// </summary>
+        /// <remarks>
+        /// <b>[M126].</b> <see cref="StopNow"/> asks two questions at once, and
+        /// they are not equally settled. Giving up because the budget ran out
+        /// costs the player a route, and where that is allowed to happen is a
+        /// rule about how the game plays. Giving up because the player has
+        /// already clicked somewhere else costs nothing at all: the answer is
+        /// thrown away on arrival either way ([M80]), so there is no rule to
+        /// decide and nowhere it is wrong to ask.
+        /// <para>
+        /// So a stage that is not ready to honour a budget can still honour a
+        /// supersession, which is what lets the host stop waiting on a plan
+        /// nobody wants without any of the budget's open questions being
+        /// settled first.
+        /// </para>
+        /// </remarks>
+        internal static bool Abandoned()
+        {
             Func<bool>? asked = GiveUpNow;
 
             return asked != null && asked();

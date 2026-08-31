@@ -1990,12 +1990,22 @@ nearer one failed. Both are real differences in what is asked. Measured:
 
 | field | orders | same | changed | won't walk | samples | of them |
 |---|---:|---:|---:|---:|---:|---:|
-| thecrowdedwing | 40 | **40** | **0** | 5/5 | 59 663 | **11,6%** |
-| greatfield | 40 | 40 | 0 | 0/0 | 2 728 | 100,0% |
-| sidewaysmile | 40 | 40 | 0 | 2/2 | 2 482 | 78,2% |
+| thecrowdedwing | 40 | **40** | **0** | 5/5 | 53 741 | **1,8%** |
+| sidewaysmile | 40 | 40 | 0 | 2/2 | 586 | 7,8% |
+| greatfield | 40 | 40 | 0 | 0/0 | 0 | - |
 | crucible | 80 | 80 | 0 | 0/0 | 0 | - |
 | brokencountry | 80 | 80 | 0 | 0/0 | 0 | - |
 | longmarch | 80 | 80 | 0 | 0/0 | 0 | - |
+
+**The sample column above is corrected from what [M125] first reported**, which
+was 59 663 falling to 11,6% with greatfield at 2 728 and 78,2%. The counter was
+incremented inside `EscapesWithoutDeepening`, which the walk check calls as well
+as the staging scan, so it charged the gate that verifies a route to the stage
+that clears the ground before one. Both arms carried the same contamination, so
+the routes and the clock below were never affected - but the saving was
+understated by a factor of six, and greatfield's staging scan, which never runs
+at all, appeared to run 2 728 times. Found while writing [M126]'s gate, where an
+abandoned order read as walking three hundred poses it had not walked.
 
 **Three hundred and sixty routes of three hundred and sixty identical**, the same
 count of routes the executor refuses in both arms, and not a second of difference
@@ -2032,3 +2042,63 @@ and both halves of what it proposed - [M121]'s outward smoothing scan and
 was actually the bill asks no clearance checks at all, had no clock on it, and
 could not appear in that table for either reason. **A profile can only rank what
 it measures**, and the thing missing from it was not a small row.
+
+### M126 — the freeze was the waiting, not the planning
+
+**The designer:** *"do we need to do something else to get rid of that bug that
+made running the game freeze sometimes?"*. Yes, and it was not what [M123] said
+it was.
+
+**[M123] is corrected: the plan was never on the drawing thread.** Every order
+goes through `WorkOutRoutes` and a worker, a single regiment as much as a wing,
+and the clock is held while one is out - which is why the slow frames in the
+recording show `sim 0,0, 0 ticks`. What ran on the drawing thread was the
+**wait**.
+
+`TrackOrders` settles any outstanding plan on every right-mouse-down, and
+`SettleRoutes` is a bare `Task.Wait()` with no timeout. **So giving the next
+order while the last plan is still out blocks the frame for whatever is left of
+it.** That is the 280,4 ms of `tracking` on the 293 ms frame, against a plan that
+took 381,7 ms in total: the frame planned nothing and waited for nearly three
+quarters of a plan it was about to throw away. The two wing orders in the same
+list say it from the other side - *13 routes worked out in 191,4 ms (all at once
+on 12 cores), off the drawing thread over 11 frame(s)* - and the frame that
+ordered next still cost 114 ms.
+
+**And [M80]'s cancellation was built, correct, and wired one line too late.**
+`Supersede` marks an outstanding plan's regiments as no longer wanted and the
+worker polls it through `Marching.GiveUpNow`. It was called from inside
+`WorkOutRoutes`, which runs *after* the settle. So the click that made a plan
+unwanted waited for it to finish before saying so. **Superseding the selection
+before settling** is the fix, and it is a reordering rather than new machinery.
+
+**A supersession is not a budget, and separating them is what let this be done
+now.** `Marching.StopNow` asks two questions at once and they are not equally
+settled: giving up because the clock ran out costs the player a route and is a
+rule about how the game plays, while giving up because the player has already
+clicked elsewhere costs nothing, since the answer is discarded on arrival either
+way. So `Marching.Abandoned()` asks only the second, and the staging scan - the
+dearest thing an order does, with no gate in front of it ([M123]) - polls that
+without any of the budget's open questions having to be settled first.
+
+**Gated, red first.** `SupersedingAnOrderTests.TheStagingScanAsksWhetherItIsStillWanted`,
+on `thecrowdedwing` because the scan never runs on a start line: the dearest order
+walks **482 staging poses wanted and 0 abandoned**, against 482 and 482 with the
+poll removed, which is how it was checked. Asserted on the **worst order rather
+than the total**, and that mattered - the first version summed the poses and
+passed before the poll existed, because an abandoned order gives up in some other
+stage and the cascade's second pass never runs. A gate that passes on the
+unfixed code is not a gate ([W9]).
+
+**And `WalkTheStagingOnce` ships on**, on [M125]'s measurement: 360 routes of 360
+identical across six fields, the played arrangement's orders halved.
+
+**What is still open is the rule, not the machinery.** With the freeze gone and
+the scan cheap, the cap can be made to bind - but the far end of that is a
+question only the designer can answer: **when planning runs out of time and the
+only answer in hand is a press-through, does the regiment take it or refuse the
+order and stand?** Today it always takes it ([M98]), which in the recorded
+session is 66 press-throughs and 96 orders the search could not answer out of
+640. A third option is on the table - take the press only inside a ceiling, as
+`WayRoundCostCeiling` already does for a neighbouring question - and it is the
+one worth measuring first.

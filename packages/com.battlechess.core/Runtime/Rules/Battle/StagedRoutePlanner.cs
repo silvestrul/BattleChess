@@ -1329,7 +1329,7 @@ namespace BattleChess.Rules
         /// nearer one failed is a sampling artefact rather than an answer.
         /// </para>
         /// </remarks>
-        internal static bool WalkTheStagingOnce;
+        internal static bool WalkTheStagingOnce = true;
 
         /// <summary>Poses the staging scan tested. Measurement only.</summary>
         [ThreadStatic] internal static long StagingSamples;
@@ -1378,11 +1378,18 @@ namespace BattleChess.Rules
 
                 for (float distance = least; distance <= furthest; distance += EgressSpacingMetres)
                 {
+                    // Not the budget - only whether anybody still wants this.
+                    // See Marching.Abandoned, and [M123] for why this stage in
+                    // particular: it is the dearest thing an order does and no
+                    // gate stands in front of it.
+                    if (Marching.Abandoned()) return false;
+
                     Vec2 stage = unit.Position + direction * distance;
                     Facing escapeFront = Facing.Towards(unit.Position, stage);
                     Facing runFront = Facing.Towards(stage, destination);
 
-                    if (!EscapesWithoutDeepening(battle, unit, unit.Position, stage, escapeFront))
+                    if (!EscapesWithoutDeepening(
+                            battle, unit, unit.Position, stage, escapeFront, staging: true))
                         continue;
 
                     if (!Marching.IsClearLine(battle, unit, stage, destination, runFront))
@@ -1445,6 +1452,8 @@ namespace BattleChess.Rules
                 for (float before = EgressSpacingMetres; before < least - 0.001f;
                      before += EgressSpacingMetres)
                 {
+                    if (Marching.Abandoned()) return false;
+
                     if (!StillEscaping(battle, unit, unit.Position + direction * before,
                                        escapeFront, own, lapping))
                     {
@@ -1457,6 +1466,8 @@ namespace BattleChess.Rules
 
                 for (float distance = least; distance <= furthest; distance += EgressSpacingMetres)
                 {
+                    if (Marching.Abandoned()) return false;
+
                     Vec2 stage = unit.Position + direction * distance;
 
                     // Refusal is monotone along the ray, so the first stand-off
@@ -1697,9 +1708,17 @@ namespace BattleChess.Rules
         /// Sweeps a first leg in small steps.  Bodies already lapped may only
         /// become less overlapped; bodies initially clear may never be entered.
         /// </summary>
+        /// <param name="staging">
+        /// Whether this walk is the staging scan's rather than the walk check's.
+        /// Measurement only, and it exists because the two share this helper:
+        /// counting both under <see cref="StagingSamples"/> charged the gate that
+        /// verifies a route to the stage that clears the ground before one, and
+        /// an abandoned order read as walking three hundred poses it never
+        /// walked.
+        /// </param>
         private static bool EscapesWithoutDeepening(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing front,
-            float? allowedContact = null)
+            float? allowedContact = null, bool staging = false)
         {
             float allowed = allowedContact ?? AllowedContactFraction;
 
@@ -1722,7 +1741,7 @@ namespace BattleChess.Rules
 
             for (int i = 1; i <= samples; i++)
             {
-                StagingSamples++;
+                if (staging) StagingSamples++;
 
                 Vec2 at = Vec2.Lerp(from, to, (float)i / samples);
                 if (!battle.FormationFits(unit, at, front)) return false;

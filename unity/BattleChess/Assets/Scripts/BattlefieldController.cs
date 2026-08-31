@@ -677,7 +677,27 @@ namespace BattleChess.Unity
                 // and both write to the field a worker may still be reading.
                 // Settling here covers the attack, the preview and the march in
                 // one place rather than three.
-                if (WorkingOutARoute) SettleRoutes();
+                //
+                // <b>Superseded first, and that ordering is the whole of [M126].</b>
+                // [M80] built the machinery to abandon a plan whose order has
+                // been replaced - Supersede marks it, the worker polls it - and
+                // it was called from inside WorkOutRoutes, which runs *after*
+                // this settle. So the click that made a plan unwanted waited for
+                // it to finish before saying so. Measured in the recording of
+                // 30 August: a frame that planned nothing at all and cost 293 ms,
+                // of which 280 was this wait, against an order that took 381,7 ms
+                // in total. Marking them first turns the wait into whatever is
+                // left before the worker next looks.
+                //
+                // By the current selection, because that is who the order below
+                // is for, whichever branch it takes. A plan out for somebody
+                // else is still waited for: it is reading a field this order is
+                // about to write.
+                if (WorkingOutARoute)
+                {
+                    Supersede(_selection);
+                    SettleRoutes();
+                }
 
                 if (_selection.Count == 0)
                 {
