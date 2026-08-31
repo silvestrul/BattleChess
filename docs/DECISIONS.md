@@ -2416,22 +2416,38 @@ left through that door [W9]. The first draft of it could not: it printed the gri
 *asked* counter instead of `GridClean`, which overstated two fields and hid the
 residual entirely.
 
-| field | orders | staged | ladder | bent | grid | tangent | corners | rings | pose | press | unattributed |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| thecrowdedwing | 40 | 2 | 7 | 16 | 10 | 0 | 0 | 0 | 0 | 1 | **4** |
-| crucible | 80 | 0 | 30 | 18 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
-| brokencountry | 80 | 0 | 34 | 14 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
-| greatfield | 40 | 0 | 10 | 12 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
-| longmarch | 80 | 0 | 40 | 32 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| sidewaysmile | 40 | 2 | 11 | 12 | 14 | 0 | 0 | 0 | 0 | 1 | 0 |
+| field | orders | staged | ladder | bent | grid | tangent | corners | rings | pose | press | unattributed | pose asked | tan asked |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | 40 | 2 | 7 | 16 | 10 | 0 | 0 | 0 | 0 | 1 | **4** | 5 | 4 |
+| crucible | 80 | 0 | 30 | 18 | 32 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| brokencountry | 80 | 0 | 34 | 14 | 32 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| greatfield | 40 | 0 | 10 | 12 | 18 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| longmarch | 80 | 0 | 40 | 32 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| sidewaysmile | 40 | 2 | 11 | 12 | 14 | 0 | 0 | 0 | 0 | 1 | 0 | 1 | 0 |
 
-**The ladder and the grid answer everything.** The tangent graph, the pose search,
-corners and rings answer *nothing* on any of the six fields - not once - which is
-the measured case for the third proposal's demolition half, and a far stronger case
-than the argument for it was. The four unattributed orders are all on
-`thecrowdedwing`, the one arrangement taken from a played recording rather than
-deployed on a parade ground, and they leave through the terminal tangent fallback
-that no stage prices.
+**The ladder and the grid answer everything**, and on five of the six fields
+nothing past the grid is *reached at all*.
+
+**Three of those zero columns are vacuous and must not be read.** `AskCorners`,
+`AskRings` and `AskTangentStage` all default to **false**, so corners, rings and the
+tangent stage were switched off before the measurement began. A stage that is not
+running has not been shown to be useless [W9], and the first draft of this entry
+claimed exactly that about all four of them.
+
+**The two that are not vacuous:**
+
+- **The pose search is on, is asked six times in three hundred and sixty orders,
+  and wins none of them.** `HybridAStarRoutePlanner` - the lattice over (place,
+  front) - never draws a route that survives `WalksCleanly` and the ceiling.
+- **The tangent graph's only live role is the terminal fallback**, and it is the
+  four unattributed orders on `thecrowdedwing`. That is the one arrangement taken
+  from a played recording rather than deployed on a parade ground, and its hard
+  orders leave through a door **no stage prices**.
+
+So the demolition the third proposal asks for is *smaller and better aimed* than it
+looks: what the measurement supports removing is the pose search, not the cascade.
+What it supports pricing is the terminal fallback. And what it says about corners,
+rings and the tangent stage is nothing whatever.
 
 **Nothing prices a turn.** The grid's A* step cost is `Spacing / going * penalty`
 and has no term for changing direction, so a dog-leg and a straight line of the

@@ -2092,7 +2092,7 @@ namespace BattleChess.Tests.Battle
                 _out.WriteLine(
                     $"{"field",-16}{"orders",8}{"staged",8}{"ladder",8}{"bent",7}" +
                     $"{"grid",7}{"tangent",9}{"corners",9}{"rings",7}{"pose",7}" +
-                    $"{"press",7}{"unattributed",14}");
+                    $"{"press",7}{"unattributed",14}{"pose asked",11}{"tan asked",10}");
                 _out.WriteLine(new string('-', 108));
 
                 foreach (string field in AllProvingFields)
@@ -2131,7 +2131,8 @@ namespace BattleChess.Tests.Battle
                         $"{StagedRoutePlanner.GridClean,7}" +
                         $"{StagedRoutePlanner.TangentClean,9}{StagedRoutePlanner.CornersClean,9}" +
                         $"{StagedRoutePlanner.RingsClean,7}{StagedRoutePlanner.PoseWon,7}" +
-                        $"{StagedRoutePlanner.Pressed,7}{orders - named,14}");
+                        $"{StagedRoutePlanner.Pressed,7}{orders - named,14}" +
+                        $"{StagedRoutePlanner.PoseAsked,11}{StagedRoutePlanner.TangentAsked,10}");
                 }
             }
             finally
