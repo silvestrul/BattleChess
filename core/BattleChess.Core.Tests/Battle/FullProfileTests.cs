@@ -854,7 +854,7 @@ namespace BattleChess.Tests.Battle
             //
             // Set out loud rather than inherited: the budget is a static shared
             // with an order-sensitive suite.
-            foreach (float budget in new[] { 0f, 5f })
+            foreach (float budget in new[] { 0f, 5f, 1.35f })
             {
             Marching.SearchBudgetMs = budget;
 
@@ -2441,8 +2441,6 @@ namespace BattleChess.Tests.Battle
             float wasBudget = Marching.SearchBudgetMs;
             StagedRoutePlanner.SecondOpinion wasAsking = StagedRoutePlanner.AskAgainWhenBent;
 
-            Marching.SearchBudgetMs = 0f;
-
             var arms = new[]
             {
                 StagedRoutePlanner.SecondOpinion.Off,
@@ -2451,6 +2449,17 @@ namespace BattleChess.Tests.Battle
                 StagedRoutePlanner.SecondOpinion.ByEither,
                 StagedRoutePlanner.SecondOpinion.Always,
             };
+
+            // **Both budgets, and the second one is the one that counts.** The
+            // first table of this was taken at nought, which is not the game:
+            // a played recording at the shipping 5 ms shows 163 orders running
+            // out of budget, and the second opinion is behind the same clock, so
+            // it asked twice where the uncapped bench predicted fifteen. A bench
+            // measured without the cap the game runs under is not a measurement
+            // of the game [W5].
+            foreach (float budget in new[] { 0f, 5f })
+            {
+            Marching.SearchBudgetMs = budget;
 
             try
             {
@@ -2461,10 +2470,11 @@ namespace BattleChess.Tests.Battle
                         Shaped(warm, out _, out _, out _, out _, out _, out _);
                 }
 
+                _out.WriteLine(string.Empty);
                 _out.WriteLine(
+                    $"budget {(budget <= 0f ? "off" : $"{budget:0} ms")}, " +
                     $"turn > {StagedRoutePlanner.SecondOpinionTurnDegrees:0} deg, " +
                     $"detour > {StagedRoutePlanner.SecondOpinionDetour:0.00}x");
-                _out.WriteLine(string.Empty);
                 _out.WriteLine(
                     $"{"arm",-10}{"walks",8}{"ms/order",10}{"worst ms",10}{"detour",9}" +
                     $"{">90deg",8}{"worst turn",12}{"asked",8}{"took",7}{"refused",9}");
@@ -2513,6 +2523,44 @@ namespace BattleChess.Tests.Battle
                         $"{worstMs,10:0.0}{detour / Math.Max(1, routed),9:0.000}" +
                         $"{sharp,8}{worstTurn,12:0}{asked,8}{took,7}{refused,9}");
                 }
+
+            }
+            finally
+            {
+                StagedRoutePlanner.AskAgainWhenBent = wasAsking;
+            }
+            }
+
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                // Per field, on the shipping arm. The played recording asked
+                // twice in forty-three grid routes where the bench asks in
+                // thirty-six of every hundred, and the fields are not alike.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("ByTurn per field, budget 5 ms");
+                _out.WriteLine(
+                    $"{"field",-16}{"grid",7}{"asked",8}{"took",7}{"refused",9}{">90deg",8}");
+                _out.WriteLine(new string('-', 55));
+
+                Marching.SearchBudgetMs = 5f;
+                StagedRoutePlanner.AskAgainWhenBent = StagedRoutePlanner.SecondOpinion.ByTurn;
+
+                foreach (string field in AllProvingFields)
+                {
+                    Shaped(field, out _, out _, out _, out _, out _, out _);
+                    StagedRoutePlanner.ResetCounters();
+                    Shaped(field, out _, out _, out int theseSharp, out _, out _, out _);
+
+                    _out.WriteLine(
+                        $"{field,-16}{StagedRoutePlanner.GridClean,7}" +
+                        $"{StagedRoutePlanner.SecondOpinionAsked,8}" +
+                        $"{StagedRoutePlanner.SecondOpinionTook,7}" +
+                        $"{StagedRoutePlanner.SecondOpinionRefused,9}{theseSharp,8}");
+                }
+
+                Marching.SearchBudgetMs = 0f;
 
                 // And the dial itself, on the arm that wins above. A rule is not
                 // chosen until its number is.

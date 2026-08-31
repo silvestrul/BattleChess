@@ -2616,6 +2616,49 @@ failures before and after, being the nine long-standing ones and the two
   either way: it means nothing pins those routes, so it is not evidence that they
   improved. The evidence for that is the table, not the suite.
 
+### M131a - and the aggregate was two fields wearing a total
+
+**Corrected by a played recording, which is the only reason it was caught.** The
+run at [M128]'s new x1 took forty-three grid routes over 2 753 ticks and the second
+opinion fired **twice**, where the bench's thirty-six-in-a-hundred predicted about
+fifteen. Two candidate explanations, and the first one was wrong:
+
+- **Not the budget.** The bench swept at 0 ms, 5 ms and 1,35 ms - the last being
+  5 ms scaled by the Mono ratio, since the bench is CoreCLR and the game is not -
+  and `ByTurn` asked 41, 40 and 40 times. The cap does not suppress it.
+- **The field.** Per field, at the shipping budget:
+
+| field | grid routes | asked | **took** | refused | >90 deg left |
+|---|---:|---:|---:|---:|---:|
+| crucible | 51 | 20 | **20** | 0 | 1 |
+| brokencountry | 38 | 7 | **7** | 0 | 3 |
+| thecrowdedwing | 10 | 6 | **0** | 6 | 7 |
+| greatfield | 18 | 4 | **0** | 4 | 4 |
+| sidewaysmile | 14 | 3 | **0** | 3 | 5 |
+| longmarch | 8 | 0 | 0 | 0 | 0 |
+
+**The whole of [M131]'s benefit is two fields.** On the Crucible and Broken Country
+the second opinion is taken every single time it is asked, twenty-seven for
+twenty-seven. On the other four it is asked thirteen times and **takes nothing** -
+thirteen pose searches, at eight to ten milliseconds apiece in Mono, for no route.
+
+**Including the field the designer actually plays.** The Great Field asks four and
+takes none, and `thecrowdedwing` - the hardest arrangement here, and the one taken
+from a recording rather than deployed on a parade ground - asks six and takes none.
+**The rule does least exactly where the routes are worst.**
+
+So [M131]'s headline, 45 sharp routes down to 21, is true of the bench and is
+carried entirely by two fields out of six. It is not a description of what a player
+sees on the Great Field, where the honest figure is *no change and four wasted
+searches a pass*.
+
+**It stays on**, because it never costs coverage and its cost is bounded, and
+because two fields in six is a real improvement rather than a rounding error. But
+the next thing worth building is not a better threshold - the angle sweep already
+shows 90 degrees is a knee - it is finding out **why the pose search returns no
+route on four fields out of six**, which is the same question [M130] asked and
+answered only for the six orders it could see. It now has thirteen more.
+
 **And it does not touch the halo.** [M129]'s 21,3 m circle is still there, still
 banning a corridor two regiments can walk down, because the *grid* still plans over
 ground. What this buys is that the ground plan's worst answers get replaced by a
