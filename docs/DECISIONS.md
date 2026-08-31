@@ -2408,22 +2408,30 @@ the sharp-turn report, and it is worse than the grid's own resolution can explai
 120 degrees is two hex steps, but 148 is not a hex angle at all and comes from the
 stages that work in continuous space.
 
-**Which stage draws them.** Warmed, counters reset, one plan per regiment.
+**Which stage draws them.** Warmed, counters reset, one plan per regiment. Every
+column is a counter that sits on a *return* path, and the last one is the residual
+- because the terminal tangent fallback increments nothing, and without the
+residual this table could not tell an order it does not mention from an order that
+left through that door [W9]. The first draft of it could not: it printed the grid's
+*asked* counter instead of `GridClean`, which overstated two fields and hid the
+residual entirely.
 
-| field | staged | ladder | bent | grid | fine | tangent | pose | press |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| thecrowdedwing | 2 | 7 | 16 | 15 | 14 | 0 | 0 | 1 |
-| crucible | 0 | 30 | 18 | 32 | 11 | 0 | 0 | 0 |
-| brokencountry | 0 | 34 | 14 | 32 | 10 | 0 | 0 | 0 |
-| greatfield | 0 | 10 | 12 | 18 | 7 | 0 | 0 | 0 |
-| longmarch | 0 | 40 | 32 | 8 | 0 | 0 | 0 | 0 |
-| sidewaysmile | 2 | 11 | 12 | 15 | 6 | 0 | 0 | 1 |
+| field | orders | staged | ladder | bent | grid | tangent | corners | rings | pose | press | unattributed |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | 40 | 2 | 7 | 16 | 10 | 0 | 0 | 0 | 0 | 1 | **4** |
+| crucible | 80 | 0 | 30 | 18 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
+| brokencountry | 80 | 0 | 34 | 14 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
+| greatfield | 40 | 0 | 10 | 12 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
+| longmarch | 80 | 0 | 40 | 32 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| sidewaysmile | 40 | 2 | 11 | 12 | 14 | 0 | 0 | 0 | 0 | 1 | 0 |
 
-The columns sum to the order count on every field, so this is an attribution and
-not a tally of attempts. **The ladder and the grid answer everything.** Tangents,
-the pose search, corners and rings answer *nothing* on any of the six - which is
-the measured case for the third proposal's demolition half, and a much stronger
-case than the argument for it was.
+**The ladder and the grid answer everything.** The tangent graph, the pose search,
+corners and rings answer *nothing* on any of the six fields - not once - which is
+the measured case for the third proposal's demolition half, and a far stronger case
+than the argument for it was. The four unattributed orders are all on
+`thecrowdedwing`, the one arrangement taken from a played recording rather than
+deployed on a parade ground, and they leave through the terminal tangent fallback
+that no stage prices.
 
 **Nothing prices a turn.** The grid's A* step cost is `Spacing / going * penalty`
 and has no term for changing direction, so a dog-leg and a straight line of the

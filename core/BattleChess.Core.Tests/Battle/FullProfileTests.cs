@@ -2090,9 +2090,10 @@ namespace BattleChess.Tests.Battle
                 _out.WriteLine(string.Empty);
                 _out.WriteLine("Which stage drew them");
                 _out.WriteLine(
-                    $"{"field",-16}{"staged",8}{"ladder",8}{"bent",7}{"grid",7}" +
-                    $"{"fine",7}{"tangent",9}{"pose",7}{"press",7}");
-                _out.WriteLine(new string('-', 76));
+                    $"{"field",-16}{"orders",8}{"staged",8}{"ladder",8}{"bent",7}" +
+                    $"{"grid",7}{"tangent",9}{"corners",9}{"rings",7}{"pose",7}" +
+                    $"{"press",7}{"unattributed",14}");
+                _out.WriteLine(new string('-', 108));
 
                 foreach (string field in AllProvingFields)
                 {
@@ -2111,13 +2112,26 @@ namespace BattleChess.Tests.Battle
                         Marching.PlanTo(
                             battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
 
+                    // Every counter that sits on a return path, and the residual.
+                    // Without the residual this table cannot say whether an
+                    // order it does not mention was answered by the terminal
+                    // tangent fallback - which increments nothing - or simply
+                    // was not asked. W9.
+                    int orders = OrdersOn(field);
+                    int named =
+                        StagedRoutePlanner.Staged + StagedRoutePlanner.LadderClean +
+                        StagedRoutePlanner.LadderBent + StagedRoutePlanner.GridClean +
+                        StagedRoutePlanner.TangentClean + StagedRoutePlanner.CornersClean +
+                        StagedRoutePlanner.RingsClean + StagedRoutePlanner.PoseWon +
+                        StagedRoutePlanner.Pressed;
+
                     _out.WriteLine(
-                        $"{field,-16}{StagedRoutePlanner.Staged,8}" +
+                        $"{field,-16}{orders,8}{StagedRoutePlanner.Staged,8}" +
                         $"{StagedRoutePlanner.LadderClean,8}{StagedRoutePlanner.LadderBent,7}" +
-                        $"{GridRoutePlanner.Found,7}" +
-                        $"{GridRoutePlanner.FineFound,7}" +
-                        $"{StagedRoutePlanner.TangentClean,9}{StagedRoutePlanner.PoseWon,7}" +
-                        $"{StagedRoutePlanner.Pressed,7}");
+                        $"{StagedRoutePlanner.GridClean,7}" +
+                        $"{StagedRoutePlanner.TangentClean,9}{StagedRoutePlanner.CornersClean,9}" +
+                        $"{StagedRoutePlanner.RingsClean,7}{StagedRoutePlanner.PoseWon,7}" +
+                        $"{StagedRoutePlanner.Pressed,7}{orders - named,14}");
                 }
             }
             finally
