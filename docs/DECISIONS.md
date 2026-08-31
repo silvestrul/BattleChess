@@ -2163,9 +2163,73 @@ sensitive than the neighbouring ceilings: 8 m of press on a 300 m march is
 distribution over the bench and the two recorded arrangements, not from an
 example.
 
-**Not built yet.** The pass order is: price a press honestly, behind a lever,
-with the route-identity gate every cost change in this file has had; measure what
-presses actually cost once priced; then set the ceiling and truncate above it.
-Changing `SecondsToWalk` moves every comparison in the cascade - both ceilings,
-`CostsMoreThan`, the ladder's own choice between the arch and the crab - so it is
-the widest blast radius of anything touched this session and gets the widest gate.
+### M127a - built, and it has almost nothing to bite on
+
+**All three parts are in.** The press is priced at the pace it is really walked,
+the ceiling decides, and above it the regiment stops at the furthest point on the
+ordered line it can reach without lapping anybody.
+
+**The pricing is not in `SecondsToWalk`, and that is a measurement rather than a
+preference.** It was written there first, which is where the argument puts it -
+the executor charges the overlap itself, so a crab that clips a neighbour and a
+declared press should be priced by one rule. Measured over six fields it cost
+**between 5 and 34 per cent of an order**, because `SecondsToWalk` is asked on
+every comparison the cascade makes and this asks the spatial index a question on
+every leg of every one of them. Asking it once for the whole leg instead of once
+a sample only brought that to 5-34 from 9-49. So it lives in
+`SecondsToWalkPressing` and is asked at the one place the answer changes a
+decision, for **+0,1% to +4,5%** instead. The residue is real and written down: a
+route that merely clips a neighbour is still under-priced, and closing that gap
+costs a third of the planner.
+
+**What a press actually costs, over 360 orders on six fields.** The ratio is the
+same route priced twice, so it is the slowdown alone.
+
+| | |
+|---|---:|
+| routes charged anything at all | **11 of 360** |
+| declared press-throughs | **4** |
+| dearest ratio anywhere | **1,236** |
+| second dearest | 1,180 |
+| routes above 1,25 | **0** |
+
+**So the useful band is 1,0 to 1,25, not 1,0 to 1,67.** The theoretical maximum is
+a march pressed end to end; nothing on any field comes close.
+
+| ceiling | presses | stopped short | routes moved |
+|---|---:|---:|---:|
+| off | 4 | 0 | 0 |
+| 1,40 | 4 | 0 | 0 |
+| 1,25 | 4 | 0 | 0 |
+| **1,15** | **4** | **1** | **1** |
+| 1,10 | 4 | 1 | 1 |
+| 1,05 | 4 | 32 | 32 |
+| 1,001 | 4 | 96 | 96 |
+
+**And the honest finding is the column that does not move.** The four declared
+presses are unchanged at every ceiling including 1,001. They are presses that
+begin *where the regiment already stands* - it is inside one of its own when the
+order arrives - so the first body is at nought metres and there is no closer place
+to stop. Under the designer's own rule that is correct: the closest place it can
+get to is where it is. But it means **the ceiling does not touch the press-throughs
+that actually happen**, and below 1,05 what it starts moving is dozens of ordinary
+routes that merely clip a neighbour, which is over-firing rather than the rule.
+
+**Shipped at 1,15**, which is the rule as asked for and costs one route on the
+bench. What it will do in play is an open question the bench cannot answer: these
+fields are two recorded arrangements and four parade grounds, and a press from
+inside is exactly the case a recorded arrangement has and a parade ground does
+not.
+
+**Which points at where the real answer is.** A press that begins from inside is
+not a routing problem, it is an extraction problem, and the stage that exists to
+solve it is `TryStageForDirectRun` - the staging scan of [M123] and [M125]. If
+those four presses are the ones the designer sees as *"cavalry goes through
+units"*, the fix is that the staging scan finds a way out for them and currently
+does not. That is the next thing to measure.
+
+**The plan as written before any of it was built**, kept because [M127a] departs
+from it: price a press honestly, measure, then set the ceiling and truncate.
+Changing `SecondsToWalk` was expected to move every comparison in the cascade -
+both ceilings, `CostsMoreThan`, the ladder's choice between the arch and the crab.
+It would have, and it cost too much to leave there.

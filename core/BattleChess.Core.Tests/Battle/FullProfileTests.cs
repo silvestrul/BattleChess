@@ -1751,6 +1751,227 @@ namespace BattleChess.Tests.Battle
             return routes;
         }
 
+        /// <summary>
+        /// What a press-through really costs once it is priced at the pace it is
+        /// walked, and what pricing it changes.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M127], and it is the number the ceiling has to be set from.</b>
+        /// The ratio reported is the same route priced twice - with
+        /// <see cref="Marching.PricePressingHonestly"/> on and off - so it is
+        /// exactly the slowdown the executor will charge and nothing else. It
+        /// cannot exceed 1/0,6 = 1,67, which is a march pressed end to end.
+        /// </para>
+        /// <para>
+        /// The routes are the other half: pricing changes every comparison in
+        /// the cascade, so what the planner *chooses* moves as well as what it
+        /// says a choice costs.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatAPressReallyCosts()
+        {
+            bool wasPricing = Marching.PricePressingHonestly;
+            float wasBudget = Marching.SearchBudgetMs;
+
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"orders",8}{"same",6}{"changed",9}" +
+                    $"{"pressed",10}{"worst",8}{"1,0-1,1",9}{"-1,25",7}{"-1,4",7}{"1,4+",7}");
+                _out.WriteLine(new string('-', 87));
+
+                foreach (string field in AllProvingFields)
+                {
+                    Marching.PricePressingHonestly = false;
+                    Pressed(field, out _, out _);
+                    Marching.PricePressingHonestly = true;
+                    Pressed(field, out _, out _);
+
+                    Marching.PricePressingHonestly = false;
+                    List<Vec2[]> before = Pressed(field, out _, out _);
+
+                    Marching.PricePressingHonestly = true;
+                    List<Vec2[]> after = Pressed(field, out List<double> ratios, out int presses);
+
+                    int same = 0;
+                    for (int i = 0; i < before.Count; i++)
+                        if (SameRoute(before[i], after[i])) same++;
+
+                    double worst = 0d;
+                    int[] band = new int[4];
+
+                    foreach (double r in ratios)
+                    {
+                        worst = Math.Max(worst, r);
+
+                        if (r <= 1.001d) continue;
+                        if (r < 1.1d) band[0]++;
+                        else if (r < 1.25d) band[1]++;
+                        else if (r < 1.4d) band[2]++;
+                        else band[3]++;
+                    }
+
+                    _out.WriteLine(
+                        $"{field,-16}{before.Count,8}{same,6}{before.Count - same,9}" +
+                        $"{presses,10}{worst,8:0.000}{band[0],9}{band[1],7}{band[2],7}{band[3],7}");
+                }
+
+                // Every route that is charged anything at all, so the ceiling is
+                // set against the real spread rather than against four buckets.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("every route charged for pressing, dearest first:");
+
+                var all = new List<(string Field, double Ratio)>();
+
+                Marching.PricePressingHonestly = true;
+
+                foreach (string field in AllProvingFields)
+                {
+                    Pressed(field, out List<double> ratios, out _);
+
+                    foreach (double r in ratios)
+                        if (r > 1.001d) all.Add((field, r));
+                }
+
+                all.Sort((a, b) => b.Ratio.CompareTo(a.Ratio));
+
+                for (int i = 0; i < all.Count && i < 30; i++)
+                    _out.WriteLine($"  {all[i].Ratio,7:0.000}  {all[i].Field}");
+
+                _out.WriteLine($"  ... {all.Count} routes charged in all");
+
+                // What each ceiling does: how many presses become a march that
+                // stops short, and how far short it stops.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine(
+                    $"{"ceiling",-10}{"pressed",10}{"stopped short",15}{"routes moved",14}");
+                _out.WriteLine(new string('-', 49));
+
+                float wasCeiling = Marching.PressCostCeiling;
+
+                foreach (float ceiling in new[] { 99f, 1.4f, 1.25f, 1.15f, 1.1f, 1.05f, 1.001f })
+                {
+                    Marching.PressCostCeiling = ceiling;
+
+                    int pressed = 0, moved = 0, stopped = 0;
+
+                    foreach (string field in AllProvingFields)
+                    {
+                        Marching.PricePressingHonestly = false;
+                        List<Vec2[]> flat = Pressed(field, out _, out _, out _);
+
+                        Marching.PricePressingHonestly = true;
+                        List<Vec2[]> now = Pressed(field, out _, out int these, out int shy);
+
+                        pressed += these;
+                        stopped += shy;
+
+                        for (int i = 0; i < flat.Count; i++)
+                            if (!SameRoute(flat[i], now[i])) moved++;
+                    }
+
+                    _out.WriteLine(
+                        $"{(ceiling > 90f ? "off" : ceiling.ToString("0.000")),-10}{pressed,10}" +
+                        $"{stopped,15}{moved,14}");
+                }
+
+                Marching.PressCostCeiling = wasCeiling;
+
+                // And the clock, because this is asked on every comparison the
+                // cascade makes.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine($"{"field",-16}{"as before",12}{"priced",10}{"change",10}");
+                _out.WriteLine(new string('-', 48));
+
+                foreach (string field in AllProvingFields)
+                {
+                    double flat = double.MaxValue, priced = double.MaxValue;
+
+                    for (int pass = 0; pass < 3; pass++)
+                    {
+                        Marching.PricePressingHonestly = false;
+                        flat = Math.Min(flat, Clocked(field, out _, out _));
+
+                        Marching.PricePressingHonestly = true;
+                        priced = Math.Min(priced, Clocked(field, out _, out _));
+                    }
+
+                    _out.WriteLine(
+                        $"{field,-16}{flat,12:0.000}{priced,10:0.000}" +
+                        $"{priced / flat - 1d,10:+0.0%;-0.0%;0.0%}");
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+                Marching.PricePressingHonestly = wasPricing;
+            }
+        }
+
+        /// <summary>
+        /// Every order on a field, with each route priced twice - for the
+        /// pressing and without it - so the ratio is the slowdown alone.
+        /// </summary>
+        /// <summary>How far short of the order counts as having stopped short.</summary>
+        /// <remarks>
+        /// Twenty-five metres, which is a cell. The placement search already
+        /// moves an order by tens of metres when the ground is taken ([M32]), so
+        /// anything under a cell is that and not this.
+        /// </remarks>
+        private const float StoppedShortMetres = 25f;
+
+        private static List<Vec2[]> Pressed(
+            string field, out List<double> ratios, out int presses) =>
+            Pressed(field, out ratios, out presses, out _);
+
+        private static List<Vec2[]> Pressed(
+            string field, out List<double> ratios, out int presses, out int shortOf)
+        {
+            shortOf = 0;
+
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            foreach (UnitInstance warm in battle.UnitsOnField())
+                Marching.PlanTo(battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+            var routes = new List<Vec2[]>();
+            ratios = new List<double>();
+            presses = 0;
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                Plan plan = Marching.PlanTo(
+                    battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                routes.Add(plan.Path.Found ? plan.Path.Waypoints.ToArray() : Array.Empty<Vec2>());
+
+                if (!plan.Path.Found) continue;
+                if (plan.PressedThrough) presses++;
+
+                float flat = Marching.SecondsToWalk(battle, unit, plan.Path.Waypoints, plan.Hold);
+                float charged =
+                    Marching.SecondsToWalkPressing(battle, unit, plan.Path.Waypoints, plan.Hold);
+
+                if (flat > 0.001f) ratios.Add(charged / (double)flat);
+
+                // Short of where it was sent, which is what the ceiling turns a
+                // press into. Measured against the order rather than inferred
+                // from the rung, because the rung is the same either way.
+                Vec2 asked = BenchScenariosTests.OrderFor(battle, unit);
+                Vec2 ended = plan.Path.Waypoints[plan.Path.Waypoints.Count - 1];
+
+                if (Vec2.Distance(ended, asked) > StoppedShortMetres) shortOf++;
+            }
+
+            return routes;
+        }
+
         private static readonly string[] AllProvingFields =
             { "thecrowdedwing", "crucible", "brokencountry", "greatfield", "longmarch", "sidewaysmile" };
 

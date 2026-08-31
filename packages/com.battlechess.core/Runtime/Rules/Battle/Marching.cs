@@ -909,6 +909,16 @@ namespace BattleChess.Rules
                                   (destination - unit.Position).Length, alongIt) &&
                     NobodyStandingAt(battle, unit, destination))
                 {
+                    // [M127]. A press is taken only while it is a squeeze. Above
+                    // the ceiling the regiment walks as far along the ordered
+                    // line as it can without lapping anybody and stands there -
+                    // the closest place it can actually get to - and the order
+                    // stays live, so the stuck cadence carries it on as its own
+                    // side moves out of the way.
+                    if (PricePressingHonestly &&
+                        StoppingShortOf(battle, unit, destination, alongIt, log, out Plan shortOf))
+                        return shortOf;
+
                     // The one that must never be silent. Two regiments sharing
                     // ground is what M1 spent the whole project forbidding, and
                     // on screen it reads as a collision bug. If it is going to
@@ -1088,6 +1098,260 @@ namespace BattleChess.Rules
 
             return seconds;
         }
+
+        /// <summary>
+        /// Whether a route is priced for the stretches of it spent inside one of
+        /// its own.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M127], and it is a [W5] fix before it is a rule.</b> The executor
+        /// has charged this since M20 - <c>MovementSystem</c> multiplies a
+        /// regiment's pace by <see cref="MovementSystem.PaceWhileInsideItsOwn"/>
+        /// on any tick it laps one of its own by more than a graze - and the
+        /// planner never has. So a press-through was priced at exactly what
+        /// walking the same line across an empty field would cost, and the
+        /// ladder's own comment says so: <i>"pressing through is the straight
+        /// line, so '62 s against 62 s straight' says nothing twice"</i>. Plan
+        /// and walk disagreeing about what a route costs is the thing [W5]
+        /// exists to forbid, and here the disagreement runs to the whole 0,6.
+        /// </para>
+        /// <para>
+        /// <b>The whole band this opens is 1,0 to 1,67.</b> A march pressed end
+        /// to end costs 1/0,6 of its straight line and no more, which makes it a
+        /// far more sensitive dial than <see cref="StagedRoutePlanner.WayRoundCostCeiling"/>
+        /// next door at 3,1 - 8 m of press on a 300 m march is 1,018x and 180 m
+        /// of it is 1,40x.
+        /// </para>
+        /// <para>
+        /// <b>Behind a lever because the blast radius is every comparison in the
+        /// cascade.</b> Both ceilings, <c>CostsMoreThan</c>, the ladder's choice
+        /// between the arch and the crab and the corner walk's own pricing all
+        /// read this number.
+        /// </para>
+        /// </remarks>
+        public static bool PricePressingHonestly = true;
+
+        /// <summary>
+        /// The same walk, with the stretches spent inside one of its own charged
+        /// at the pace they are really walked.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Its own method rather than a term inside
+        /// <see cref="SecondsToWalk"/>, and the reason is a measurement.</b> It
+        /// was written there first, which is where it belongs on the argument:
+        /// the executor charges the overlap itself, so a crab that clips a
+        /// neighbour and a declared press should be priced by one rule. Measured
+        /// over six fields it cost between <b>5 and 34 per cent of an order</b>,
+        /// because <see cref="SecondsToWalk"/> is asked on every comparison the
+        /// cascade makes and this asks the spatial index a question on every leg
+        /// of every one of them.
+        /// </para>
+        /// <para>
+        /// What it bought at that price was <b>ten routes in three hundred and
+        /// sixty</b> charged anything at all, the dearest at 1,236. So it is
+        /// asked at the one place the answer changes a decision - the rung that
+        /// declares a press - and nowhere else. The residue is honest and worth
+        /// writing down: a route that merely clips a neighbour is still priced
+        /// as though it did not, and closing that gap costs a third of the
+        /// planner.
+        /// </para>
+        /// </remarks>
+        public static float SecondsToWalkPressing(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints,
+            IReadOnlyList<Facing?>? hold = null)
+        {
+            float flat = SecondsToWalk(battle, unit, waypoints, hold);
+
+            if (battle == null || unit == null || waypoints == null || waypoints.Count < 2)
+                return flat;
+
+            float slower = 1f / MovementSystem.PaceWhileInsideItsOwn - 1f;
+            float length = 0f, inside = 0f;
+
+            Facing facing = unit.Facing;
+
+            for (int i = 1; i < waypoints.Count; i++)
+            {
+                Vec2 leg = waypoints[i] - waypoints[i - 1];
+                float far = leg.Length;
+
+                if (far <= 0f) continue;
+
+                Facing front = hold != null && i < hold.Count && hold[i].HasValue
+                    ? hold[i]!.Value
+                    : Facing.FromVector(leg);
+
+                length += far;
+                inside += far * ShareSpentInsideItsOwn(battle, unit, waypoints[i - 1], leg, front);
+
+                facing = front;
+            }
+
+            _ = facing;
+
+            return length <= 0f ? flat : flat * (1f + inside / length * slower);
+        }
+
+        /// <summary>
+        /// What a press-through may cost against the same march across an empty
+        /// field, before the regiment stops short instead.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M127], and the band is 1,0 to 1,67 rather than anything like
+        /// <see cref="StagedRoutePlanner.WayRoundCostCeiling"/>'s 3,1.</b> A
+        /// march pressed end to end costs 1/0,6 of its straight line and no
+        /// more, so every value that means anything lives in two thirds of a
+        /// multiple. Measured over six fields, only ten routes in three hundred
+        /// and sixty are charged anything at all and the dearest is 1,236.
+        /// </para>
+        /// </remarks>
+        public static float PressCostCeiling = 1.15f;
+
+        /// <summary>How far short of the first body a stopped march halts.</summary>
+        /// <remarks>
+        /// Two metres, which is the same clearance the staging scan leaves. It
+        /// only has to be enough that the pose it stops in is one the executor
+        /// will accept as standing clear rather than lapping.
+        /// </remarks>
+        private const float ShortOfTheBodyMetres = 2f;
+
+        /// <summary>How far it has to get for stopping short to beat standing still.</summary>
+        /// <remarks>
+        /// Five metres. Below that the regiment has not meaningfully moved, and
+        /// a route that goes nowhere is worse than no route: it reads as an
+        /// order obeyed.
+        /// </remarks>
+        private const float WorthWalkingMetres = 5f;
+
+        /// <summary>
+        /// The furthest point along an ordered line a regiment can reach without
+        /// shouldering through anybody - when the press it replaces is dearer
+        /// than <see cref="PressCostCeiling"/>.
+        /// </summary>
+        private static bool StoppingShortOf(
+            BattleState battle, UnitInstance unit, Vec2 destination, Facing alongIt,
+            IBattleLog? log, out Plan plan)
+        {
+            plan = default;
+
+            var line = new[] { unit.Position, destination };
+
+            float flat = SecondsToWalk(battle, unit, line);
+            if (flat <= 0f) return false;
+
+            float pressed = SecondsToWalkPressing(battle, unit, line);
+
+            if (pressed <= flat * PressCostCeiling) return false;
+
+            // Where the press would have begun. The sweep already works this out
+            // for the refusal, so the stopping place costs nothing to find.
+            FirstBodyInTheWay(battle, unit, unit.Position, destination, alongIt, out float upTo);
+
+            float stopAt = upTo - ShortOfTheBodyMetres;
+
+            if (stopAt < WorthWalkingMetres) return false;
+
+            Vec2 along = (destination - unit.Position).Normalised();
+            Vec2 nearest = unit.Position + along * stopAt;
+
+            if (!battle.FormationFits(unit, nearest, alongIt)) return false;
+
+            var walk = new[] { unit.Position, nearest };
+
+            log?.Decision("Move",
+                $"{unit.Def.DisplayName} is stopping {Vec2.Distance(nearest, destination):0} m short " +
+                $"rather than shouldering through - the press would cost {pressed:0} s against " +
+                $"{flat:0} s clear, which is {pressed / flat:0.00}x. It will try again from there. " +
+                $"{Route(walk)}.",
+                unit.Id);
+
+            unit.LastRung = 4;
+
+            plan = Straight(walk);
+
+            return true;
+        }
+
+        /// <summary>How finely a leg is sampled for bodies it passes through.</summary>
+        /// <remarks>
+        /// Ten metres, matching <see cref="GroundStepMetres"/>'s reasoning rather
+        /// than its value: this is asked of every leg of every route on every
+        /// cost comparison in the planner, so it is the cheapest sampling that
+        /// can see a body at all. A regiment is forty metres deep at its
+        /// thinnest, so ten metres cannot step over one.
+        /// </remarks>
+        private const float PressStepMetres = 10f;
+
+        /// <summary>How much of a leg is walked inside one of its own, as a share.</summary>
+        /// <remarks>
+        /// The same question <c>MovementSystem.InsideItsOwn</c> asks of a tick,
+        /// asked of a leg: a pose laps one of its own by more than a graze. Same
+        /// rule and the same tolerance, so the plan cannot come to disagree with
+        /// the walk about which stretches are slow.
+        /// </remarks>
+        private static float ShareSpentInsideItsOwn(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 travel, Facing front)
+        {
+            float length = travel.Length;
+            if (length <= 0f) return 0f;
+
+            // <b>One query for the leg, not one for each sample.</b> The first
+            // version asked the index at every sample and cost between nine and
+            // forty-nine per cent of an order - on a function every cost
+            // comparison in the cascade calls. Asked once for the whole leg it
+            // answers "nothing of ours is anywhere near this" for most legs in
+            // the game ([M119] measured that share), and those return here
+            // without a single overlap test.
+            List<UnitInstance> all = _pressing ??= new List<UnitInstance>(32);
+
+            battle.WhereEverybodyIs.Near(
+                battle.AllUnits, from, from + travel, unit.Footprint.BoundingRadius, all);
+
+            List<UnitInstance> ours = _ourPressing ??= new List<UnitInstance>(32);
+            ours.Clear();
+
+            for (int i = 0; i < all.Count; i++)
+            {
+                UnitInstance other = all[i];
+
+                if (other.Id == unit.Id) continue;
+                if (!other.IsOnField || other.Owner != unit.Owner) continue;
+
+                ours.Add(other);
+            }
+
+            if (ours.Count == 0) return 0f;
+
+            int steps = (int)MathF.Ceiling(length / PressStepMetres);
+            if (steps < 1) steps = 1;
+
+            Vec2 along = travel / length;
+            int inside = 0;
+
+            for (int i = 0; i <= steps; i++)
+            {
+                var pose = new OrientedRect(
+                    from + along * (length * i / steps), front, unit.Footprint);
+
+                for (int u = 0; u < ours.Count; u++)
+                {
+                    if (OrientedRect.OverlapFraction(pose, ours[u].Shape) <=
+                        OrderSystem.GrazingTolerance)
+                        continue;
+
+                    inside++;
+                    break;
+                }
+            }
+
+            return inside / (float)(steps + 1);
+        }
+
+        [ThreadStatic] private static List<UnitInstance>? _pressing;
+        [ThreadStatic] private static List<UnitInstance>? _ourPressing;
 
         private static float Degrees(Facing from, Facing to) =>
             Facing.AbsoluteDelta(from, to) * 180f / MathF.PI;
