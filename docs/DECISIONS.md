@@ -2233,3 +2233,84 @@ from it: price a press honestly, measure, then set the ceiling and truncate.
 Changing `SecondsToWalk` was expected to move every comparison in the cascade -
 both ceilings, `CostsMoreThan`, the ladder's choice between the arch and the crab.
 It would have, and it cost too much to leave there.
+
+### M127b - the dial is metres, and the second time a measurement moved it
+
+The ratio of a press to its own straight line **cannot express the rule it was
+built for**. A ratio is a share of the *whole march*, so a regiment walking 650 m
+and ploughing 40 m of that clean through a formed line scores **1,04** - cheaper
+than the same plough on a hundred-metre hop, and under any ceiling worth setting.
+**A long march may go through anything for free.**
+
+Caught by an arrangement rather than by argument: a wall of five spearmen at
+2 000 men apiece straight across the field, a swordsmen regiment sent 650 m
+through it, and the planner returning `pressed: True` with the ceiling at 1,15
+and every bench measurement saying it should not.
+
+**So the ceiling is `Marching.MostMetresPressed`, in metres**, which is what the
+designer described all along: shouldering past a neighbour is a few metres of
+contact, and crossing a regiment drawn up in line is its whole depth. That does
+not depend on how far the march was, which is the property the ratio lacked. The
+time ratio stays as `SecondsToWalkPressing` because it is still the honest price
+of a press and still the [W5] fix; it is simply not the dial.
+
+| pressed at most | presses | stopped short | routes moved |
+|---|---:|---:|---:|
+| off | 4 | 0 | 0 |
+| 100 m | 4 | 14 | 14 |
+| 50 m | 4 | 50 | 52 |
+| **25 m** | 4 | **96** | 98 |
+| 15 m and below | 4 | 96 | 98 |
+
+**A quarter of every order on the bench stops short at 25 m**, and a twentieth at
+100 m. This is not a small rule.
+
+### M127c - and refusing at rung three does not refuse the press
+
+**The rule does not hold, and the tests that say so are left red.**
+`StoppingShortTests` walls a regiment in and orders it through. The ladder refuses
+to press, correctly, and returns nothing - **and the regiment reaches its goal
+anyway**, because refusing at the ladder's third rung only hands the order to the
+grid and the tangent search, and neither of those knows the rule. A ceiling
+enforced at one of several stages that can propose a route is not a ceiling.
+
+**Where it has to go instead is the gate that accepts a route** -
+`StagedRoutePlanner.WalksCleanly` and its callers - which is the one place every
+stage's answer passes through. That is a wider change than this pass, and it wants
+the designer's eye first, because of what else it collides with.
+
+**It collides with rules already decided, and by name.**
+
+| test | what it asserts |
+|---|---|
+| `CrabbingTests.AWallOfItsOwnWithNoGapIsPressedThroughRatherThanStoodBeforeForEver` | the exact opposite |
+| `CrabbingTests.AGapNarrowerThanItIsDeepIsNotThreadedButPressedThrough` | the same |
+| `ApproachAngleTests.EveryApproachAngleFindsAWayThroughTheGap` | the nineteen-angle gate |
+| `RouteFingerprintTests.HalvingTheGraphChangesNoRoute` | four fields' routes |
+
+Turning `PricePressingHonestly` on breaks **23 tests**, and the first of those is
+a decision whose title is a sentence saying the reverse of [M127]. That is not a
+test to be rewritten quietly; it is a rule the designer has to overrule
+deliberately, knowing that *"stood before it for ever"* was written because a
+regiment doing exactly that was the fault of the day.
+
+**So the lever ships off.** What is in the tree: the honest price of a press, the
+metres-pressed ceiling, the stop-short march, the refusal to press with nowhere
+nearer to stand, and the sweep above. What is not: the rule holding.
+
+**And one thing from this pass is finished, correct and on.** [M127]'s third
+clause - *the order is not finished when the march is* - is in `OrderSystem` and
+needs none of the above. `KeepTheMarchHonest` only ever watched a march **in
+progress**, so a route that stopped short read exactly like an arrival: the
+regiment finished, stopped marching, and nothing looked at it again. Now a Move
+order that is not marching and is more than a cell short of where it was sent
+tries again on the same cadence and the same allowance a stall uses, under the
+same three-try cap - and `UnitInstance.NearestTheOrder` resets that cap on ground
+actually gained, so a regiment creeping forward in twenty-metre stages may take a
+dozen tries while one getting nowhere still stops after three and says so.
+
+**Given up is not forgotten.** A regiment that has spent its tries asks once every
+eight cadences whether anything is still standing on the line to where it was
+sent - one clearance cast - and goes on if the answer is no. Measured on the wall
+arrangement before the guard began firing: stopped 183 m short, four tries, gave
+up saying so; the wall marched away; it saw its way again and finished the order.

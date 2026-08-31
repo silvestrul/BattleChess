@@ -227,9 +227,23 @@ namespace BattleChess.Rules
         /// </remarks>
         private void KeepTheMarchHonest(BattleState battle, UnitInstance unit, int tick, IBattleLog log)
         {
-            if (unit.Order.Kind != OrderKind.Move || !unit.IsMarching)
+            if (unit.Order.Kind != OrderKind.Move)
             {
                 unit.ForgetProgress();
+                return;
+            }
+
+            // [M127]. A regiment that walked a route which stopped short of
+            // where it was sent has finished its *route* and not its *order*,
+            // and until now nothing looked at it again: this method only ever
+            // watched a march still in progress, so a short march read exactly
+            // like an arrival. That is the half of the designer's rule that the
+            // planner alone could not deliver - "go to the closest destination
+            // possible" is only worth anything if the regiment then keeps trying
+            // as its own side moves out of the way.
+            if (!unit.IsMarching)
+            {
+                KeepTryingIfItStoppedShort(battle, unit, tick, log);
                 return;
             }
 
@@ -301,6 +315,121 @@ namespace BattleChess.Rules
             // regiment that could find no placement cost the frame real
             // milliseconds while leaving the ration untouched. The milliseconds
             // are charged and the route slot is not, because no route was made.
+            TryAgain(battle, unit, log);
+        }
+
+        /// <summary>How far short of the order still counts as having arrived.</summary>
+        /// <remarks>
+        /// Twenty-five metres, one map cell. The placement search already moves
+        /// an order by tens of metres when the ground it names is taken (M6, M32),
+        /// so a regiment standing within a cell of where it was sent has arrived
+        /// as far as anything else in the game is concerned.
+        /// </remarks>
+        private const float StoppedShortMetres = 25f;
+
+        /// <summary>
+        /// A regiment that stopped short of its order, tried again as the field
+        /// changes round it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M127]'s third clause.</b> On the same cadence and the same
+        /// allowance a stalled march uses, and under the same
+        /// <see cref="ReplansBeforeGivingUp"/> - so an order still always ends
+        /// (<c>OrdersAlwaysEndTests</c>), and the thing that keeps it going is
+        /// making headway rather than the passage of time. Ground actually
+        /// gained resets the count - see <see cref="UnitInstance.NearestTheOrder"/>,
+        /// which is measured to the order and not along a route, because a
+        /// regiment creeping forward in stages makes a fresh route every time.
+        /// So one creeping twenty metres at a time may take a dozen tries, and
+        /// one that gains nothing three times running stops and says so.
+        /// </para>
+        /// </remarks>
+        private void KeepTryingIfItStoppedShort(
+            BattleState battle, UnitInstance unit, int tick, IBattleLog log)
+        {
+            float shy = Vec2.Distance(unit.Position, unit.Order.Destination);
+
+            if (shy <= StoppedShortMetres)
+            {
+                unit.ForgetProgress();
+                return;
+            }
+
+            // Ground gained buys another try. Without this a regiment creeping
+            // forward twenty metres at a time gets three tries in total and
+            // stops with the way ahead clearing in front of it, which is the
+            // opposite of the rule - the count is meant to end an order that is
+            // getting nowhere, not one that is getting somewhere slowly.
+            if (shy < unit.NearestTheOrder - ProgressMetres)
+            {
+                unit.NearestTheOrder = shy;
+                unit.FailedReplans = 0;
+            }
+
+            if (tick % RepathIntervalTicks != 0) return;
+
+            if (unit.FailedReplans >= ReplansBeforeGivingUp)
+            {
+                // Once, not every tick the cadence comes round. The count is
+                // pushed past the cap by the saying of it, which is what makes
+                // this the last word rather than a refrain.
+                if (unit.FailedReplans == ReplansBeforeGivingUp)
+                {
+                    unit.FailedReplans++;
+
+                    log.Blocked("Move",
+                        $"{unit.Def.DisplayName} has stopped {shy:0} m short of where it was sent " +
+                        "and three more tries got it no closer. Something is standing on that ground.",
+                        unit.Id);
+                }
+
+                // <b>Given up, not forgotten.</b> The designer's rule is that a
+                // regiment goes as close as it can and keeps trying as the field
+                // clears, and a count that only ever runs out makes the second
+                // half untrue: a regiment that stopped behind a line would stand
+                // there for the rest of the battle with the line marching away in
+                // front of it. So the tries are re-armed - but only by the world
+                // actually changing, and only asked for on a slow beat.
+                //
+                // One cast rather than a plan, which is what makes it affordable
+                // at all: the question is whether anything is still standing on
+                // the line to where it was sent, and the answer costs a single
+                // clearance check every eight cadences per given-up regiment.
+                if (tick % (RepathIntervalTicks * 8) != 0) return;
+
+                if (Marching.FirstBodyInTheWay(
+                        battle, unit, unit.Position, unit.Order.Destination,
+                        Marching.AlongTheLine(unit.Position, unit.Order.Destination, unit.Facing),
+                        out _) != null)
+                    return;
+
+                log.Decision("Move",
+                    $"{unit.Def.DisplayName} can see its way to where it was sent again, " +
+                    $"{shy:0} m off, and is going on.",
+                    unit.Id);
+
+                unit.FailedReplans = 0;
+
+                return;
+            }
+
+            if (!battle.Planning.MayPlan(unit.Id)) return;
+
+            TryAgain(battle, unit, log);
+        }
+
+        /// <summary>
+        /// Works the order out again from where the regiment is standing now.
+        /// </summary>
+        /// <remarks>
+        /// Split out of <see cref="KeepTheMarchHonest"/> by [M127] so that a
+        /// march which stopped short and one which stalled mid-stride ask for
+        /// the same remedy. Both faults end with a regiment that is not where it
+        /// was sent, and one of them used to have no way of asking at all.
+        /// </remarks>
+        private void TryAgain(BattleState battle, UnitInstance unit, IBattleLog log)
+        {
             long began = System.Diagnostics.Stopwatch.GetTimestamp();
 
             unit.FailedReplans++;

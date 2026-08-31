@@ -1130,7 +1130,7 @@ namespace BattleChess.Rules
         /// read this number.
         /// </para>
         /// </remarks>
-        public static bool PricePressingHonestly = true;
+        public static bool PricePressingHonestly;
 
         /// <summary>
         /// The same walk, with the stretches spent inside one of its own charged
@@ -1158,6 +1158,39 @@ namespace BattleChess.Rules
         /// planner.
         /// </para>
         /// </remarks>
+        /// <summary>How far along a route the regiment is inside one of its own.</summary>
+        /// <remarks>
+        /// The number [M127b] decides on. Same sampling as
+        /// <see cref="SecondsToWalkPressing"/> and the same rule as
+        /// <c>MovementSystem.InsideItsOwn</c>, so the three cannot come to
+        /// disagree about which stretches are pressed.
+        /// </remarks>
+        public static float MetresPressed(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints,
+            IReadOnlyList<Facing?>? hold = null)
+        {
+            if (battle == null || unit == null || waypoints == null || waypoints.Count < 2)
+                return 0f;
+
+            float inside = 0f;
+
+            for (int i = 1; i < waypoints.Count; i++)
+            {
+                Vec2 leg = waypoints[i] - waypoints[i - 1];
+                float far = leg.Length;
+
+                if (far <= 0f) continue;
+
+                Facing front = hold != null && i < hold.Count && hold[i].HasValue
+                    ? hold[i]!.Value
+                    : Facing.FromVector(leg);
+
+                inside += far * ShareSpentInsideItsOwn(battle, unit, waypoints[i - 1], leg, front);
+            }
+
+            return inside;
+        }
+
         public static float SecondsToWalkPressing(
             BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> waypoints,
             IReadOnlyList<Facing?>? hold = null)
@@ -1195,20 +1228,33 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
-        /// What a press-through may cost against the same march across an empty
-        /// field, before the regiment stops short instead.
+        /// How far a regiment may shoulder through its own before it stops short
+        /// of them instead, in metres.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// <b>[M127], and the band is 1,0 to 1,67 rather than anything like
-        /// <see cref="StagedRoutePlanner.WayRoundCostCeiling"/>'s 3,1.</b> A
-        /// march pressed end to end costs 1/0,6 of its straight line and no
-        /// more, so every value that means anything lives in two thirds of a
-        /// multiple. Measured over six fields, only ten routes in three hundred
-        /// and sixty are charged anything at all and the dearest is 1,236.
+        /// <b>[M127b], and it is metres rather than a multiple of the march -
+        /// which is the second time this dial has changed units and the second
+        /// time a measurement changed it.</b> The ratio of a press to its own
+        /// straight line was built first, on the designer's picture of a squeeze
+        /// against a plough. It cannot express that picture. A ratio is a share
+        /// of the <i>whole march</i>, so a regiment walking 650 m and ploughing
+        /// 40 m of that straight through a formed line scores 1,04 - cheaper
+        /// than the same plough on a 100 m hop, and comfortably under any
+        /// ceiling worth setting. <b>A long march may go through anything for
+        /// free.</b> Caught by the arrangement in <c>StoppingShortTests</c>,
+        /// which walked a swordsmen regiment clean through a wall of five
+        /// spearmen with the ceiling at 1,15 and every measurement on the bench
+        /// saying it should not.
+        /// </para>
+        /// <para>
+        /// What the designer described is a distance and always was: shouldering
+        /// past a neighbour is a few metres of contact, and crossing a regiment
+        /// drawn up in line is its whole depth. That does not depend on how far
+        /// the march was, which is exactly the property the ratio lacked.
         /// </para>
         /// </remarks>
-        public static float PressCostCeiling = 1.15f;
+        public static float MostMetresPressed = 25f;
 
         /// <summary>How far short of the first body a stopped march halts.</summary>
         /// <remarks>
@@ -1239,12 +1285,9 @@ namespace BattleChess.Rules
 
             var line = new[] { unit.Position, destination };
 
-            float flat = SecondsToWalk(battle, unit, line);
-            if (flat <= 0f) return false;
+            float through = MetresPressed(battle, unit, line);
 
-            float pressed = SecondsToWalkPressing(battle, unit, line);
-
-            if (pressed <= flat * PressCostCeiling) return false;
+            if (through <= MostMetresPressed) return false;
 
             // Where the press would have begun. The sweep already works this out
             // for the refusal, so the stopping place costs nothing to find.
@@ -1252,20 +1295,49 @@ namespace BattleChess.Rules
 
             float stopAt = upTo - ShortOfTheBodyMetres;
 
-            if (stopAt < WorthWalkingMetres) return false;
-
             Vec2 along = (destination - unit.Position).Normalised();
             Vec2 nearest = unit.Position + along * stopAt;
 
-            if (!battle.FormationFits(unit, nearest, alongIt)) return false;
+            // <b>Nowhere closer to get to, so it stands.</b> Not a press, which
+            // is the whole rule: a regiment already up against its own has no
+            // shorter march available, and the answer to "go as close as you can"
+            // is then "you are as close as you can be". Handled rather than
+            // declined, so rung three does not run after this - the cascade goes
+            // on to the grids and the search, either of which may find a real way
+            // round, and if none does the order gives up saying so
+            // (OrderSystem.KeepTryingIfItStoppedShort).
+            if (stopAt < WorthWalkingMetres || !battle.FormationFits(unit, nearest, alongIt))
+            {
+                if (unit.LastRung != 6)
+                    log?.Decision("Move",
+                        $"{unit.Def.DisplayName} will not shoulder {through:0} m through its own and " +
+                        "has nowhere nearer to stand, so it is holding where it is.",
+                        unit.Id);
+
+                unit.LastRung = 6;
+
+                // A refusal with a reason on it, never default(Plan): that has a
+                // null PathResult and every caller in the cascade reads
+                // .Path.Found. It threw on the first field it was run against,
+                // which is what a suite is for.
+                plan = new Plan(
+                    PathResult.Failed(
+                        PathFailure.NoRouteExists,
+                        $"{unit.Def.DisplayName} will not shoulder {through:0} m through its own and " +
+                        "has nowhere nearer to stand.",
+                        cellsExplored: 0),
+                    hold: null, pressedThrough: false);
+
+                return true;
+            }
 
             var walk = new[] { unit.Position, nearest };
 
             log?.Decision("Move",
                 $"{unit.Def.DisplayName} is stopping {Vec2.Distance(nearest, destination):0} m short " +
-                $"rather than shouldering through - the press would cost {pressed:0} s against " +
-                $"{flat:0} s clear, which is {pressed / flat:0.00}x. It will try again from there. " +
-                $"{Route(walk)}.",
+                $"rather than shouldering {through:0} m through its own, which is more than the " +
+                $"{MostMetresPressed:0} m a squeeze past somebody is worth. It will try again from " +
+                $"there. {Route(walk)}.",
                 unit.Id);
 
             unit.LastRung = 4;

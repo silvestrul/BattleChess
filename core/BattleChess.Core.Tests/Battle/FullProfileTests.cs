@@ -1848,14 +1848,14 @@ namespace BattleChess.Tests.Battle
                 // stops short, and how far short it stops.
                 _out.WriteLine(string.Empty);
                 _out.WriteLine(
-                    $"{"ceiling",-10}{"pressed",10}{"stopped short",15}{"routes moved",14}");
+                    $"{"pressed <=",-10}{"presses",10}{"stopped short",15}{"routes moved",14}");
                 _out.WriteLine(new string('-', 49));
 
-                float wasCeiling = Marching.PressCostCeiling;
+                float wasCeiling = Marching.MostMetresPressed;
 
-                foreach (float ceiling in new[] { 99f, 1.4f, 1.25f, 1.15f, 1.1f, 1.05f, 1.001f })
+                foreach (float ceiling in new[] { 9999f, 100f, 50f, 25f, 15f, 8f, 2f })
                 {
-                    Marching.PressCostCeiling = ceiling;
+                    Marching.MostMetresPressed = ceiling;
 
                     int pressed = 0, moved = 0, stopped = 0;
 
@@ -1875,11 +1875,11 @@ namespace BattleChess.Tests.Battle
                     }
 
                     _out.WriteLine(
-                        $"{(ceiling > 90f ? "off" : ceiling.ToString("0.000")),-10}{pressed,10}" +
+                        $"{(ceiling > 9000f ? "off" : ceiling.ToString("0") + " m"),-10}{pressed,10}" +
                         $"{stopped,15}{moved,14}");
                 }
 
-                Marching.PressCostCeiling = wasCeiling;
+                Marching.MostMetresPressed = wasCeiling;
 
                 // And the clock, because this is asked on every comparison the
                 // cascade makes.

@@ -394,6 +394,20 @@ namespace BattleChess.Rules
         /// <summary>How many times this order has been re-planned after stalling.</summary>
         public int FailedReplans { get; set; }
 
+        /// <summary>
+        /// The nearest this regiment has yet got to where it was sent, in
+        /// metres, across every march this order has taken.
+        /// </summary>
+        /// <remarks>
+        /// <b>[M127].</b> Distinct from <see cref="NearestApproach"/>, which is
+        /// measured along the current route and forgotten whenever a new one is
+        /// made - exactly what a regiment creeping forward in stages does every
+        /// time. This is measured to the order and survives the routes, so that
+        /// <c>FailedReplans</c> can be spent on tries that gain nothing rather
+        /// than on tries.
+        /// </remarks>
+        public float NearestTheOrder { get; set; } = float.MaxValue;
+
         /// <summary>Forgets what the march had achieved, as when a fresh one begins.</summary>
         public void ForgetProgress()
         {
@@ -574,6 +588,7 @@ namespace BattleChess.Rules
             ForgetProgress();
             ForgetTheReckoning();
             FailedReplans = 0;
+            NearestTheOrder = float.MaxValue;
             GoingRound = UnitId.None;
             ForcedIntoThisFight = false;
 
