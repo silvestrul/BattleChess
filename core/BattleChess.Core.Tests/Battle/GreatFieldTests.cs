@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -60,18 +61,58 @@ namespace BattleChess.Tests.Battle
             foreach (var type in byType)
                 _out.WriteLine($"  {type.Key,-13} {type.Value} men across both sides");
 
-            foreach (var side in strength)
+            // **Forty thousand WORTH, not forty thousand men** - [M133]. This
+            // test used to assert men, and in doing so locked the bug in: it
+            // required every regiment to be two thousand bodies, which for
+            // cavalry is 5,72 times the rectangle a regiment is meant to cover
+            // and put 229 x 114 m of horse on the field beside 80 x 40 m of
+            // foot. The line under it even said so - "the whole point of raising
+            // the ceiling: without it every horse regiment would have been
+            // silently trimmed to 700 or 800" - which is the catalogue's cap
+            // doing exactly its job, read as an obstacle.
+            //
+            // What the field claims in its own title is forty thousand a side.
+            // costPerMan is what makes that a claim about fighting weight rather
+            // than about headcount, so that is what is asked for here.
+            var worth = new Dictionary<PlayerId, double>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
             {
-                Assert.Equal(40000, side.Value);
+                worth.TryGetValue(unit.Owner, out double had);
+                worth[unit.Owner] =
+                    had + unit.InitialStrength * unit.Def.Get(UnitAttributes.CostPerMan);
+            }
+
+            foreach (var side in worth)
+                _out.WriteLine($"army {side.Key.Value}: {side.Value:N0} worth");
+
+            foreach (var side in worth)
+            {
+                // Within a tenth of a percent: costPerMan is authored to two
+                // decimals, so 2,86 against a true 1000/350 leaves cavalry six
+                // worth heavy over three regiments.
+                Assert.InRange(side.Value, 39_960d, 40_040d);
                 Assert.Equal(20, regiments[side.Key]);
             }
 
-            // The whole point of raising the ceiling: without it every horse
-            // regiment would have been silently trimmed to 700 or 800.
-            Assert.Equal(12000, byType["cavalry"]);
-            Assert.Equal(8000, byType["horsearchers"]);
-            Assert.Equal(32000, byType["spearmen"]);
-            Assert.Equal(28000, byType["swordsmen"]);
+            // Each unit type at its own cap, which is 2000 / costPerMan and the
+            // one strength at which every regiment is the same rectangle.
+            Assert.Equal(4200, byType["cavalry"]);        // 6 x 700
+            Assert.Equal(3200, byType["horsearchers"]);   // 4 x 800
+            Assert.Equal(32000, byType["spearmen"]);      // 16 x 2000
+            Assert.Equal(22400, byType["swordsmen"]);     // 14 x 1600
+
+            // And they really are one rectangle. BattleGroundTests holds this
+            // for every field; said again here because it is the property the
+            // assertions above exist to protect, and a reader of this file
+            // should not have to go and find that out.
+            var shapes = new HashSet<string>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+                shapes.Add($"{unit.Def.FootprintAt(unit.InitialStrength)}");
+
+            Assert.Single(shapes);
+            _out.WriteLine($"every regiment: {shapes.First()}");
         }
 
         [Fact]

@@ -43,35 +43,35 @@ maxStrength = 2000
 # U0, recorded at (817.3 , 1486.6)
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 32,36
 facing   = -56.9
 
 # U1, recorded at (756.7 , 1356.9)
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 30,41
 facing   = -56.9
 
 # U2, recorded at (745.1 , 1491.9)
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 29,36
 facing   = -130.6
 
 # U3, recorded at (362.5 , 612.5)
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,71
 facing   = 0
 
 # U4, recorded at (362.5 , 387.5)
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 14,80
 facing   = 0
 
@@ -134,49 +134,49 @@ facing   = 75.6
 # U13, recorded at (454.2 , 1537.9)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 18,34
 facing   = -62.2
 
 # U14, recorded at (694.5 , 1481.5)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 27,36
 facing   = -56.9
 
 # U15, recorded at (794.7 , 1834.6)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 31,22
 facing   = 75.6
 
 # U16, recorded at (840.4 , 1627.4)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 33,30
 facing   = 75.6
 
 # U17, recorded at (832.8 , 1406.8)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 33,39
 facing   = 56.1
 
 # U18, recorded at (262.5 , 1162.5)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,49
 facing   = 0
 
 # U19, recorded at (658.4 , 1345.8)
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 26,42
 facing   = 37.6
 
@@ -189,35 +189,35 @@ maxStrength = 2000
 # U20, recorded at (1437.5 , 2137.5)
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,10
 facing   = -180
 
 # U21, recorded at (1437.5 , 1912.5)
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 57,19
 facing   = -180
 
 # U22, recorded at (1437.5 , 862.5)
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,61
 facing   = -180
 
 # U23, recorded at (1437.5 , 612.5)
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,71
 facing   = -180
 
 # U24, recorded at (1437.5 , 387.5)
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 57,80
 facing   = -180
 
@@ -280,48 +280,48 @@ facing   = -180
 # U33, recorded at (1537.5 , 1762.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,25
 facing   = -180
 
 # U34, recorded at (1537.5 , 1637.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,30
 facing   = -180
 
 # U35, recorded at (1537.5 , 1512.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,35
 facing   = -180
 
 # U36, recorded at (1537.5 , 1387.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,40
 facing   = -180
 
 # U37, recorded at (1537.5 , 1262.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,45
 facing   = -180
 
 # U38, recorded at (1537.5 , 1162.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,49
 facing   = -180
 
 # U39, recorded at (1537.5 , 1037.5)
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,54
 facing   = -180

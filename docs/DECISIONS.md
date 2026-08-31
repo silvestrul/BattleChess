@@ -2738,3 +2738,65 @@ Large regiments are precisely the ones whose routes look worst, so the honest
 reading is that **[M131] helps least where help is most wanted, for a reason that
 is now named**. The fix is in the lattice's primitive set or in what it refuses,
 and it is a real piece of work rather than a lever.
+
+### M133 - every regiment covers the same ground, and every battle file broke it
+
+**The designer's oldest rule about content, found broken by looking at the map.**
+A regiment is a rectangle, and a regiment of cavalry is never physically bigger
+than a regiment of spearmen. `units.cfg` has said so in its own header since it
+was written and encodes it as `costPerMan`: a horseman is worth 2,86 footmen, so
+**seven hundred riders fill the rectangle two thousand spearmen fill**. Each
+unit's `maxStrength` is exactly `2000 / costPerMan`.
+
+**Nothing checked it. Every battle file in the project broke it.**
+
+| field | was | spread |
+|---|---|---:|
+| greatfield, sidewaysmile, thecrowdedwing | 2 000 of everything | **2,86x** |
+| crucible, brokencountry, longmarch | 800 foot, 600 horse | 2,19x |
+
+The Great Field asked for two thousand **men** rather than two thousand **worth**
+and raised its own `maxStrength` to be allowed to, which put **229 x 114 m** of
+cavalry beside **80 x 40 m** of spearmen. Its own header explained the override as
+a feature. `GreatFieldTests` then asserted `Assert.Equal(12000, byType["cavalry"])`
+and called the catalogue's cap an obstacle - **the test locked the bug in**.
+
+**Fixed by strength, not by footprint code.** Each file now sets
+`strength = scale x (1000 / costPerMan)` per type - spearmen 1000, swordsmen 800,
+archers 700, scouts 500, horse archers 400, cavalry 350, artillery 175. The Great
+Field family goes to scale 2 (every regiment 80 x 40 m, 2 000 worth), the bench
+trio to scale 1 (40 x 20 m, 1 000 worth). The Great Field's title is still true and
+now means something: **40 006 worth a side**, twenty regiments, one rectangle.
+
+**Guarded by `BattleGroundTests`**, which walks every battle file and every unit in
+the catalogue [W8]. Two exemptions, both with their reason quoted from the file
+itself: `melee`, two spearmen regiments at 200 and 600 whose whole point is that
+one is smaller; and `ford`, carrying a sixty-strong scout screen and saying in its
+own margin *"raised under strength to show sizes are free"*.
+
+**The test was wrong first, and the content was right.** Reading
+`UnitInstance.Footprint` failed `charge`, `volley` and `ford`, because formation is
+*meant* to change the shape - a square is 14 m across where a line is 40 - and
+those fields exist to put one regiment in several. It now reads the
+formation-independent `Def.FootprintAt(InitialStrength)`. A check that fails a rule
+which is working is worse than no check.
+
+**What it costs, stated rather than absorbed.**
+
+- **[M132] is now suspect and must be re-run.** It concluded *"the lattice cannot
+  route a big regiment"* from a population of 100 x 50 m Swordsmen - a size that
+  only existed because of this bug. Its `cruciblebig` control survives (it is now a
+  proper equal-ground field at scale 2), but the finding needs re-measuring.
+  [M129], [M130] and [M131] were all measured on fields with a 2,19x spread and
+  inherit the same doubt.
+- **`sidewaysmile` has lost the case it was recorded for.** It was kept for a mover
+  starting 2,1% inside its own Horse Archers; at the corrected size nothing laps,
+  and `TangledAtDeployment` is now zero for every field. Regiments still lap in
+  play - the 31 August recording has 106 contact lines - so it wants re-recording
+  on corrected ground rather than repairing by hand.
+- **`RegimentGridTests.ASearchNobodyIsWaitingForStopsAtItsNextLook` is red**, and
+  its own non-vacuity guard is what fails: nought expansions, nothing for the poll
+  to cut short. Four repairs were tried and all four are written into its remarks
+  rather than one being kept because it went green. It needs an arrangement built
+  for it, the way `StoppingShortTests` builds a wall - **scavenging bench fields
+  until a number clears sixty-four is fitting the arrangement to the assertion**.

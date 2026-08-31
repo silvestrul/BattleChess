@@ -136,145 +136,145 @@ facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,22
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,24
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,26
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,28
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,30
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,32
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,34
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,36
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,38
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,40
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,42
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 9,44
 facing   = east
 
 [deploy 0]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 6,30
 facing   = east
 
 [deploy 0]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 6,32
 facing   = east
 
 [deploy 0]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 6,34
 facing   = east
 
 [deploy 0]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 6,36
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 11,5
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 11,8
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 11,11
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 11,14
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 11,51
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 11,54
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 11,57
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 11,60
 facing   = east
 
@@ -379,144 +379,144 @@ facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,22
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,24
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,26
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,28
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,30
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,32
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,34
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,36
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,38
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,40
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,42
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 46,44
 facing   = west
 
 [deploy 1]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 49,30
 facing   = west
 
 [deploy 1]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 49,32
 facing   = west
 
 [deploy 1]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 49,34
 facing   = west
 
 [deploy 1]
 type     = archers
-strength = 2000
+strength = 1400
 at       = 49,36
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 44,5
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 44,8
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 44,11
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 44,14
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 44,51
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 44,54
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 44,57
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 44,60
 facing   = west

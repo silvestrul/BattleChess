@@ -60,31 +60,31 @@ maxStrength = 2000
 
 [deploy 0]
 type     = cavalry
-strength = 800
+strength = 350
 at       = 14,10
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 800
+strength = 400
 at       = 14,19
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 800
+strength = 350
 at       = 14,61
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 800
+strength = 350
 at       = 14,71
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 800
+strength = 400
 at       = 14,80
 facing   = east
 
@@ -92,49 +92,49 @@ facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,26
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,30
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,34
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,38
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,42
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,46
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,50
 facing   = east
 
 [deploy 0]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 14,54
 facing   = east
 
@@ -193,31 +193,31 @@ maxStrength = 2000
 
 [deploy 1]
 type     = cavalry
-strength = 800
+strength = 350
 at       = 57,10
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 800
+strength = 400
 at       = 57,19
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 800
+strength = 350
 at       = 57,61
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 800
+strength = 350
 at       = 57,71
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 800
+strength = 400
 at       = 57,80
 facing   = west
 
@@ -225,49 +225,49 @@ facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,26
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,30
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,34
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,38
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,42
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,46
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,50
 facing   = west
 
 [deploy 1]
 type     = spearmen
-strength = 800
+strength = 1000
 at       = 57,54
 facing   = west
 

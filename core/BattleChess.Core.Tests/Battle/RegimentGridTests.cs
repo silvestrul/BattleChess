@@ -1224,6 +1224,34 @@ namespace BattleChess.Tests.Battle
         /// M80: a search whose order has been superseded stops at its next
         /// poll instead of spending a frame on a route nobody will take.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Red since [M133], and left red on purpose.</b> Its own non-vacuity
+        /// guard is what fails: the unsuperseded run reaches <b>nought</b>
+        /// expansions, so there is nothing for the poll to cut short and the
+        /// assertion underneath would pass on any code at all.
+        /// </para>
+        /// <para>
+        /// The cause is content, not the poll. This arrangement squeezes the
+        /// mover past its nearest neighbour and sends it 188 m, and it used to
+        /// fall through to the lattice because the Crucible's regiments were
+        /// uneven - spearmen at 0,80 of the base rectangle, cavalry at 1,72.
+        /// With every regiment the same rectangle the cascade answers it two
+        /// stages earlier and the lattice never runs.
+        /// </para>
+        /// <para>
+        /// Four repairs were tried and all are recorded here rather than one
+        /// being kept because it went green: standing the grid down reaches 5
+        /// expansions, the Crucible at two thousand worth reaches 2 (which is
+        /// [M132] - a big body dies sooner rather than working harder), sending
+        /// the mover 800 m instead of 188 still reaches 5, and the crowded wing
+        /// reaches 0. **What this needs is an arrangement built for it**, the
+        /// way <c>StoppingShortTests</c> builds a wall, rather than a bench
+        /// field scavenged until the number goes over sixty-four. Fitting an
+        /// arrangement to an assertion by trial is how a test stops measuring
+        /// what it claims to.
+        /// </para>
+        /// </remarks>
         [Fact]
         public void ASearchNobodyIsWaitingForStopsAtItsNextLook()
         {

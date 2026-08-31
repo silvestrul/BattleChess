@@ -1,27 +1,28 @@
-# The Great Field - forty thousand a side.
+# The Great Field - forty thousand worth a side.
 #
-# The largest order of battle in this project, and built to be exactly that:
-# twenty regiments an army at two thousand men each, eighty thousand on the
-# field between them, on ground with room for all of it.
+# The largest order of battle in this project: twenty regiments an army, every
+# one of them two thousand worth and every one of them the same rectangle,
+# 80 x 40 m, on ground with room for all of it.
 #
-#   3 cavalry        6 000    on the wings, where horse is worth having
-#   2 horse archers  4 000    outside them again, free to swing
-#   8 spearmen      16 000    the front line
-#   7 swordsmen     14 000    the second line
-#  ------------------------
-#  20 regiments     40 000    each side, identical
+#   3 cavalry        700 men each   on the wings, where horse is worth having
+#   2 horse archers  800 men each   outside them again, free to swing
+#   8 spearmen      2000 men each   the front line
+#   7 swordsmen     1600 men each   the second line
+#  -----------------------------
+#  20 regiments    40 000 worth     each side, identical
 #
-# The infantry split is 16 000 spears to 14 000 swords rather than an even
-# 15 000 apiece: fifteen regiments cannot halve, and holding every regiment to
-# exactly two thousand was worth more than splitting the difference. Change the
-# eight to seven and the seven to eight to lean the other way.
+# The infantry split is eight spear regiments to seven sword rather than an even
+# division: fifteen regiments cannot halve. Change the eight to seven and the
+# seven to eight to lean the other way.
 #
-# TWO THOUSAND IS NOT A NORMAL REGIMENT. units.cfg caps cavalry at 700 and
-# horse archers at 800, for the good reason that a two-thousand-strong body of
-# horse is 229 m across its front and 114 m deep - a quarter of a kilometre of
-# cavalry in one rectangle. This battle raises its own ceiling rather than
-# editing the shared catalogue, so nothing else in content inherits it. What it
-# looks like on the field is worth watching before it is copied.
+# EVERY REGIMENT COVERS THE SAME GROUND, which is the designer's rule and the
+# whole point of costPerMan in units.cfg. A regiment is two thousand *worth*,
+# not two thousand *men*: a horseman costs 2,86 footmen, so seven hundred riders
+# fill the rectangle that two thousand spearmen fill. This file used to ask for
+# two thousand of everything and raise its own maxStrength to allow it, which
+# put 229 x 114 m of cavalry on the field beside 80 x 40 m of spearmen - horse
+# nearly three times the frontage of foot, and every measurement taken here
+# inherited the distortion. See M133 and BattleGroundTests.
 #
 # Both armies stand about a kilometre apart, in the clear, with their northern
 # flank on a range of small mountains and their southern on the river. The two
@@ -46,31 +47,31 @@ maxStrength = 2000
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,10
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 14,19
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,61
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,71
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 14,80
 facing   = east
 
@@ -128,43 +129,43 @@ facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,25
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,30
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,35
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,40
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,45
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,49
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,54
 facing   = east
 
@@ -179,31 +180,31 @@ maxStrength = 2000
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,10
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 57,19
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,61
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,71
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 57,80
 facing   = west
 
@@ -261,42 +262,42 @@ facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,25
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,30
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,35
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,40
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,45
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,49
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,54
 facing   = west

@@ -186,9 +186,27 @@ namespace BattleChess.Tests.Battle
         /// assert, so that a <i>second</i> tangle appearing in this field still
         /// fails the build.
         /// </para>
+        /// <para>
+        /// <b>[M133] deleted that overlap, and with it the case.</b> The
+        /// recording was taken on a Great Field where cavalry covered
+        /// 229 x 114 m, because every regiment there had been given two thousand
+        /// <i>men</i> rather than two thousand <i>worth</i>. With the rule
+        /// restored the same regiments are 80 x 40 m at the same positions, and
+        /// nothing laps anything: this field now deploys clean and the count is
+        /// zero.
+        /// </para>
+        /// <para>
+        /// That is a loss and is recorded as one rather than quietly absorbed.
+        /// <c>sidewaysmile</c> was kept for a mover starting 2,1% inside its own
+        /// Horse Archers, and it no longer contains one, so it no longer
+        /// exercises the case its remarks describe. Regiments still lap in play -
+        /// the 31 August recording has 106 contact lines - so the fixture wants
+        /// re-recording on corrected ground rather than repairing by hand.
+        /// Nudging bodies together to recreate an overlap would be authoring the
+        /// answer.
+        /// </para>
         /// </remarks>
-        private static int TangledAtDeployment(string key) =>
-            key == "sidewaysmile" ? 1 : 0;
+        private static int TangledAtDeployment(string key) => 0;
 
         // ----------------------------------------------------------- the bench
 

@@ -58,7 +58,7 @@ facing   = 20.6
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,2
 facing   = 3.1
 
@@ -66,32 +66,32 @@ facing   = 3.1
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,10
 facing   = east
 
 # The regiment that refused the mover's line.
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 14,19
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,61
 facing   = east
 
 [deploy 0]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 14,71
 facing   = east
 
 [deploy 0]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 14,80
 facing   = east
 
@@ -133,37 +133,37 @@ facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,30
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,35
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,40
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,45
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,49
 facing   = east
 
 [deploy 0]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 10,54
 facing   = east
 
@@ -178,31 +178,31 @@ maxStrength = 2000
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,10
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 57,19
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,61
 facing   = west
 
 [deploy 1]
 type     = cavalry
-strength = 2000
+strength = 700
 at       = 57,71
 facing   = west
 
 [deploy 1]
 type     = horsearchers
-strength = 2000
+strength = 800
 at       = 57,80
 facing   = west
 
@@ -256,42 +256,42 @@ facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,25
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,30
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,35
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,40
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,45
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,49
 facing   = west
 
 [deploy 1]
 type     = swordsmen
-strength = 2000
+strength = 1600
 at       = 61,54
 facing   = west
