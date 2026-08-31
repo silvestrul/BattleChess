@@ -37,3 +37,4 @@ unity/**/compile.log
 logs/
 
 *.bak
+*.bak.meta
