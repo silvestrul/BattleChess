@@ -2141,6 +2141,292 @@ namespace BattleChess.Tests.Battle
             }
         }
 
+
+        /// <summary>
+        /// Why the one planner that already searches over (place, front) never
+        /// wins an order.
+        /// </summary>
+        /// <remarks>
+        /// The measurement behind [M130]. [M129] found the halo is 21,3 m round
+        /// every body because the grid plans over ground and cannot know the
+        /// front the mover will arrive on - and that a search over poses is the
+        /// thing that would let it shrink. One already exists.
+        /// <c>HybridAStarRoutePlanner</c> is asked six times in three hundred
+        /// and sixty orders and wins none, so before building a second one this
+        /// asks what happens to the six.
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhyThePoseSearchNeverWins()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                _out.WriteLine(
+                    $"{"field",-16}{"asked",7}{"won",6}{"no route",10}{"pressed",9}" +
+                    $"{"dirty",7}{"too dear",10}{"widened",9}");
+                _out.WriteLine(new string('-', 74));
+
+                int asked = 0, won = 0, none = 0, pressed = 0, dirty = 0, dear = 0;
+
+                foreach (string field in AllProvingFields)
+                {
+                    BattleState battle = BenchScenariosTests.Load(field);
+                    IPathfinder pathfinder = new DirectPathfinder(
+                        battle.Terrain, new TerrainMovementModel(TestContent.Terrain),
+                        TestContent.Terrain);
+
+                    foreach (UnitInstance warm in battle.UnitsOnField())
+                        Marching.PlanTo(
+                            battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                    StagedRoutePlanner.ResetCounters();
+
+                    foreach (UnitInstance unit in battle.UnitsOnField())
+                        Marching.PlanTo(
+                            battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                    asked += StagedRoutePlanner.PoseAsked;
+                    won += StagedRoutePlanner.PoseWon;
+                    none += StagedRoutePlanner.PoseNoRoute;
+                    pressed += StagedRoutePlanner.PosePressed;
+                    dirty += StagedRoutePlanner.PoseDirty;
+                    dear += StagedRoutePlanner.PoseTooDear;
+
+                    _out.WriteLine(
+                        $"{field,-16}{StagedRoutePlanner.PoseAsked,7}{StagedRoutePlanner.PoseWon,6}" +
+                        $"{StagedRoutePlanner.PoseNoRoute,10}{StagedRoutePlanner.PosePressed,9}" +
+                        $"{StagedRoutePlanner.PoseDirty,7}{StagedRoutePlanner.PoseTooDear,10}" +
+                        $"{StagedRoutePlanner.PoseWidened,9}");
+                }
+
+                _out.WriteLine(new string('-', 74));
+                _out.WriteLine(
+                    $"{"all six",-16}{asked,7}{won,6}{none,10}{pressed,9}{dirty,7}{dear,10}");
+
+                // Non-vacuity. If the stage is never asked, every zero above is
+                // a zero about nothing and this table measures the cascade's
+                // ordering rather than the pose search. W9.
+                Assert.True(asked > 0,
+                    "The pose search was not asked once on any field, so nothing above is a " +
+                    "statement about the pose search at all.");
+
+                // And what it would take to make it matter: how many orders
+                // reach it, against how many the grid answers first.
+                _out.WriteLine(string.Empty);
+                _out.WriteLine("What it is asked about, with the grid moved out of its way");
+
+                bool wasUse = true;
+                GridUse restore = GridRoutePlanner.Use;
+
+                try
+                {
+                    GridRoutePlanner.Use = GridUse.Off;
+
+                    _out.WriteLine(
+                        $"{"field",-16}{"asked",7}{"won",6}{"no route",10}{"pressed",9}" +
+                        $"{"dirty",7}{"too dear",10}{"widened",9}");
+                    _out.WriteLine(new string('-', 74));
+
+                    foreach (string field in AllProvingFields)
+                    {
+                        BattleState battle = BenchScenariosTests.Load(field);
+                        IPathfinder pathfinder = new DirectPathfinder(
+                            battle.Terrain, new TerrainMovementModel(TestContent.Terrain),
+                            TestContent.Terrain);
+
+                        foreach (UnitInstance warm in battle.UnitsOnField())
+                            Marching.PlanTo(
+                                battle, warm, pathfinder, BenchScenariosTests.OrderFor(battle, warm));
+
+                        StagedRoutePlanner.ResetCounters();
+
+                        foreach (UnitInstance unit in battle.UnitsOnField())
+                            Marching.PlanTo(
+                                battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                        _out.WriteLine(
+                            $"{field,-16}{StagedRoutePlanner.PoseAsked,7}" +
+                            $"{StagedRoutePlanner.PoseWon,6}{StagedRoutePlanner.PoseNoRoute,10}" +
+                            $"{StagedRoutePlanner.PosePressed,9}{StagedRoutePlanner.PoseDirty,7}" +
+                            $"{StagedRoutePlanner.PoseTooDear,10}{StagedRoutePlanner.PoseWidened,9}");
+                    }
+                }
+                finally
+                {
+                    GridRoutePlanner.Use = restore;
+                    _ = wasUse;
+                }
+            }
+            finally
+            {
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+
+        /// <summary>What the pose search's routes are worth against the grid's.</summary>
+        /// <remarks>
+        /// [M130]'s second half. The first found that the pose search wins 74 of
+        /// 120 orders when the grid is not in front of it, so the question stops
+        /// being "why does it lose" and becomes "what are its routes like, and
+        /// what do they cost". Both arms warmed before either is read, and the
+        /// whole sweep taken three times with the least kept [W12].
+        /// </remarks>
+        [Fact(Skip = "A record of a measurement rather than a check on one.")]
+        public void WhatThePoseSearchsRoutesAreWorth()
+        {
+            float wasBudget = Marching.SearchBudgetMs;
+            GridUse wasUse = GridRoutePlanner.Use;
+
+            Marching.SearchBudgetMs = 0f;
+
+            try
+            {
+                foreach (string warm in AllProvingFields)
+                {
+                    GridRoutePlanner.Use = wasUse;
+                    Shaped(warm, out _, out _, out _, out _, out _, out _);
+                    GridRoutePlanner.Use = GridUse.Off;
+                    Shaped(warm, out _, out _, out _, out _, out _, out _);
+                }
+
+                _out.WriteLine(
+                    $"{"field",-16}{"arm",8}{"routed",8}{"walks",7}{"ms/order",10}" +
+                    $"{"worst ms",10}{"detour",9}{">90deg",8}{"worst turn",12}");
+                _out.WriteLine(new string('-', 88));
+
+                foreach (string field in AllProvingFields)
+                {
+                    for (int arm = 0; arm < 2; arm++)
+                    {
+                        double least = double.MaxValue, leastWorst = double.MaxValue;
+                        int routed = 0, sharp = 0, walks = 0;
+                        double detour = 0d, worst = 0d;
+
+                        // Least of three on both the mean and the worst. A worst
+                        // order is still a clock reading, so the cheapest of
+                        // three runs is the honest one for it too - a warm cache
+                        // and a cold one differ by more than the tail does [W12].
+                        for (int again = 0; again < 3; again++)
+                        {
+                            GridRoutePlanner.Use = arm == 0 ? wasUse : GridUse.Off;
+
+                            double ms = Shaped(
+                                field, out routed, out detour, out sharp, out worst,
+                                out double worstOrder, out walks);
+
+                            least = Math.Min(least, ms);
+                            leastWorst = Math.Min(leastWorst, worstOrder);
+                        }
+
+                        _out.WriteLine(
+                            $"{(arm == 0 ? field : string.Empty),-16}" +
+                            $"{(arm == 0 ? "grid" : "pose"),8}{routed,8}{walks,7}" +
+                            $"{least,10:0.00}{leastWorst,10:0.0}" +
+                            $"{detour / Math.Max(1, routed),9:0.000}{sharp,8}{worst,12:0}");
+                    }
+                }
+            }
+            finally
+            {
+                GridRoutePlanner.Use = wasUse;
+                Marching.SearchBudgetMs = wasBudget;
+            }
+        }
+
+        /// <summary>Every order on a field: what it cost, and what shape it came out.</summary>
+        private double Shaped(
+            string field, out int routed, out double detour, out int sharp, out double worstTurn,
+            out double worstOrder, out int walks)
+        {
+            BattleState battle = BenchScenariosTests.Load(field);
+            IPathfinder pathfinder = new DirectPathfinder(
+                battle.Terrain, new TerrainMovementModel(TestContent.Terrain), TestContent.Terrain);
+
+            var ways = new List<Vec2[]>();
+
+            worstOrder = 0d;
+            walks = 0;
+
+            // The guard this table cannot do without. "Routed" only means the
+            // plan came back with two waypoints in it, and with the grid out of
+            // the cascade an order can leave through the terminal tangent
+            // fallback, which no stage prices and no gate checks. Without this
+            // column the comparison is a checked answer against an unchecked
+            // one, which is exactly how a route that is shorter on paper turns
+            // out to be one the regiment cannot walk [W10].
+            var checkable = new List<(UnitInstance Unit, Plan Plan)>();
+
+            var watch = Stopwatch.StartNew();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                long began = Stopwatch.GetTimestamp();
+
+                Plan plan = Marching.PlanTo(
+                    battle, unit, pathfinder, BenchScenariosTests.OrderFor(battle, unit));
+
+                worstOrder = Math.Max(
+                    worstOrder,
+                    (Stopwatch.GetTimestamp() - began) * 1000d / Stopwatch.Frequency);
+
+                ways.Add(plan.Path.Found ? plan.Path.Waypoints.ToArray() : Array.Empty<Vec2>());
+                checkable.Add((unit, plan));
+            }
+
+            watch.Stop();
+
+            // Outside the clock, because it is a check on the answer and not
+            // part of producing it.
+            foreach ((UnitInstance unit, Plan plan) in checkable)
+                if (plan.Path.Found && StagedRoutePlanner.WalksCleanly(battle, unit, plan))
+                    walks++;
+
+            routed = 0;
+            sharp = 0;
+            detour = 0d;
+            worstTurn = 0d;
+
+            foreach (Vec2[] way in ways)
+            {
+                if (way.Length < 2) continue;
+
+                routed++;
+
+                float walked = 0f;
+                for (int i = 1; i < way.Length; i++) walked += Vec2.Distance(way[i - 1], way[i]);
+
+                float straight = Vec2.Distance(way[0], way[way.Length - 1]);
+                if (straight > 1f) detour += walked / (double)straight;
+
+                bool any = false;
+
+                for (int i = 1; i < way.Length - 1; i++)
+                {
+                    Vec2 into = way[i] - way[i - 1];
+                    Vec2 outOf = way[i + 1] - way[i];
+
+                    if (into.IsNearZero || outOf.IsNearZero) continue;
+
+                    double turn = Math.Abs(
+                        Facing.FromVector(outOf).Radians - Facing.FromVector(into).Radians);
+
+                    if (turn > Math.PI) turn = 2d * Math.PI - turn;
+
+                    double degrees = turn * 180d / Math.PI;
+                    worstTurn = Math.Max(worstTurn, degrees);
+
+                    if (degrees > 90d) any = true;
+                }
+
+                if (any) sharp++;
+            }
+
+            return watch.Elapsed.TotalMilliseconds / Math.Max(1, ways.Count);
+        }
+
         private static int OrdersOn(string field)
         {
             int many = 0;

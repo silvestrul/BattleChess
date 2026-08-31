@@ -2474,3 +2474,73 @@ none of them reserves ground in *time*, so two regiments handed the same gap bot
 plan through it and both are right. `HybridAStarPlanner`'s own remarks name the
 missing piece - space-time reservation, "the multi-agent layer" - and it has never
 been built. No cell shape, no cell size and no cascade change fixes it.
+
+### M130 - the pose search does not lose, it is only ever handed the impossible
+
+[M129] left one lead worth following before any grid is rebuilt: the halo is
+21,3 m because the grid plans over ground and cannot know the front the mover will
+arrive on, **and a search over (place, front) already exists**.
+`HybridAStarRoutePlanner` is asked six times in three hundred and sixty orders and
+wins none of them. The question was why.
+
+**It is not losing. It is not being asked.**
+
+| field | asked | won | no route | pressed | dirty | too dear |
+|---|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | 5 | 0 | 5 | 0 | 0 | 0 |
+| sidewaysmile | 1 | 0 | 1 | 0 | 0 | 0 |
+| the other four | 0 | 0 | 0 | 0 | 0 | 0 |
+
+All six losses are **no route at all** - not a route refused by the ceiling, not
+one that would not walk. The stage sits after the grid in `Choose`, so the only
+orders that reach it are the ones nothing cheaper could answer, and on five of six
+fields nothing reaches it whatever.
+
+**With the grid moved out of its way it wins 74 of 120.** Thirty-two of thirty-two
+on the Crucible and on Broken Country; none of the eight on the Long March.
+
+**And then the comparison, which needed a guard before it could be read.** Both
+arms warmed, three passes, least kept [W12].
+
+| field | arm | routed | **walks** | ms/order | worst ms | detour | >90 deg | worst turn |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| thecrowdedwing | grid | 40 | **35** | 2,28 | 36,1 | 1,243 | 7 | 120 |
+| | pose | 40 | **28** | 1,71 | 30,6 | **1,030** | **2** | 156 |
+| crucible | grid | 80 | 80 | 1,12 | 21,0 | 1,427 | 21 | 119 |
+| | pose | 80 | 80 | 2,15 | **15,5** | **1,258** | **2** | **92** |
+| brokencountry | grid | 80 | 80 | 0,50 | 6,3 | 1,287 | 8 | 103 |
+| | pose | 80 | 80 | 1,53 | 11,1 | **1,152** | **5** | **98** |
+| greatfield | grid | 40 | **40** | 0,49 | 3,0 | 1,486 | 4 | 94 |
+| | pose | 40 | **26** | 0,94 | 3,6 | **1,009** | **0** | **54** |
+| longmarch | grid | 80 | 80 | 0,19 | 1,3 | 1,028 | 0 | 82 |
+| | pose | 80 | **72** | 1,87 | 19,7 | **1,001** | 0 | **29** |
+| sidewaysmile | grid | 40 | **38** | 0,38 | 3,9 | 1,399 | 5 | 148 |
+| | pose | 40 | **27** | 0,75 | 3,7 | **1,013** | **2** | 148 |
+
+**The `walks` column is the whole reason this table can be believed, and it
+overturned the reading it was added to check.** `routed` only means the plan came
+back with two waypoints in it; with the grid out of the cascade an order can leave
+through the terminal tangent fallback, which no stage prices and no gate checks.
+Read on `routed` alone every field says 40/40 and 80/80 in both arms and coverage
+looks untouched. Read on `WalksCleanly`, the grid delivers **353 walkable routes of
+360 and the cascade without it delivers 313** [W10].
+
+**So the grid is the coverage stage and it was put first for a reason.** It answers
+forty orders - one in nine - that nothing else can walk. What it charges for them is
+route *shape*: a mean detour of 1,43 on the Crucible against 1,26, 1,49 on the Great
+Field against 1,01, and twenty-one orders of eighty turning through more than ninety
+degrees against two.
+
+**That is the sharp-turn report, located.** It is not the hex grid's 15,5% metric
+artefact and it is not the cascade's ordering being wrong. It is one stage buying
+coverage with shape, and no stage afterwards asking whether the shape it bought was
+worth it.
+
+**The rule this suggests, which is the designer's to take.** Neither planner should
+replace the other. The grid keeps the coverage; the pose search upgrades the shape
+where it can. Accept the grid's route when it is not badly bent, and when it is,
+ask the pose search and take its answer only if it walks - **falling back to the
+grid's route, so coverage cannot drop by construction**. One dial, the bend a grid
+route may have before it is worth a second opinion, in the same family as
+`WayRoundCostCeiling`. On the Crucible that would put nineteen of the twenty-one
+worst-turning routes through a planner that walks all eighty.

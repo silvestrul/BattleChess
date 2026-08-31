@@ -411,6 +411,10 @@ namespace BattleChess.Rules
         /// </summary>
         internal static int TangentAsked;
 
+        /// <summary>Why the pose search did not win: no route, a press, a route that will not walk.</summary>
+        /// <remarks>[M130]. <see cref="PoseTooDear"/> is the fourth door and was already counted.</remarks>
+        internal static int PoseNoRoute, PosePressed, PoseDirty;
+
         internal static void ResetCounters()
         {
             Staged = LadderClean = LadderBent = TangentClean = CornersClean = RingsClean =
@@ -419,6 +423,7 @@ namespace BattleChess.Rules
                     TangentTooDear = WayRoundTooDear = CrabTooLong =
                     TangentAsked = BadFirstLeg = BadLaterLeg = BadPressed = BadNoRoute = 0;
 
+            PoseNoRoute = PosePressed = PoseDirty = 0;
             OutOfTimeAtTheGrid = OutOfTimeReachedTheGrid = OutOfTimeWithNothing = 0;
             StoppedBeforeCoarse = StoppedBeforeFine = StoppedBeforeGraphs =
                 StoppedBeforePose = 0;
@@ -996,6 +1001,17 @@ namespace BattleChess.Rules
                         expansionBudget: PoseExpansionBudget > 0 ? PoseExpansionBudget : null,
                         secondsLimit: limit);
                 }
+
+                // [M130]. The stage is asked six times in three hundred and
+                // sixty orders and wins none of them, and until now the four
+                // ways it can lose were indistinguishable from outside: no
+                // route, a route that presses, a route that does not walk, and
+                // a route refused by the ceiling. Only the last was counted, so
+                // "the pose search never wins" was a fact with no cause
+                // attached to it.
+                if (!posed.Path.Found) PoseNoRoute++;
+                else if (posed.PressedThrough) PosePressed++;
+                else if (!WalksCleanly(battle, unit, posed)) PoseDirty++;
 
                 if (posed.Path.Found && !posed.PressedThrough &&
                     WalksCleanly(battle, unit, posed))
