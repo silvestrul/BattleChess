@@ -79,6 +79,17 @@ namespace BattleChess.Unity
                 : $"x1/{1f / TimeScale:0.##}";
 
         /// <summary>Whether the clock is running.</summary>
+        /// <summary>
+        /// Clicking a regiment draws a route rather than setting it walking,
+        /// and nothing moves until the turn is ended.
+        /// </summary>
+        /// <remarks>
+        /// [M143]. On by default, because this is the game rather than a debug
+        /// aid - the harness toggles around it are for looking at the
+        /// simulation, and this decides what the simulation is.
+        /// </remarks>
+        public bool PlanThenFire = true;
+
         public bool Running = true;
 
         /// <summary>

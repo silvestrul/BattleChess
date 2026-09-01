@@ -147,6 +147,12 @@ namespace BattleChess.Unity
         private BattleClock _clock;
         private float _tickAccumulator;
 
+        /// <summary>Orders drawn this turn and not yet given ([M143]).</summary>
+        private readonly TurnOrders _book = new TurnOrders();
+
+        /// <summary>Ticks still to run of the turn that was set going, or nought while planning.</summary>
+        private int _resolving;
+
         private readonly List<UnitView> _views = new List<UnitView>();
 
         /// <summary>
@@ -989,7 +995,10 @@ namespace BattleChess.Unity
             {
                 if (unit.Owner == target.Owner) continue;
 
-                unit.GiveOrder(UnitOrder.Attack(target.Id, _options.WheelBeforeMarching), unit.Position);
+                UnitOrder drawn = UnitOrder.Attack(target.Id, _options.WheelBeforeMarching);
+
+                if (_options.PlanThenFire) _book.Draw(_battle, unit, drawn, PathfinderFor(unit), _console);
+                else unit.GiveOrder(drawn, unit.Position);
 
                 _console.Decision("Order",
                     $"{unit.Def.DisplayName} ordered to attack {target.Def.DisplayName} " +
@@ -1501,6 +1510,15 @@ namespace BattleChess.Unity
         {
             if (!_options.Running) return;
 
+            // [M143]. Under plan-then-fire the battle is still between turns.
+            // Nothing accumulates while the player is drawing, or the moment a
+            // turn is ended it would run every tick it had banked.
+            if (_options.PlanThenFire && _resolving <= 0)
+            {
+                _tickAccumulator = 0f;
+                return;
+            }
+
             // A plan is out with a worker reading positions, shapes and the
             // spatial index. A tick writes to all three, so the battle waits -
             // which is the trade this whole arrangement makes: the clock loses
@@ -1523,6 +1541,16 @@ namespace BattleChess.Unity
             {
                 _tickAccumulator -= BattleClock.SecondsPerTick;
                 StepOnce();
+
+                if (_options.PlanThenFire && --_resolving <= 0)
+                {
+                    // The turn is over. Stop on the tick rather than letting the
+                    // accumulator carry into the next one, or a slow frame would
+                    // spend part of a turn nobody has ordered yet.
+                    _resolving = 0;
+                    _tickAccumulator = 0f;
+                    break;
+                }
             }
 
             if (budget <= 0) _tickAccumulator = 0f;
@@ -2129,6 +2157,26 @@ namespace BattleChess.Unity
         /// that looks wrong.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// A pathfinder set up the way this regiment's routes are worked out.
+        /// </summary>
+        /// <remarks>
+        /// The same construction `PreviewRoute` does, lifted out because
+        /// [M143]'s order book needs one too and building a second copy by hand
+        /// is how the two quietly stop agreeing.
+        /// </remarks>
+        private IPathfinder PathfinderFor(UnitInstance unit)
+        {
+            float clearance = _options.RespectUnitWidth
+                ? unit.Footprint.Width * 0.5f
+                : HexPathfinder.DefaultClearanceMetres;
+
+            return _options.RouteLikeAi
+                ? new HexPathfinder(_map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance)
+                : (IPathfinder)new DirectPathfinder(
+                    _map.Terrain, _trueMovement, _terrainCatalogue, clearanceMetres: clearance);
+        }
+
         private void PreviewRoute(UnitInstance unit, Vec2 destination)
         {
             if (unit == null) return;
@@ -2997,9 +3045,23 @@ namespace BattleChess.Unity
                 // Record it as an order, not just a route, so the order system
                 // can keep it honest — following a target, or reacting to what
                 // turns up on the way.
-                unit.GiveOrder(
-                    UnitOrder.MoveTo(destination, _options.WheelBeforeMarching, bearing: bearing), unit.Position);
-                unit.Route = plan.ToRoute(_options.WheelBeforeMarching);
+                UnitOrder drawn =
+                    UnitOrder.MoveTo(destination, _options.WheelBeforeMarching, bearing: bearing);
+
+                if (_options.PlanThenFire)
+                {
+                    // [M143]. The route goes in the book and on the field; the
+                    // regiment does not move until the turn is ended. Planned
+                    // there rather than reusing the plan just taken, because the
+                    // book plans against the orders already drawn and this one
+                    // did not.
+                    _book.Draw(_battle, unit, drawn, PathfinderFor(unit), _console);
+                }
+                else
+                {
+                    unit.GiveOrder(drawn, unit.Position);
+                    unit.Route = plan.ToRoute(_options.WheelBeforeMarching);
+                }
 
                 // Against the front it will actually hold, not against the line
                 // of march. Those are different whenever a bearing was drawn,
@@ -3143,6 +3205,86 @@ namespace BattleChess.Unity
             return OptionsRect.Contains(point) || ConsoleRect.Contains(point);
         }
 
+        /// <summary>
+        /// The one control that is not part of the harness: end the turn and
+        /// let every drawn order go.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M143].</b> Drawn before the harness panels and outside every
+        /// toggle they answer to, because F1 and F2 turn the debug interface on
+        /// and off and this is not debug interface - it is how the game is
+        /// played. A player who has hidden the harness must still be able to
+        /// end their turn.
+        /// </para>
+        /// <para>
+        /// Bottom centre, wide, and it says what is waiting. Its own corner of
+        /// the screen rather than a row in the bar, so nothing the harness does
+        /// to its own layout can move it.
+        /// </para>
+        /// </remarks>
+        private void DrawEndTurn()
+        {
+            if (!_options.PlanThenFire || _battle == null) return;
+
+            const float width = 280f;
+            const float height = 46f;
+
+            var area = new Rect((Screen.width - width) * 0.5f, Screen.height - height - 24f, width, height);
+
+            bool resolving = _resolving > 0;
+
+            GUI.enabled = !resolving;
+
+            string face = resolving
+                ? $"resolving... {_resolving} ticks left"
+                : _book.Count == 0
+                    ? "End turn (no orders)"
+                    : $"End turn - {_book.Count} order{(_book.Count == 1 ? string.Empty : "s")}";
+
+            if (GUI.Button(area, face)) EndTheTurn();
+
+            GUI.enabled = true;
+
+            // A drawn order can be taken back until the turn is ended, and a
+            // player needs to be told that without reading a manual.
+            if (!resolving && _book.Count > 0)
+            {
+                var clear = new Rect(area.x + area.width + 8f, area.y, 110f, height);
+
+                if (GUI.Button(clear, "Clear orders"))
+                {
+                    _book.RubEverything();
+                    _status = "Orders cleared.";
+                }
+            }
+        }
+
+        /// <summary>Gives every drawn order and runs exactly one turn.</summary>
+        /// <remarks>
+        /// Exactly one. A turn that ran until the orders were finished would be
+        /// a different length every time and would make a simultaneous turn
+        /// impossible to reason about - both sides have to be resolving the
+        /// same window.
+        /// </remarks>
+        private void EndTheTurn()
+        {
+            int given = _book.Fire(_battle, _console);
+
+            _resolving = BattleClock.TicksPerTurn;
+            _tickAccumulator = 0f;
+            _options.Running = true;
+
+            _console.Decision("Turn",
+                $"Turn {_clock.Turn} ends - {given} order{(given == 1 ? string.Empty : "s")} given, " +
+                $"resolving {BattleClock.TicksPerTurn} ticks.",
+                UnitId.None);
+
+            _status = given == 0
+                ? "Turn ended with no orders."
+                : $"Turn ended - {given} regiment{(given == 1 ? string.Empty : "s")} on the move.";
+        }
+
         private void OnGUI()
         {
             _guiClock.Start();
@@ -3167,6 +3309,8 @@ namespace BattleChess.Unity
                 GUI.Label(new Rect(20, 18, Screen.width - 40, 100), $"Could not load the battle:\n\n{_error}");
                 return;
             }
+
+            DrawEndTurn();
 
             // Every panel in the harness shares this, so the whole interface
             // thickens at once rather than the unit labels alone.

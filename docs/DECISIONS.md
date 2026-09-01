@@ -3211,3 +3211,55 @@ player to arbitrate something must give way. And resolution must become
 them one at a time, so who resolves first can change the outcome. That is
 tolerable for one player and fatal both for simultaneous turns and for the
 battle-resolver audience, which needs a referee whose answer can be verified.
+
+### M143 - orders are drawn, held, and given when the turn is ended
+
+**[M142]'s first piece, and it is testable.** Clicking a regiment plans a route
+rather than setting it walking. The routes sit on the field in `TurnOrders` until
+an **End turn** button hands them all over at once and runs exactly one turn -
+sixty ticks, always sixty, because a turn that ran until the orders finished would
+be a different length every time and makes a simultaneous turn impossible to
+reason about.
+
+**Almost none of it is new machinery**, which is why it is one pass rather than
+five. [Mx6a] already promised planning is pure - *"a batch of orders is planned in
+parallel; nothing in a plan writes to the battle"* - and `Marching.PlanTo` has
+always returned a `Plan` that `ToRoute` turns into movement as a separate act.
+What was missing was somewhere to keep a plan between those two moments.
+
+**Each order is planned against the ones already queued**, which is the designer's
+requirement and the only part with difficulty in it. This pass answers it with
+*where the earlier orders end*: the queued units are stood at their finishing
+places, the new order is planned, and they are put back. `Ends` comes from the
+plan and not the order, because a march that could not reach where it was sent
+finishes where its route does.
+
+**Redrawing is the half that is easy to get wrong.** Changing or rubbing out an
+order redraws every order queued *after* it and none before, since those never saw
+it. An order that can no longer be drawn is dropped rather than kept as a route
+nobody can walk - the player is told by it vanishing from the field, which is the
+only honest way to show "not possible any more".
+
+**What it does not do, said before anybody plays it:** two regiments can plan
+cleanly against each other's finishing places and still cross in the middle of the
+turn. That wants [M16] - where a body will be *at each moment* - which the
+designer has chosen provisionally and which is the next pass. A queue nobody has
+played is a poor place to re-litigate a reverted feature.
+
+**Planning writes to the battle, and [Mx6a] says planning must not.** The
+distinction is real: Mx6a governs a *plan* - one call, possibly on a worker beside
+a dozen others, which must see a world nobody is editing. This is the phase
+*around* the planner, single-threaded by construction because each queued order
+depends on the one before, and every position is restored before the caller sees
+anything. `DrawingAnOrderLeavesEverybodyStandingWhereTheyWere` is the test that
+holds it to that.
+
+**The button is deliberately outside the harness.** F1 and F2 turn the debug
+interface on and off; this is not debug interface, it is how the game is played,
+so it is drawn before those panels and answers to none of their toggles. A player
+who has hidden the harness must still be able to end their turn.
+
+`PlanThenFire` ships **on**, and switching it off restores the old immediate
+behaviour intact - which is what keeps every existing test meaningful, since the
+suite drives the rules directly and never goes through the button.
+
