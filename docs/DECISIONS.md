@@ -3083,3 +3083,43 @@ changing, the churn goes, and the latch can come out - which is what the recordi
 says the designer is actually seeing.
 
 Open finding 31.
+
+### M140 - a detour is committed to what it was drawn for, not to what it first saw
+
+**[M21] across a re-plan, which is what [M139] said the next thread was.**
+
+The identity latch tried to express commitment by remembering what the first look
+at a route **saw**. A fresh way round starts clear, so it remembered *nobody*,
+re-armed, and let the same body trigger another re-plan three ticks later - which
+is the deepening detour in `logs/battle-20260901-182703.log`: 8 m off the straight
+line, then 20, 31, 40, 47, the last three with no gap left to thread.
+
+**So the route now records what it is *for*.** `MovementRoute.DrawnAround` names
+the body the re-plan was drawn to get past, and a route drawn to get past a body
+is not redrawn because of that same body.
+
+**The release is the important half.** Having the thing you are going round on
+your leg is what going round it looks like from the inside; being *inside* it is
+not. So commitment ends when the mover is actually **lapping** the body it
+committed against, on the same tolerance the collision record uses, so that what
+releases a commitment and what gets written down as a collision are one event
+rather than two thresholds that can drift. That is the other half of the same
+recording: the cavalry arrived and stood still at tick 278, the way round stopped
+working, and the regiment forced through it for fifteen ticks because nothing ever
+asked again. Under [M140] the lap releases the commitment and the march re-plans.
+
+**Measured, and this is the part that matters for what comes next:** with
+commitment holding, removing the identity latch entirely leaves **one** failure
+instead of two - `DecisionsAreSaidOnceAndNotEveryTick`, 47 crab announcements in
+twelve turns from a regiment threading a 30 m gap, whose corridor walls are on its
+leg by construction. That is log churn in a corridor, not the collision fault the
+latch was hiding. **The latch is therefore kept for now**, doing far less work
+than it was, and dropping it is one log-churn fix away. Leaving a route that names
+a front alone was tried and did not move the number, so the announcement comes
+from somewhere else and wants finding rather than guessing at.
+
+**The test written for this does not discriminate**, and says so in its own
+remarks: a blocker standing still does not reproduce the deepening detour, which
+needed a body moving across the line. It guards the behaviour; it does not prove
+the recorded fault fixed. Finding 31 stays open until a recording closes it.
+

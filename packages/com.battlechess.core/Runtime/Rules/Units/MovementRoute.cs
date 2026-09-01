@@ -64,6 +64,27 @@ namespace BattleChess.Rules
         /// </summary>
         public string? HeldItsHandBecause { get; set; }
 
+        /// <summary>
+        /// The body this route was drawn around, or <see cref="UnitId.None"/>
+        /// if it was not drawn to avoid anybody.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M140], and it is what makes [M21]'s commitment survive a
+        /// re-plan.</b> Distinct from <see cref="LegsPlannedAgainst"/>, which
+        /// records what the first look at this route happened to <i>see</i> -
+        /// usually nobody, because a fresh way round starts clear. That is why
+        /// the latch kept re-arming: the detour's first leg was clear, so the
+        /// blocker read as news again three ticks later, and the regiment drew
+        /// a new and slightly worse way round every time.
+        /// </para>
+        /// <para>
+        /// This one records what the route is <i>for</i>. A route drawn to get
+        /// past a body is not redrawn because of that same body.
+        /// </para>
+        /// </remarks>
+        public UnitId DrawnAround { get; set; } = UnitId.None;
+
         /// <summary>Where the regiment stood when the cadence last looked at this route.</summary>
         public Vec2 LastLookedFrom { get; set; }
 

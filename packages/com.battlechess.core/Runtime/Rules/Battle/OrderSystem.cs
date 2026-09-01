@@ -634,29 +634,53 @@ namespace BattleChess.Rules
                 return false;
             }
 
-            // <b>Identity, and it is now known to be wrong rather than merely
-            // suspected.</b>
+            // <b>[M21]'s commitment, and it is what the identity latch was
+            // failing to be.</b>
             //
-            // A re-plan fires when the leg meets a <i>different</i> body than
-            // the one this route was drawn around. What that costs is recorded
-            // in `logs/battle-20260901-182703.log`: cavalry crossed a spearmen
-            // march, was re-planned round five times in thirteen ticks, then
-            // arrived and stopped where it stood. A standing body's identity
-            // can never change, so the latch shut permanently - the spearmen
-            // re-planned not once in the next ninety-one ticks, walked into the
-            // stationary cavalry, and forced through it for fifteen, six per
-            // cent of a body, charged to both, with nobody having asked.
+            // A detour is committed until the thing it went round is behind
+            // you. The old latch tried to express that by remembering what the
+            // first look at a route <i>saw</i> - and a fresh way round starts
+            // clear, so it remembered nobody, re-armed, and let the same body
+            // trigger a fresh re-plan three ticks later. Recorded in
+            // `logs/battle-20260901-182703.log`: five re-plans in thirteen
+            // ticks against one regiment of cavalry, each drawn from a few
+            // metres further along, each worse than the last - 8 m, 20, 31, 40,
+            // 47 off the straight line, the last three with no gap left to
+            // thread at all.
             //
-            // <b>Removing it does not work yet, and [M139] says why.</b> Asking
-            // the honest question - is the leg blocked at all - re-plans every
-            // beat against a standing obstacle, and each answer is drawn from a
-            // few metres further on, so the way round deepens instead of
-            // settling: 8 m, 20, 31, 40, 47 in that same recording. That is
-            // [M21]'s commitment rule being broken by the cadence, and it is
-            // the thread to pull, not this line.
+            // So the route remembers what it is <i>for</i> instead, and a route
+            // drawn to get past a body is not redrawn because of that same
+            // body.
             UnitId now = meets?.Id ?? UnitId.None;
 
-            bool blocked = now.IsValid && now != route.LegsPlannedAgainst;
+            bool alreadyGoingRoundHim = now.IsValid && now == route.DrawnAround;
+
+            // <b>And the commitment ends when the detour has actually failed,
+            // not when it merely still has the body in view.</b> Having the
+            // thing you are going round on your leg is what going round it
+            // looks like from the inside; being <i>inside</i> it is not. That
+            // is the release, and it is the other half of the same recording:
+            // the cavalry arrived and stood still at tick 278, the way round
+            // stopped working, and the regiment forced through it for fifteen
+            // ticks because nothing ever asked again.
+            if (alreadyGoingRoundHim && IsLapping(unit, meets!))
+                alreadyGoingRoundHim = false;
+
+            // <b>The identity latch stays, for now, and it is no longer the
+            // thing doing the work.</b>
+            //
+            // With commitment holding, taking it out leaves exactly one failure
+            // - `DecisionsAreSaidOnceAndNotEveryTick`, 47 crab announcements in
+            // twelve turns from a regiment threading a 30 m gap, which re-plans
+            // the same manoeuvre every beat because both walls of a corridor
+            // are on its leg by construction. That is log churn in a corridor,
+            // not the collision fault the latch used to be hiding, and it is
+            // the last thing between here and dropping the latch for good.
+            // Leaving a route that names a front alone was tried and did not
+            // move the number, so the announcement comes from somewhere else
+            // and wants finding rather than guessing at. Finding 31.
+            bool blocked = now.IsValid && !alreadyGoingRoundHim &&
+                           now != route.LegsPlannedAgainst;
 
             // (1) Still going the long way round something that may have gone.
             bool detourMayBeStale =
@@ -807,6 +831,18 @@ namespace BattleChess.Rules
                 leaving: true, leavingGrazeOnly: true);
         }
 
+        /// <summary>
+        /// Whether these two are sharing ground by more than the margin M2
+        /// forgives.
+        /// </summary>
+        /// <remarks>
+        /// The same tolerance the collision record uses, so what releases a
+        /// commitment and what gets written down as a collision are the same
+        /// event rather than two thresholds that can disagree.
+        /// </remarks>
+        private static bool IsLapping(UnitInstance unit, UnitInstance other) =>
+            OrientedRect.OverlapFraction(unit.Shape, other.Shape) > GrazingTolerance;
+
         /// <summary>The first body standing on one leg of a route, if any.</summary>
         private static UnitInstance? WhatTheLegMeets(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing? holding)
@@ -901,6 +937,12 @@ namespace BattleChess.Rules
                 }
 
                 unit.Route = plan.ToRoute(unit.Order.WheelFirst);
+
+                // What this route is for, so the next beat does not draw
+                // another one for the same reason ([M140]). Carried over rather
+                // than cleared when the re-plan was about a stale detour, since
+                // that route is not for anybody.
+                unit.Route.DrawnAround = detourMayBeStale ? UnitId.None : meets?.Id ?? UnitId.None;
 
                 // Said once, when it is news. A dropped detour is an event -
                 // the answer *became* the straight line, which is the same

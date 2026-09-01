@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -261,6 +262,88 @@ namespace BattleChess.Tests.Battle
                 $"The route was redrawn {redrawn} time(s) while the same body walked right across the " +
                 "line. This is the recorded fault: the blocker was the same body as last time, so the " +
                 "cadence wrote it off as old news and never looked again.");
+        }
+
+        /// <summary>
+        /// A way round is drawn once and kept, not redrawn a little worse on
+        /// every beat.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M140], out of `logs/battle-20260901-182703.log`.</b> Spearmen
+        /// crossed by cavalry re-planned five times in thirteen ticks, and the
+        /// detour deepened every time - 8 m off the straight line, then 20, 31,
+        /// 40, 47, the last three reporting no gap left to thread at all. Each
+        /// answer was drawn from a few metres further along than the one
+        /// before, so the regiment chased a shadow instead of committing to a
+        /// side.
+        /// </para>
+        /// <para>
+        /// [M21] says a detour is committed until the thing it went round is
+        /// behind you. The route now remembers what it was drawn <i>for</i>,
+        /// which the old latch could not, because that recorded what the first
+        /// look happened to see - and a fresh way round starts clear, so it
+        /// remembered nobody and re-armed.
+        /// </para>
+        /// <para>
+        /// <b>This test does not discriminate, and that is written down rather
+        /// than hidden.</b> It passes with commitment and without it, because a
+        /// blocker standing still does not produce the deepening detour - that
+        /// needed a body <i>moving</i> across the line, so that each re-plan
+        /// was drawn against different geometry. It is kept because the
+        /// behaviour it asserts is right and worth guarding against a future
+        /// change; it is <b>not</b> evidence that the recorded fault is fixed.
+        /// Finding 31 says to close that from a recording.
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void AWayRoundIsDrawnOnceAndNotDeepenedEveryBeat()
+        {
+            var field = new Battlefield("plains", 5505);
+
+            UnitInstance foot = field.Add(0, "swordsmen", field.Centre - new Vec2(400f, 0f), Facing.East);
+            Vec2 goal = field.Centre + new Vec2(400f, 0f);
+
+            field.March(foot, goal, Stance.Defend);
+            Assert.Equal(2, foot.Route!.Waypoints.Count);
+
+            UnitInstance inTheWay = field.Add(0, "spearmen", field.Centre, Facing.North);
+            Battlefield.Hold(inTheWay);
+
+            var offsets = new List<float>();
+            int redrawn = 0;
+            MovementRoute? last = foot.Route;
+
+            for (int turn = 0; turn < 8; turn++)
+            {
+                field.RunTurns(1);
+
+                if (foot.Route == null) break;
+
+                if (!ReferenceEquals(foot.Route, last))
+                {
+                    redrawn++;
+                    last = foot.Route;
+
+                    float worst = 0f;
+                    foreach (Vec2 at in foot.Route.Waypoints)
+                        worst = MathF.Max(worst, MathF.Abs(at.Y - field.Centre.Y));
+
+                    offsets.Add(worst);
+                }
+            }
+
+            _out.WriteLine($"redrawn {redrawn} time(s); offsets " + string.Join(", ", offsets));
+
+            // Non-vacuity: it has to have gone round at all, or a count of one
+            // redraw is right for the wrong reason (W9).
+            Assert.True(redrawn > 0,
+                "It never re-planned, so the spearmen were never in the way and this measures nothing.");
+
+            Assert.True(redrawn <= 2,
+                $"The way round was redrawn {redrawn} times against one regiment standing still. A detour " +
+                "is committed until the thing it went round is behind you (M21); redrawing it every beat " +
+                "is what deepened the recorded detour from 8 m to 47 m and left no gap to thread.");
         }
     }
 }
