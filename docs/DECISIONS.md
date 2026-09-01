@@ -51,12 +51,12 @@ rule is right but the number, threshold or exact form is the designer's to move.
 | M8 | Box-selecting several regiments groups them temporarily, with no button pressed. | Mandatory | ✅ |
 | M9 | Each regiment pathfinds individually, so a wing does not walk into itself. | Mandatory | ✅ |
 | M10 | A march is a cast, not a search. <sup>[why](#m10)</sup> | Mandatory | ❌ new |
-| M11 | Routes are rebuilt on a cadence, never every tick, and never only once. <sup>[why](#m11)</sup> | Mandatory | ⚠️ `RepathIntervalTicks = 5` exists and is being bypassed — finding 7 |
+| M11 | Routes are rebuilt on a cadence, never every tick, and never only once. <sup>[why](#m11)</sup> | Mandatory | ✅ [M135](#m135) — a march in progress is now asked on the beat whether its detour is still needed and whether its next two legs still fit |
 | M12 | The rectangle is what travels, not a point. <sup>[why](#m12)</sup> | Mandatory | ⚠️ the cast asks the whole body; the fallback search still uses 2 m. |
 | M13 | A regiment can crab. <sup>[why](#m13)</sup> | Mandatory | ✅ |
 | M14 | Full width first, crabbing second. <sup>[why](#m14)</sup> | Mandatory | ✅ |
-| M15 | An obstacle is whatever will not get out of your way. <sup>[why](#m15)</sup> | Mandatory | ❌ new |
-| M15a | Stance decides whether an enemy is a wall. <sup>[why](#m15a)</sup> | Mandatory | ⚠️ **adapted, and further than this says.** In practice enemies are not planning obstacles at *any* stance. As walls they had charges arrive by walking round the regiment they were sent to break — five tests at once — but the real reason is [M4](#moving)'s: a route that quietly avoids an enemy overrules the line the player drew, and whether to cross a formed enemy's front is the last decision that should be taken out of their hands. |
+| M15 | An obstacle is whatever will not get out of your way. <sup>[why](#m15)</sup> | Mandatory | ✅ [M134](#m134) |
+| M15a | Stance decides whether an enemy is a wall. <sup>[why](#m15a)</sup> | Mandatory | ✅ [M134](#m134) — **restored, and the adaptation recorded here was the wrong conclusion.** For a long stretch enemies were not planning obstacles at *any* stance, on the grounds that a route quietly avoiding an enemy overrules the line the player drew. The designer has since ruled the other way, and the rule turns out to be safe once the exemption names the *quarry* rather than every enemy: Advance and Aggressive force through, Defend goes round, and the regiment sent to break somebody never routes round him. |
 | M16 | Ask where a body will be, not where it is. <sup>[why](#m16)</sup> | Mandatory | ❌ new |
 | M16a | Friends are predicted from their orders; enemies only from what has been seen of them. <sup>[why](#m16a)</sup> | Mandatory | ❌ new |
 | M16b | Only one of any two regiments gives way. <sup>[why](#m16b)</sup> | Mandatory | ❌ new |
@@ -2800,3 +2800,142 @@ which is working is worse than no check.
   rather than one being kept because it went green. It needs an arrangement built
   for it, the way `StoppingShortTests` builds a wall - **scavenging bench fields
   until a number clears sixty-four is fitting the arrangement to the assertion**.
+
+### M134 - an enemy is a wall to everybody except the regiment sent to break it
+
+**Mx2d and M15, and the audit that found them.** Every row of
+`docs/requirements/movement.md` was read against the code rather than against its
+own status column, and four rows were wrong in both directions: `M19a` and
+orders' `O5` were marked not-built and are fully built; `M3b`, `M3c`, `M3d` and
+`M3e` were blank and are mostly built; `M15a` was marked partly-done and the code
+consulted no stance at all.
+
+**What was actually there.** `Marching.IsInTheWayOf` returned
+`other.Owner == unit.Owner`, unconditionally. Only friends were ever planning
+obstacles, so a regiment told to march drew its line through an enemy line and
+walked into it - the player's report of regiments refusing to go round something
+plainly in the way.
+
+**Turning it on breaks five tests, and it did again.** Charges arrived by walking
+politely round the regiment they had been sent to break; cavalry declined to be
+held by cavalry; a regiment that had fought its way past somebody never fought at
+all. The fix is not to give up on the rule but to name the exemption properly, and
+it has two halves:
+
+- **The quarry.** An explicit attack order names it through `Order.Target`. An
+  aggressive regiment closing with somebody it was never told about has no order
+  to read, so the chase writes `UnitInstance.ClosingWith` before it plans - and
+  writes it *before* the cadence gate, or the quarry becomes a wall on the ticks
+  the chase does not re-plan on.
+- **The stance, which restores [M15a] rather than superseding it.** Advance is
+  defined in the player's own words as "carry out the order, forcing through an
+  enemy line where the unit is able to", so routing it round contradicts the order
+  given. Defend is the default and is the stance the new rule is really for.
+
+With both, the five come back green and only one test remains red -
+`MarchingAwayAcrossAFormedEnemyAtArmsLengthGetsTheRegimentCutUp`, which asserted
+the *old* rule and is re-recorded as
+`MarchingAwayFromAFormedEnemyAtArmsLengthGoesRoundHim`.
+
+**Deliberately the quarry alone, not the whole enemy army.** A regiment sent at
+the enemy left still wants to walk round the enemy centre on the way, which is
+what Mx2d asks for in as many words; exempting every enemy would make "attack"
+mean "walk through anything", which is the rule being replaced rather than a
+version of it. **This is the one judgement in M134 the designer did not state and
+may want to overrule.**
+
+**It opened a hole nobody could have had before.** `Marching` skipped rung 2 - the
+way round - for every attack order, on the reasoning that closing with an enemy is
+O5's business. That was safe while there were no third parties, because the only
+bodies an approach could meet were friends and a friend on an approach was O5's
+line-mate. With enemies as obstacles an attack meets its first stranger and
+shoulders straight into him. Rung 2 is now open to an attack whose blocker is not
+its quarry.
+
+**Cost:** the price of breaking off at arm's length is no longer pinned by
+anything. The old test measured it because crossing a formed enemy's front was the
+only route out; now the regiment plans round and gets away clean. That price
+belongs to the deferred withdrawal rule, and open finding 2 is where it waits.
+
+### M135 - a march is asked whether it still wants its route, and Mx2e is the answer when it cannot have one
+
+**M11, as the designer restated it:** *"it doesn't verify if the current (or the
+next) leg would result in collision to recalculate."* The cadence that existed
+(`RepathIntervalTicks = 5`) only ever fired for a regiment that had **stopped
+getting anywhere**. A regiment walking cheerfully along a route that has gone
+wrong is not stalled - it is making excellent progress toward the wrong thing, and
+nothing looked at it. Two cases, both the designer's:
+
+1. **The reason for the detour has gone.** A regiment sent round a body walks the
+   long way for the rest of the march even after that body has left, because
+   nothing asks the straight question again. One clearance cast on the beat, and
+   it costs nothing for regiments not on a detour.
+2. **Something new has stepped onto the line.** Compared against what the legs
+   were drawn around - kept on the `MovementRoute` so replacing the route replaces
+   the answer and no creation site has to remember to clear it - so a route
+   deliberately pressing through a friend does not re-plan for ever over the
+   friend it already agreed to press.
+
+**Mx2e lives in the same method**, because it is the one place that knows both
+that the way is blocked and by whom. A friend on the line is somebody else's
+problem: the planner presses through him, or the stall detector gives up in its
+own time. An enemy is not - there is no shouldering past a formed enemy - so a
+march that cannot be re-planned round one **ends where the regiment stands**.
+
+**The first build asked about the leg underfoot every tick and was wrong twice
+over.** A route swapped mid-leg puts the body on a new first leg while it is still
+coming round onto the old one: `ARouteThePlannerCalledClearIsWalkedClear` went red
+with two overlapping ticks, which is the [M29] fault by a new door. And the churn
+had the planner announcing itself 29 times in twelve turns, which
+`DecisionsAreSaidOnceAndNotEveryTick` failed the build for, correctly. **What a
+leg meets changes identity constantly as a marching body closes on it**, so most
+of those firings were the view changing rather than the world. Both legs now ride
+the five-second beat, and only a dropped detour is reported as a decision.
+
+**Cost, and it is a real one.** `ThreadingSidewaysTakesLongerThanWalkingThrough`
+measured 318 ticks against 290; it now measures **303 against 290**, because a
+regiment that has cleared the gap sees straight to its destination and drops the
+crab. The charge did not shrink - the crabbed stretch did, which is the cadence
+working - but the bar came down from 1,05 to 1,03 to follow the measurement. If it
+ever needs lowering again the answer is a fixture that times the squeeze rather
+than the journey, **not a smaller number**.
+
+**Not measured on the clock.** The rule adds one or two swept-rectangle casts per
+marching regiment every fifth tick, plus re-plans that did not happen before. The
+whole suite is unchanged in wall time across four runs, which is weak evidence and
+is being reported as weak evidence; the real number is a play-test recording's
+frame times, and that has not been taken yet [W5].
+
+### M136 - Mx2b and M16b are postponed, and what would have to be known first
+
+**The designer's decision, in their own words:** *"Mx2b M16b can be postponed
+since we already have the press-through. An analysis on usability would be needed
+like being blocked by impassable terrain on each sides and cannot press through or
+we want to reorder the units."*
+
+Mx2b - a blocking friendly moves sideways to make space before the marcher arrives
+- is the largest unbuilt movement requirement, and M16b (only one of any two gives
+way) is the same hole: nothing gives way, so there is nothing to arbitrate. It is
+also the direct cause of the play-test symptom *"they compete for the space they
+walk through when they could just wait behind one another"*, and no planner change
+reaches it, because every planner in the tree is single-agent by construction.
+
+**Why it can wait:** [Mx2c]'s press-through already gets a regiment past one of
+its own, priced rather than refused, so nothing is *stuck*. What is lost is
+tidiness, not passage.
+
+**What has to be known before it is built** - the analysis the designer asked for,
+and the reason this is not simply queued as work:
+
+- **The cases the press cannot answer.** A corridor walled by impassable ground on
+  both flanks, where there is neither a way round nor room to press. This is the
+  case that makes giving way necessary rather than merely nicer, and nobody has
+  counted how often it occurs.
+- **Reordering a line on purpose.** Two regiments asked to swap places is a
+  give-way problem with no obstacle in it at all, and it is a thing players will
+  want to do directly rather than as a side effect of pathfinding.
+- **Who moves, and how far.** M16b settles that only one of two moves, but not
+  which, nor whether the one that moves resumes what it was doing.
+
+Until those are answered, building it would be choosing a mechanism before knowing
+what it is for.

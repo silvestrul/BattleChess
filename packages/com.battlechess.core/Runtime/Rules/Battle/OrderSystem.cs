@@ -158,6 +158,15 @@ namespace BattleChess.Rules
 
                 if (!unit.IsFighting) continue;
 
+                // Mx2d. Only a regiment that could be closing with somebody
+                // carries an exemption from one tick to the next. A stale
+                // ClosingWith is worse than none - it would let a marching
+                // regiment walk through an enemy it fought three orders ago -
+                // and the aggressive path re-writes its own on every tick it
+                // holds a quarry, including the ones it does not re-plan on.
+                if (unit.Order.Kind != OrderKind.Attack && unit.Stance != Stance.Aggressive)
+                    unit.ClosingWith = UnitId.None;
+
                 ReleaseIfClear(battle, unit);
 
                 KeepTheMarchHonest(battle, unit, tick, log);
@@ -266,6 +275,14 @@ namespace BattleChess.Rules
             // same ninety degrees as going onto it, and excusing only the way in
             // left a regiment declared stuck the moment it had finished getting
             // through — which is the fault, arriving one waypoint later.
+            // M11, and it is the half the cadence never had. Everything below
+            // watches for a march making no headway; nothing watched a march
+            // making perfectly good headway toward a collision that was not
+            // there when the route was drawn, or plodding round a body that has
+            // since walked away. Asked before the stall accounting, because a
+            // route that has just been replaced has nothing to be stalled on.
+            if (ReconsiderTheMarch(battle, unit, tick, log)) return;
+
             Facing? holding = unit.Route!.HoldThisLeg;
 
             if (holding.HasValue &&
@@ -428,6 +445,215 @@ namespace BattleChess.Rules
         /// the same remedy. Both faults end with a regiment that is not where it
         /// was sent, and one of them used to have no way of asking at all.
         /// </remarks>
+        /// <summary>
+        /// How often a march that is going along fine is asked whether it still
+        /// wants the route it has.
+        /// </summary>
+        /// <remarks>
+        /// Five seconds. The leg it is <i>on</i> is asked every tick, because a
+        /// regiment at cavalry pace covers forty metres in five and a collision
+        /// noticed five seconds late has already happened. The leg after it, and
+        /// the question of whether a detour is still needed, ride the slower
+        /// beat: neither is urgent and both cost a cast.
+        /// </remarks>
+        private const int ReconsiderIntervalTicks = RepathIntervalTicks;
+
+        /// <summary>
+        /// Asks a march in progress whether the world has changed under it, and
+        /// re-plans if it has.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>M11, as the designer restated it.</b> The old cadence only ever
+        /// fired for a regiment that had stopped getting anywhere, which misses
+        /// both of the cases a re-plan is actually for.
+        /// </para>
+        /// <para>
+        /// <b>One: the reason for the detour has gone.</b> A regiment sent round
+        /// a body walks the long way for the rest of the march even after that
+        /// body has moved off, because nothing ever asks the straight question
+        /// again. One clearance cast on the slow beat answers it, and it costs
+        /// nothing at all for regiments that are not on a detour.
+        /// </para>
+        /// <para>
+        /// <b>Two: something new has stepped onto the line.</b> The route was
+        /// honest when it was drawn and is not now. Compared against what the
+        /// legs were drawn around rather than against nothing, so a route
+        /// deliberately pressing through a friend does not re-plan itself for
+        /// ever over the friend it already agreed to press.
+        /// </para>
+        /// <para>
+        /// <b>Mx2e</b> lives here too, because this is the one place that knows
+        /// both that the way is blocked and by whom. A march that cannot be
+        /// re-planned round an enemy is not a march that should keep walking
+        /// into him.
+        /// </para>
+        /// </remarks>
+        /// <returns>
+        /// True if the route was replaced or the order ended, so the caller must
+        /// not go on to judge a route it no longer has.
+        /// </returns>
+        private bool ReconsiderTheMarch(
+            BattleState battle, UnitInstance unit, int tick, IBattleLog log)
+        {
+            MovementRoute route = unit.Route!;
+
+            // On the beat, both legs, and never between beats.
+            //
+            // The first build asked about the leg underfoot every tick, on the
+            // reasoning that a collision noticed five seconds late has already
+            // happened. Measured, that was the wrong trade twice over: a route
+            // swapped mid-leg puts the body on a new first leg while it is
+            // still coming round onto the old one, which broke
+            // `ARouteThePlannerCalledClearIsWalkedClear` with two overlapping
+            // ticks - the M29 fault by a new door - and the churn had the
+            // planner announcing itself 29 times in twelve turns. What the leg
+            // meets changes identity constantly as a marching body closes on
+            // it, so most of those firings were the view changing rather than
+            // the world.
+            if (tick % ReconsiderIntervalTicks != 0) return false;
+
+            UnitInstance? meets = WhatTheLegMeets(
+                battle, unit, unit.Position, route.Target, route.HoldThisLeg);
+
+            // The leg after it too: a collision one waypoint ahead is worth
+            // knowing about before the regiment is committed to the turn onto
+            // it, which is the designer's "current leg or the next leg".
+            if (meets == null)
+            {
+                int after = route.NextWaypoint + 1;
+
+                if (after < route.Waypoints.Count)
+                    meets = WhatTheLegMeets(battle, unit, route.Target, route.Waypoints[after], null);
+            }
+
+            // The first look records rather than reacts. Without it every fresh
+            // route reads its own first blocker as news and re-plans once for
+            // nothing, which is a check firing on its own arrangement (W9).
+            if (!route.LegsLookedAt)
+            {
+                route.LegsLookedAt = true;
+                route.LegsPlannedAgainst = meets?.Id ?? UnitId.None;
+
+                return false;
+            }
+
+            UnitId now = meets?.Id ?? UnitId.None;
+
+            bool somebodyNew = now.IsValid && now != route.LegsPlannedAgainst;
+
+            // (1) Still going the long way round something that may have gone.
+            bool detourMayBeStale =
+                !somebodyNew &&
+                route.Waypoints.Count > 2 &&
+                !route.IsComplete &&
+                IsTheStraightWayOpenAgain(battle, unit);
+
+            if (!somebodyNew && !detourMayBeStale)
+            {
+                // Keep the answer current even when nothing is done about it,
+                // or a blocker that steps aside and is replaced by a second one
+                // reads as the same body and is never noticed.
+                route.LegsPlannedAgainst = now;
+
+                return false;
+            }
+
+            if (!battle.Planning.MayPlan(unit.Id)) return false;
+
+            return ReplanTheSameMarch(battle, unit, meets, detourMayBeStale, log);
+        }
+
+        /// <summary>The first body standing on one leg of a route, if any.</summary>
+        private static UnitInstance? WhatTheLegMeets(
+            BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing? holding)
+        {
+            if (Vec2.Distance(from, to) <= Vec2.Epsilon) return null;
+
+            Facing along = holding ?? Marching.AlongTheLine(from, to, unit.Facing);
+
+            Marching.IsClearLine(battle, unit, from, to, along, out UnitInstance? blocker, leaving: true);
+
+            return blocker;
+        }
+
+        /// <summary>Whether the regiment can now see straight to where it was sent.</summary>
+        private static bool IsTheStraightWayOpenAgain(BattleState battle, UnitInstance unit)
+        {
+            Vec2 goal = unit.Order.Destination;
+
+            return Marching.IsClearLine(
+                battle, unit, unit.Position, goal,
+                Marching.AlongTheLine(unit.Position, goal, unit.Facing));
+        }
+
+        /// <summary>
+        /// Draws the same order again from where the regiment now stands.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately not <see cref="TryAgain"/>. That one is the stall
+        /// remedy: it counts a failure, and it moves the destination when the
+        /// ground the regiment was sent to is occupied. Neither is right for a
+        /// march that is walking along perfectly well and has simply been
+        /// overtaken by events, and counting this as a failed try would have a
+        /// regiment give up on an order it was in the middle of carrying out.
+        /// </remarks>
+        private bool ReplanTheSameMarch(
+            BattleState battle, UnitInstance unit, UnitInstance? meets, bool detourMayBeStale, IBattleLog log)
+        {
+            Vec2 goal = unit.Order.Destination;
+
+            Plan plan = Marching.PlanTo(battle, unit, _pathfinder, goal, log);
+
+            if (plan.Path.Found && plan.Path.Waypoints.Count >= 2)
+            {
+                unit.Route = plan.ToRoute(unit.Order.WheelFirst);
+
+                // Said once, when it is news. A dropped detour is an event -
+                // the answer *became* the straight line, which is the same
+                // test Marching applies at rung one. Re-routing round a
+                // newcomer happens as often as the field churns and is
+                // reported at Info, or `DecisionsAreSaidOnceAndNotEveryTick`
+                // fails the build for it, correctly.
+                if (detourMayBeStale)
+                    log.Decision("Move",
+                        $"{unit.Def.DisplayName} can see straight to where it was sent again and has " +
+                        "dropped the way round.",
+                        unit.Id);
+                else
+                    log.Info("Move",
+                        $"{unit.Def.DisplayName} has {meets!.Def.DisplayName} on the leg it is walking, " +
+                        "which was not there when the route was drawn, and is going again.",
+                        unit.Id);
+
+                return true;
+            }
+
+            // A stale detour is a chance to do better, never a reason to throw
+            // away a route that works. Failing to find a shorter answer simply
+            // means the old one stands.
+            if (detourMayBeStale) return false;
+
+            // Mx2e. A friend on the line is somebody else's problem: the planner
+            // presses through him, or the stall detector gives up on him in its
+            // own time, and neither is an emergency. An enemy is. There is no
+            // pressing through a formed enemy, so a regiment that cannot be
+            // routed round one and keeps walking is a regiment walking into a
+            // fight nobody ordered.
+            if (meets == null || meets.Owner == unit.Owner) return false;
+
+            log.Blocked("Move",
+                $"{unit.Def.DisplayName} cannot get past {meets.Def.DisplayName} and there is no way " +
+                "round. It has stopped where it stands and the order is cancelled.",
+                unit.Id);
+
+            unit.Route = null;
+            unit.GiveOrder(UnitOrder.Stand(), unit.Position);
+            unit.ForgetProgress();
+
+            return true;
+        }
+
         private void TryAgain(BattleState battle, UnitInstance unit, IBattleLog log)
         {
             long began = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -737,7 +963,12 @@ namespace BattleChess.Rules
             // Routing enemies count: running them down is the point of being
             // aggressive.
             UnitInstance? quarry = NearestThreat(battle, unit, EngagementReachFactor, includeRouting: true);
-            if (quarry == null) return false;
+
+            if (quarry == null)
+            {
+                unit.ClosingWith = UnitId.None;
+                return false;
+            }
 
             // Do not be baited away from where the order was given.
             if (Vec2.Distance(unit.OrderAnchor, quarry.Position) > PursuitLeashMetres)
@@ -748,6 +979,12 @@ namespace BattleChess.Rules
 
                 return false;
             }
+
+            // Before the cadence gate rather than after it. The exemption has
+            // to hold on the ticks this regiment does *not* re-plan on, or the
+            // quarry becomes a wall halfway through the walk toward it and the
+            // leg check calls for a route round the thing being charged.
+            unit.ClosingWith = quarry.Id;
 
             // The same rule as the attack path, and for the same reason: this
             // branch has the same shape — a marching regiment is throttled to a
@@ -981,6 +1218,8 @@ namespace BattleChess.Rules
         /// <summary>Plans a march that stops just short of a target.</summary>
         private bool ChaseToward(BattleState battle, UnitInstance unit, UnitInstance quarry, int tick, IBattleLog log, string verb)
         {
+            unit.ClosingWith = quarry.Id;
+
             Vec2 approach = (unit.Position - quarry.Position).Normalised();
             if (approach.IsNearZero) approach = unit.Facing.Opposite().ToVector();
 

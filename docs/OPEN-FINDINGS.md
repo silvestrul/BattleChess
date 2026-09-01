@@ -1631,6 +1631,27 @@ runtime rather than by rebuilding:
 That is the real reason [M94](DECISIONS.md#m94) ships off, and it convicts one of
 its four pieces rather than all of them.
 
+## 28. Breaking off at arm's length is now free, and nothing measures it
+
+**Raised by [M134](DECISIONS.md#m134), 1 Sep 2026.** While enemies were not
+planning obstacles, a regiment ordered away from an enemy seven metres in front of
+it had only one route: across his front, presenting a flank, and it was taken
+apart on the way. `MarchingAwayAcrossAFormedEnemyAtArmsLengthGetsTheRegimentCutUp`
+measured that, and the price it measured was the right one - breaking off should
+be a decision with a cost.
+
+Under Mx2d the enemy is a wall, so the regiment plans **round** him and gets away
+without a scratch. The routing is correct; the freedom is not. A regiment in
+contact should not be able to walk out of a fight by pathfinding.
+
+The test is re-recorded as `MarchingAwayFromAFormedEnemyAtArmsLengthGoesRoundHim`
+and now asserts the new routing, so **nothing pins the price any more**. It
+belongs to the deferred withdrawal rule - see finding 2, and the skipped
+`ARegimentInMeleeCanBeOrderedToBreakOffAndPayForIt` directly below the re-recorded
+test. Close this entry and that skip together.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

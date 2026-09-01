@@ -46,6 +46,26 @@ namespace BattleChess.Rules
         /// </remarks>
         public bool PressingThrough { get; set; }
 
+        /// <summary>
+        /// Who the legs this route is about to walk were drawn around, or
+        /// <see cref="UnitId.None"/> if they were clear when it was checked.
+        /// </summary>
+        /// <remarks>
+        /// <b>M11.</b> Kept on the route rather than on the unit so that
+        /// replacing the route replaces the answer with it - there is no way to
+        /// leave a stale one behind, and no creation site has to remember to
+        /// clear it.
+        /// </remarks>
+        public UnitId LegsPlannedAgainst { get; set; } = UnitId.None;
+
+        /// <summary>Whether <see cref="LegsPlannedAgainst"/> has been taken yet.</summary>
+        /// <remarks>
+        /// The first look records rather than reacts. Without it every fresh
+        /// route reads its own first blocker as news and re-plans once for
+        /// nothing.
+        /// </remarks>
+        public bool LegsLookedAt { get; set; }
+
         public MovementRoute(IReadOnlyList<Vec2> waypoints, bool wheelFirst)
             : this(waypoints, wheelFirst, null)
         {

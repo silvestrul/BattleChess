@@ -332,8 +332,35 @@ namespace BattleChess.Tests.Battle
             Assert.Equal(0, enemy.Casualties);
         }
 
+        /// <summary>
+        /// Ordered away from an enemy at arm's length, a regiment on Defend
+        /// goes round him rather than across his front.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Re-recorded for Mx2d, and it used to assert the opposite.</b> The
+        /// old form was <c>MarchingAwayAcrossAFormedEnemyAtArmsLengthGetsTheRegimentCutUp</c>,
+        /// and it was right for the rule it was written under: while enemies
+        /// were not planning obstacles at any stance, the only route out of here
+        /// was straight across the spearmen's front, which presents a flank and
+        /// gets the regiment taken apart.
+        /// </para>
+        /// <para>
+        /// Under Mx2d an enemy is a wall to anyone not sent to break it, so a
+        /// regiment on Defend now plans round him and the crossing never
+        /// happens. That is the rule working.
+        /// </para>
+        /// <para>
+        /// <b>What the old test pinned and this one cannot:</b> that breaking
+        /// off at arm's length has a price. It is now free, which is a loss
+        /// rather than a gain, and it belongs to the deferred withdrawal rule
+        /// - see the skipped test directly below, and open finding 2. Written
+        /// down here rather than absorbed, because a rule that stops being
+        /// tested quietly is a rule that stops holding.
+        /// </para>
+        /// </remarks>
         [Fact]
-        public void MarchingAwayAcrossAFormedEnemyAtArmsLengthGetsTheRegimentCutUp()
+        public void MarchingAwayFromAFormedEnemyAtArmsLengthGoesRoundHim()
         {
             var field = new Battlefield("plains", 27120);
 
@@ -348,18 +375,20 @@ namespace BattleChess.Tests.Battle
             float gap = OrientedRect.GapBetween(foot.Shape, enemy.Shape);
             Assert.True(gap < 15f, $"The test needs it halted at close quarters, and it is {gap:0} m off.");
 
-            // Now ordered to march round him. It obeys — and is taken apart on
-            // the way, because turning a formation across a formed enemy at
-            // arm's length presents him a flank and there is no way to do it
-            // quickly. This is the right answer rather than a fault: it is
-            // exactly why breaking off should be a decision with a price, and it
-            // is what the deferred withdrawal rule is meant to put a number on.
+            Vec2 wasAt = foot.Position;
+
             field.March(foot, field.Centre + new Vec2(0f, 260f), Stance.Defend);
             field.RunTurns(6);
 
-            Assert.True(foot.Casualties > 0 || foot.State == UnitState.Routing || !foot.IsOnField,
-                "Walking away from spearmen seven metres in front of you should cost something. It got off " +
-                "without a scratch.");
+            // Non-vacuity first: an order that never moved anybody would pass
+            // the real assertion for the wrong reason (W9).
+            Assert.True(Vec2.Distance(foot.Position, wasAt) > 20f,
+                $"It has gone {Vec2.Distance(foot.Position, wasAt):0} m. If it never set off, nothing below " +
+                "is being tested - the route it took is the whole point.");
+
+            Assert.True(foot.Casualties == 0 && foot.State != UnitState.Routing && foot.IsOnField,
+                $"On Defend the spearmen are a wall (Mx2d), so it should have planned round them rather than " +
+                $"turning across their front. It took {foot.Casualties} casualties, which means it crossed.");
         }
 
         [Fact(Skip = "Withdrawal is designed but not built — a regiment in melee cannot be ordered away yet. " +

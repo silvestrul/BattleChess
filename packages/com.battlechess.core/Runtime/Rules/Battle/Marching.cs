@@ -756,9 +756,11 @@ namespace BattleChess.Rules
             Facing alongIt = AlongTheLine(unit.Position, destination, unit.Facing);
 
             bool straightThere;
+            UnitInstance? stopsIt;
 
             using (PlanningProfile.Measure(PlanningProfile.Step.Rung1))
-                straightThere = IsClearLine(battle, unit, unit.Position, destination, alongIt);
+                straightThere = IsClearLine(
+                    battle, unit, unit.Position, destination, alongIt, out stopsIt, leaving: true);
 
             if (straightThere)
             {
@@ -791,11 +793,23 @@ namespace BattleChess.Rules
                 return Straight(line);
             }
 
-            // Rung 2: round whatever is in the way — but only for a march.
+            // Rung 2: round whatever is in the way — but only for a march, or
+            // for an attack held up by somebody other than its quarry.
+            //
             // Closing with an enemy is O5's business and it says centre first,
-            // then sidestep to share the face; arching an attack in would put
-            // the two rules in charge of the same approach.
-            if (unit.Order.Kind != OrderKind.Attack)
+            // then sidestep to share the face; arching an attack *in* would put
+            // the two rules in charge of the same approach. But Mx2d asks for a
+            // way round an enemy blocking the line, and a third party standing
+            // between a regiment and the enemy it was sent to break is not the
+            // approach at all. Before Mx2d there were no third parties to meet,
+            // because only friends were obstacles and a friend on an approach
+            // was O5's line-mate; now there are, and without this an attack
+            // meets its first stranger and shoulders straight into him.
+            bool approachingTheQuarry =
+                unit.Order.Kind == OrderKind.Attack &&
+                (stopsIt == null || stopsIt.Id == unit.Order.Target);
+
+            if (!approachingTheQuarry)
             {
                 IReadOnlyList<Vec2>? arch;
 
@@ -2534,7 +2548,43 @@ namespace BattleChess.Rules
         {
             if (ReferenceEquals(other, unit)) return false;
 
-            return other.Owner == unit.Owner;
+            if (other.Owner == unit.Owner) return true;
+
+            // Mx2d and M15, and the exemption is the whole of why this can be
+            // turned on at all. An enemy is a wall to everybody except the
+            // regiment sent to break *that* enemy. Read from the order rather
+            // than from the stance, which is the designer's correction to M15a:
+            // a stance is a standing answer to contact you did not plan for and
+            // never named anybody, so it could not say which enemy an attack
+            // was for and had to exempt all of them.
+            return !IsGoingFor(unit, other);
+        }
+
+        /// <summary>
+        /// Whether this regiment is on its way to fight that one.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately the quarry alone, not every enemy on the field while an
+        /// attack order stands. A regiment told to break the enemy left still
+        /// wants to walk round the enemy centre on the way there - Mx2d says
+        /// so in as many words, and exempting the whole army would have made
+        /// "attack" mean "walk through anything", which is the rule this
+        /// replaces rather than a version of the one asked for.
+        /// </remarks>
+        private static bool IsGoingFor(UnitInstance unit, UnitInstance other)
+        {
+            if (unit.Order.Kind == OrderKind.Attack && unit.Order.Target == other.Id) return true;
+            if (unit.ClosingWith == other.Id) return true;
+
+            // M15a, and it turns out to be right after all rather than
+            // superseded. Advance is *defined* as "carry out the order, forcing
+            // through an enemy line where the unit is able to", and Aggressive
+            // is Advance plus a pursuit - so routing either of them politely
+            // round an enemy contradicts the stance in the player's own words.
+            // Defend is the default and is the stance the new rule is really
+            // for: a regiment that has not been told to force anything now
+            // walks round rather than across a formed enemy's front.
+            return unit.Stance == Stance.Advance || unit.Stance == Stance.Aggressive;
         }
 
         /// <summary>

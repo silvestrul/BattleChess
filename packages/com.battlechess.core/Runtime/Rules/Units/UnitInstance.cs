@@ -194,6 +194,26 @@ namespace BattleChess.Rules
         public UnitId ChasePlannedAgainst { get; set; } = UnitId.None;
 
         /// <summary>
+        /// The enemy this regiment is closing with, and which is therefore not
+        /// an obstacle to it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Mx2d and M15.</b> An enemy is a wall to everybody except the
+        /// regiment sent to break it. An explicit attack order says who that is
+        /// through <c>Order.Target</c>; an aggressive regiment closing with
+        /// somebody it was never told about has no order to read, so the chase
+        /// writes its quarry here before it plans.
+        /// </para>
+        /// <para>
+        /// Cleared whenever a unit is not chasing anybody, because a stale one
+        /// is worse than none: it would let a marching regiment walk through an
+        /// enemy it fought three orders ago.
+        /// </para>
+        /// </remarks>
+        public UnitId ClosingWith { get; set; } = UnitId.None;
+
+        /// <summary>
         /// The tick a stuck chase may ask for a new route again.
         /// </summary>
         /// <remarks>
