@@ -3001,3 +3001,85 @@ deferring the *look* with it. Open finding 30.
 faster" was five failed attempts and a bisection, not a smaller constant. Setting
 the number lower and shipping it would have looked like progress and put eight
 centimetres of a neighbour under every regiment on the field.
+
+### M138 - the hand-over, and why every faster beat used to walk into somebody
+
+**[M137] said the beat was not the lever and the hand-over was. This is the
+hand-over.**
+
+`Marching.IsClearLine` sweeps the mover's rectangle at **one** front for the whole
+leg. That is correct for a march drawn from a standstill, where the body comes
+round first and then walks. It is wrong for a route handed to a body **in
+mid-stride**, which walks its new first leg while turning from the front it has
+onto the front the leg wants - occupying ground at every angle between, none of
+which the single-front sweep ever asked about.
+
+Recorded at a one-tick cadence: a route handed over on tick 117, clear at 112
+degrees when planned, **8% inside spearmen four ticks later at 140 degrees**. The
+spearmen were behind it. It was getting out, and the wheel drove it back in.
+
+**The fix is to bracket the wheel.** The first leg - and only the first, since
+every later leg begins at a waypoint the plan chose, on a front the plan asked
+for - is checked at the front the body **starts** on as well as the one it ends
+on, both with `leavingGrazeOnly` so a body genuinely being left may be brushed but
+must stay a brush for the whole leg rather than only at the door. That last part
+is the pose lattice's own rule, *"separation may hold or widen across the sweep,
+never narrow"*, finally applied on this side of the codebase too.
+
+**Measured: the suite is clean at a one-tick cadence** - twelve failures, the same
+twelve as before, at the fastest beat the clock allows. Before this, ten metres,
+fifteen, twenty, twenty-five and thirty all put a regiment inside a neighbour.
+
+**So [M137]'s ground-based beat is switched on**, exactly as it was written there:
+look again when the mover's own pace plus the fastest regiment on the move could
+have closed ten metres, floored at one tick, capped at the old five, phased by
+unit id so the army does not all cast on one frame. Spearmen crossed by cavalry
+are now looked at about every other tick instead of every fifth.
+
+**One hole, stated rather than papered over.** Three samples of the wheel is not
+the swept rotation: a rectangle part-way round reaches about two metres further
+than at either end, and a mid-wheel sample was added and made no difference to the
+one case that survives, so it was taken out again rather than kept as decoration.
+What remains uncovered is a pose between the samples that laps something neither
+end does.
+
+### M139 - the cadence works, and the next fault is [M21] rather than the beat
+
+**The 18:27 recording of 1 Sep, taken by the designer on [M138]'s build.** The
+cadence now fires: spearmen crossed by cavalry re-planned at ticks 162, 165, 168
+and again at 250, 253, 256, 259, 262, against **once in two hundred ticks** on the
+previous build. That part works.
+
+**Two faults are visible in the same recording, and they are one fault.**
+
+**The way round deepens instead of settling.** Five consecutive re-plans against
+the same cavalry drew detours 8 m, 20 m, 31 m, 40 m and 47 m off the straight
+line, the last three reporting *"there was no gap to thread"*. Each answer is
+drawn from a few metres further along than the last, so the geometry sours as the
+regiment commits. **This is [M21] - a detour is committed until the thing it went
+round is behind you - being broken by the cadence**, which redraws the commitment
+every beat.
+
+**Then the latch shuts and it walks into somebody.** At tick 278 the cavalry
+**arrived and stopped**. A standing body's identity never changes, so the identity
+latch in `ReconsiderTheMarch` shut permanently: **ninety-one ticks with no re-plan
+at all**, and at 395 the spearmen were inside the stationary cavalry -
+*"0,06 of a body overlapping ... being forced through rather than moved with"* -
+for fifteen ticks, charged to both, with nobody having asked for a press.
+
+**Removing the latch was tried again and still does not pass**, and now it is
+clear why rather than merely that: without it the cadence re-plans every beat
+against a standing obstacle, and because each answer is drawn from a new place it
+gets a *new* route every time - so the churn the latch was suppressing is the
+deepening detour above. Narrowing the latch to standing blockers only is the same
+thing by another name, since the recorded blockers are standing. Measured: 47
+planner decisions in twelve turns, and an overlap still standing.
+
+**So the order of work is settled and it is not the beat and not the latch.**
+[M21]'s commitment has to hold across a re-plan first: a march already going round
+a body must be given the *same* way round when it asks again, and only redraw when
+that way round has actually failed. With commitment holding, the answer stops
+changing, the churn goes, and the latch can come out - which is what the recording
+says the designer is actually seeing.
+
+Open finding 31.

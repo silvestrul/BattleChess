@@ -399,6 +399,55 @@ namespace BattleChess.Rules
         // ---- Bonds ------------------------------------------------------------
 
         /// <summary>
+        /// The pace of the fastest regiment currently marching anywhere on the
+        /// field, or nought if nobody is moving.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M137].</b> What the march cadence sizes its beat from. A
+        /// regiment about to be cut across does not need to know its own speed
+        /// - it is not the one closing - it needs to know how fast the ground
+        /// in front of it can change, and the worst case is the fastest thing
+        /// on the field walking straight at it.
+        /// </para>
+        /// <para>
+        /// One number for the whole battle, worked out once a tick and shared
+        /// by everybody who asks. Asking each mover for the fastest body
+        /// <i>near</i> it would be exact and costs a neighbour query per
+        /// marching regiment per tick, which is the expense the beat exists to
+        /// avoid. Battle-wide over-estimates the danger for a regiment marching
+        /// alone in a quiet corner, and over-estimating means looking more
+        /// often than needed - the safe direction to be wrong in.
+        /// </para>
+        /// </remarks>
+        /// <param name="tick">The tick being run, which the answer is cached against.</param>
+        public float FastestOnTheMove(int tick)
+        {
+            if (_fastestOnTheMoveTick == tick) return _fastestOnTheMove;
+
+            float fastest = 0f;
+
+            for (int i = 0; i < _units.Count; i++)
+            {
+                UnitInstance unit = _units[i];
+
+                if (!unit.IsOnField || !unit.IsMarching) continue;
+
+                float speed = SpeedOf(unit);
+
+                if (speed > fastest) fastest = speed;
+            }
+
+            _fastestOnTheMove = fastest;
+            _fastestOnTheMoveTick = tick;
+
+            return fastest;
+        }
+
+        private float _fastestOnTheMove;
+        private int _fastestOnTheMoveTick = int.MinValue;
+
+        /// <summary>
         /// The pace a whole wing keeps: the speed of whichever of its regiments
         /// is currently moving slowest, terrain and all.
         /// </summary>

@@ -476,7 +476,80 @@ namespace BattleChess.Rules
         /// the question of whether a detour is still needed, ride the slower
         /// beat: neither is urgent and both cost a cast.
         /// </remarks>
-        private const int ReconsiderIntervalTicks = RepathIntervalTicks;
+        /// <summary>
+        /// How much ground may pass under a march between looks at its route.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M137], and it replaces a flat five ticks.</b> A beat counted in
+        /// time samples the world at whatever rate the clock happens to run,
+        /// while the thing being watched for is measured in <i>metres</i>: a
+        /// body arriving on a leg. At five seconds, spearmen at 1,59 m/s
+        /// covered eight metres between looks and cavalry at 4,76 covered
+        /// twenty-four - and the two crossing closed thirty-two, which is most
+        /// of the depth of the eighty-by-forty body they were trying not to
+        /// hit. The slow regiment was checked exactly as often as the fast one
+        /// while being the one that needed it more.
+        /// </para>
+        /// <para>
+        /// Ten metres is a quarter of a regiment's depth, so a body cannot
+        /// cross a leg unseen between two looks. It only became safe to ask
+        /// this often once [M138] fixed the hand-over: every faster beat used
+        /// to walk a regiment into a neighbour, and the beat was never the
+        /// reason.
+        /// </para>
+        /// </remarks>
+        private const float LookAgainAfterMetres = 10f;
+
+        /// <summary>However fast the field is moving, no march looks twice in one tick.</summary>
+        private const int LeastTicksBetweenLooks = 1;
+
+        /// <summary>
+        /// And however slow, a march still looks this often - the old flat
+        /// beat, kept as the ceiling so nothing is checked less than it used to
+        /// be.
+        /// </summary>
+        private const int MostTicksBetweenLooks = RepathIntervalTicks;
+
+        /// <summary>
+        /// Whether enough has happened for this march to be worth looking at
+        /// again.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Sized from the mover's own pace <i>and</i> the fastest regiment on
+        /// the move, added together, because a collision is a closing speed and
+        /// not a walking speed. Spearmen crossed by cavalry are looked at about
+        /// every other tick; the same spearmen alone on a quiet field fall back
+        /// to the ceiling.
+        /// </para>
+        /// <para>
+        /// The phase comes off the unit's own id rather than the raw tick, so
+        /// the army does not all look on the same frame. Under the flat beat
+        /// every marching regiment checked on tick 0, 5, 10..., which put every
+        /// cast on the field into one frame in five and left the other four
+        /// empty.
+        /// </para>
+        /// </remarks>
+        private static bool TimeToLookAgain(BattleState battle, UnitInstance unit, int tick)
+        {
+            MovementRoute route = unit.Route!;
+
+            // A route nobody has looked at yet is looked at now - that look is
+            // what records where it started from.
+            if (route.LastLookedTick == int.MinValue) return true;
+
+            int since = tick - route.LastLookedTick;
+
+            if (since < LeastTicksBetweenLooks) return false;
+
+            if (since >= MostTicksBetweenLooks + unit.Id.Value % MostTicksBetweenLooks) return true;
+
+            float closing = battle.SpeedOf(unit) + battle.FastestOnTheMove(tick);
+
+            return Vec2.Distance(unit.Position, route.LastLookedFrom)
+                   + closing * since * BattleClock.SecondsPerTick >= LookAgainAfterMetres;
+        }
 
         /// <summary>
         /// Asks a march in progress whether the world has changed under it, and
@@ -531,7 +604,10 @@ namespace BattleChess.Rules
             // meets changes identity constantly as a marching body closes on
             // it, so most of those firings were the view changing rather than
             // the world.
-            if (tick % ReconsiderIntervalTicks != 0) return false;
+            if (!TimeToLookAgain(battle, unit, tick)) return false;
+
+            route.LastLookedFrom = unit.Position;
+            route.LastLookedTick = tick;
 
             UnitInstance? meets = WhatTheLegMeets(
                 battle, unit, unit.Position, route.Target, route.HoldThisLeg);
@@ -558,29 +634,26 @@ namespace BattleChess.Rules
                 return false;
             }
 
-            // <b>Identity, and it is a compromise that is known to be one.</b>
+            // <b>Identity, and it is now known to be wrong rather than merely
+            // suspected.</b>
             //
-            // A re-plan fires when the leg meets a *different* body than the
-            // one this route was drawn around. That is what stops a route
-            // deliberately pressing through a friend from re-planning for ever
-            // over the friend it already agreed to press - and, less
-            // obviously, what stops a marching body from re-planning every
-            // beat as the view of a blocker it is closing on changes.
+            // A re-plan fires when the leg meets a <i>different</i> body than
+            // the one this route was drawn around. What that costs is recorded
+            // in `logs/battle-20260901-182703.log`: cavalry crossed a spearmen
+            // march, was re-planned round five times in thirteen ticks, then
+            // arrived and stopped where it stood. A standing body's identity
+            // can never change, so the latch shut permanently - the spearmen
+            // re-planned not once in the next ninety-one ticks, walked into the
+            // stationary cavalry, and forced through it for fifteen, six per
+            // cent of a body, charged to both, with nobody having asked.
             //
-            // Asking instead whether the leg is blocked *at all* was built and
-            // reverted the same day: it swaps the route mid-leg while the body
-            // is still coming round onto the old one, which put two
-            // overlapping ticks into `ARouteThePlannerCalledClearIsWalkedClear`
-            // - the M29 fault by a new door - and had the planner announcing
-            // itself 29 times in twelve turns.
-            //
-            // <b>It is also the leading suspect for the fault recorded on
-            // 1 Sep 2026</b>, where spearmen re-planned once and then walked
-            // two hundred ticks with the same friendly cavalry crossing their
-            // route. That suspicion is unproven: the arrangement built to
-            // demonstrate it passes with the latch and without it. Open
-            // finding 29, and the diagnostics below are there to settle it
-            // from the next recording rather than by guessing again.
+            // <b>Removing it does not work yet, and [M139] says why.</b> Asking
+            // the honest question - is the leg blocked at all - re-plans every
+            // beat against a standing obstacle, and each answer is drawn from a
+            // few metres further on, so the way round deepens instead of
+            // settling: 8 m, 20, 31, 40, 47 in that same recording. That is
+            // [M21]'s commitment rule being broken by the cadence, and it is
+            // the thread to pull, not this line.
             UnitId now = meets?.Id ?? UnitId.None;
 
             bool blocked = now.IsValid && now != route.LegsPlannedAgainst;
@@ -669,6 +742,71 @@ namespace BattleChess.Rules
         /// <summary>How far two routes may differ and still count as the same answer.</summary>
         private const float SameRouteMetres = 1f;
 
+        /// <summary>
+        /// Whether a plan handed to a body in mid-stride actually gets it out
+        /// of whatever it is standing in, rather than turning back into it.
+        /// </summary>
+        /// <remarks>
+        /// Only the first leg is asked. It is the only one walked from a pose
+        /// the planner did not choose - every leg after it begins at a waypoint
+        /// the plan put there, on a front the plan asked for, and the ordinary
+        /// checks already cover those.
+        /// </remarks>
+        private static bool WalksOutCleanly(BattleState battle, UnitInstance unit, Plan plan)
+        {
+            // A press says outright that it is going through somebody, and M20
+            // charges it for the privilege. Holding it to a graze would refuse
+            // the one route shape that is allowed to overlap.
+            if (plan.PressedThrough) return true;
+
+            IReadOnlyList<Vec2> way = plan.Path.Waypoints;
+
+            if (way.Count < 2) return false;
+
+            Vec2 from = way[0];
+            Vec2 to = way[1];
+
+            if (Vec2.Distance(from, to) <= Vec2.Epsilon) return true;
+
+            Facing along = plan.Hold != null && plan.Hold.Length > 0 && plan.Hold[0].HasValue
+                ? plan.Hold[0]!.Value
+                : Marching.AlongTheLine(from, to, unit.Facing);
+
+            // <b>Both ends of the wheel, and this is the part that matters.</b>
+            // IsClearLine sweeps the mover's rectangle at <i>one</i> front for
+            // the whole leg. A body handed a route in mid-stride walks that leg
+            // while turning from the front it has onto the front the leg wants,
+            // so it occupies ground at every angle between - ground the
+            // single-front sweep never asked about. Recorded: clear at 112
+            // degrees when planned, 8% inside spearmen four ticks later at 140.
+            //
+            // Checking the leg at the front it starts on as well as the one it
+            // ends on brackets the wheel. It is not the swept rotation - a
+            // rectangle mid-turn reaches about two metres wider than at either
+            // end - but it catches a body that is only clear at one of the two,
+            // which is this fault.
+            if (!Marching.IsClearLine(
+                    battle, unit, from, to, along, leaving: true, leavingGrazeOnly: true))
+                return false;
+
+            if (Facing.AbsoluteDelta(unit.Facing, along) <= StillComingRound) return true;
+
+            if (!Marching.IsClearLine(
+                    battle, unit, from, to, unit.Facing, leaving: true, leavingGrazeOnly: true))
+                return false;
+
+            // And the middle of the wheel, which is the widest part of it. A
+            // rectangle part-way round reaches about two metres further than at
+            // either end - `Marching` says so where it sizes rotation
+            // clearance - so bracketing the two ends alone still let a body
+            // through at 7% into spearmen it was turning away from. Three
+            // samples is not the swept rotation either, but it is the pose that
+            // the two-ended check is blind to by construction.
+            return Marching.IsClearLine(
+                battle, unit, from, to, Facing.RotateTowards(unit.Facing, along, Facing.AbsoluteDelta(unit.Facing, along) * 0.5f),
+                leaving: true, leavingGrazeOnly: true);
+        }
+
         /// <summary>The first body standing on one leg of a route, if any.</summary>
         private static UnitInstance? WhatTheLegMeets(
             BattleState battle, UnitInstance unit, Vec2 from, Vec2 to, Facing? holding)
@@ -725,6 +863,39 @@ namespace BattleChess.Rules
                     had.LegsPlannedAgainst = meets?.Id ?? UnitId.None;
 
                     WhyItHeldItsHand(unit, meets, "the planner gave back the same route", log);
+
+                    return false;
+                }
+
+                // <b>[M138], the hand-over rule, and it is what lets the beat
+                // be quick at all.</b>
+                //
+                // <see cref="Marching.IsClearLine"/> excuses a body the mover
+                // is already lapping for the <i>whole leg</i> - M25's rule,
+                // and the right one when a march is being drawn from a standstill,
+                // because getting clear of ground you already occupy is the
+                // steering's business. It is the wrong one for a route handed to
+                // a body in mid-stride. The mover's rectangle is built at the
+                // <i>new leg's</i> front, so a regiment that laps nobody where
+                // it stands can still lap somebody once turned - and that turned
+                // pose is what earns the excuse, which then covers every metre
+                // of the leg.
+                //
+                // Recorded: a route handed over on tick 117 put the mover 8% into
+                // spearmen it had already passed, four ticks later, while wheeling
+                // from 155 degrees onto 112. The spearmen were behind it. It was
+                // getting out, and the wheel drove it back in.
+                //
+                // So the hand-over asks the strict form instead - the same rule
+                // the pose lattice has always used, "separation may hold or widen
+                // across the sweep, never narrow", expressed here as
+                // <c>leavingGrazeOnly</c>: a body being left may be brushed, but
+                // it has to stay a brush for the whole leg rather than only at
+                // the door. A route that cannot promise that is not taken, and
+                // the one already being walked stands.
+                if (!WalksOutCleanly(battle, unit, plan))
+                {
+                    WhyItHeldItsHand(unit, meets, "the new route would turn back into what it is leaving", log);
 
                     return false;
                 }

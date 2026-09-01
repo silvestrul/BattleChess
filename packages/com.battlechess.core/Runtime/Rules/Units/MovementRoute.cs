@@ -64,6 +64,12 @@ namespace BattleChess.Rules
         /// </summary>
         public string? HeldItsHandBecause { get; set; }
 
+        /// <summary>Where the regiment stood when the cadence last looked at this route.</summary>
+        public Vec2 LastLookedFrom { get; set; }
+
+        /// <summary>The tick the cadence last looked at this route.</summary>
+        public int LastLookedTick { get; set; } = int.MinValue;
+
         /// <summary>Whether <see cref="LegsPlannedAgainst"/> has been taken yet.</summary>
         /// <remarks>
         /// The first look records rather than reacts. Without it every fresh

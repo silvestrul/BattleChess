@@ -1740,6 +1740,52 @@ entry.
 
 ---
 
+## 31. A committed detour is redrawn every beat, and deepens each time
+
+**Recorded 1 Sep 2026, `logs/battle-20260901-182703.log`, on the [M138] build.
+Cause established. Supersedes finding 29, which was the same fault seen with less
+evidence.**
+
+Spearmen marching 747 m, friendly cavalry crossing. The cadence re-planned five
+times in thirteen ticks and the way round got **worse every time**:
+
+    250  8 m off the straight line
+    253  20 m
+    256  31 m   - there was no gap to thread
+    259  40 m   - there was no gap to thread
+    262  47 m   - there was no gap to thread
+
+Each re-plan is drawn from a few metres further along than the last, so the
+regiment is chasing a shadow rather than committing to a side. **[M21] says a
+detour is committed until the thing it went round is behind you**, and the cadence
+redraws that commitment on every beat.
+
+**Then it stops asking entirely.** The cavalry arrived at tick 278 and stood
+still. A standing body's identity never changes, so the identity latch in
+`ReconsiderTheMarch` shut permanently: **no re-plan for ninety-one ticks**, and at
+395 the spearmen were 6% inside the stationary cavalry, forcing through for
+fifteen ticks with nobody having asked for a press. That is the designer's report
+- *"it gives up and bumps into another unit for 3-5 seconds until it recalculates
+a way around"* - in the log, exactly.
+
+**What has been ruled out**, each built and measured:
+
+- Removing the latch. Breaks `ARouteThePlannerCalledClearIsWalkedClear` and
+  `DecisionsAreSaidOnceAndNotEveryTick` - 47 planner decisions in twelve turns,
+  which is the deepening detour arriving as log churn.
+- Narrowing it to standing blockers. Identical, because the recorded blockers are
+  standing.
+- Sampling the middle of the wheel in [M138]'s check. No effect on the survivor;
+  removed rather than kept as decoration.
+
+**The fix is commitment, not cadence.** A march already going round a body must be
+handed the *same* way round when it asks again - `UnitInstance.GoingRound` already
+names the body - and should redraw only when that way round has itself failed.
+With the answer stable the churn goes, and the latch can then come out, which is
+what actually closes the designer's report.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
