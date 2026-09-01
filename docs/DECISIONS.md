@@ -3123,3 +3123,91 @@ remarks: a blocker standing still does not reproduce the deepening detour, which
 needed a body moving across the line. It guards the behaviour; it does not prove
 the recorded fault fixed. Finding 31 stays open until a recording closes it.
 
+### M141 - sight is a proportion of the fastest march, not a number in the catalogue
+
+**The designer is moving the game to simultaneous turns**, where both players
+commit orders at the same time against information a turn old. That is only fair
+if nothing can cross from unseen ground into contact inside the window they were
+blind for, so sight has to be *sized* rather than chosen.
+
+**The rule, in the designer's words:** vision stays **proportional** to what the
+catalogue already says, the unit with the sharpest eyes gets **two turns of the
+fastest unit's march**, anything with naturally poorer sight gets proportionally
+less, and nothing sees less than two turns of its own march.
+
+Derived, never tabulated - the scale follows `units.cfg`, so a balance pass moves
+every horizon with it. A table of metres is right the day it is written and
+quietly wrong afterwards, which is exactly how the equal-ground rule came to be
+broken on every field in the project ([M133]).
+
+At the shipped catalogue the scale is **x2,538** - the sharpest eyes (scouts, 260)
+take two turns of the fastest march (scouts again, 5,50 m/s over 120 s = 660 m):
+
+| | speed | catalogue | horizon | own 2 turns | warning |
+|---|---:|---:|---:|---:|---:|
+| Spearmen, Swordsmen | 1,59 | 180 | 457 | 191 | 1,4 turns |
+| Archers | 1,59 | 220 | 558 | 191 | 1,7 |
+| Artillery | 1,30 | 200 | 508 | 156 | 1,5 |
+| Horse Archers | 4,20 | 240 | 609 | 504 | 1,8 |
+| Cavalry | 4,76 | 250 | 635 | 571 | 1,9 |
+| Scouts | 5,50 | 260 | 660 | 660 | 2,0 |
+
+**"Warning" is the number the rule is really about**: how long a unit has between
+first seeing the fastest thing on the field and being reached by it. Nothing is
+below 1,4 turns, so nobody is ambushed from nowhere - **but the floor is each
+unit's own march and not the fastest, so a spearman is still catchable by
+cavalry.** That is the designer's choice and the interesting one: being outrun
+should happen; being surprised should not.
+
+**The floor never binds** for any unit in the shipped catalogue - every
+proportional share is larger. Said out loud, because a guard that cannot fire
+looks exactly like a guard that works [W9].
+
+**Shipped switched off** (`SightHorizon.InUse`), and that is not a half-finished
+switch. Turns are not simultaneous yet, so raising every horizon two and a half
+times buys nothing today and costs the six vision arrangements built against the
+old metres - a hundred metres of wood is thick cover at 260 m of sight and thin at
+660. Rescaling them was tried and abandoned mid-way: the shooting cases are bound
+by **bowshot**, which did not move, so scaling their distances pushed targets out
+of range and measured the wrong thing. **Those six want re-recording with the
+feature they are for**, so what they measure and what the game does move together.
+Flip the switch the same day simultaneous turns land.
+
+### M142 - the three answers on turns, queues and the hex board
+
+Recorded as decisions taken, with the work not yet begun.
+
+**Turn structure becomes plan-then-fire.** Clicking a unit plans a route rather
+than executing one; orders queue and fire together on an **end turn** button that
+is always rendered and separate from the F1/F2 harness. Most of this is already
+here: `BattleClock.TicksPerTurn` is 60, and [Mx6a] already guarantees planning is
+pure - *"a batch of orders is planned in parallel; nothing in a plan writes to the
+battle"*. What is missing is the queue, the mode and the button.
+
+**A queued order is planned against full prediction of the ones before it**, not
+merely against where they end up - the designer's choice, provisionally
+(*"we will see later if we keep it"*). That is [M16], which was built, worked, and
+was reverted because making `FirstBodyInTheWay` predictive as well as
+`IsClearLine` broke crabbing - open finding 9. The cause it was reverted for has
+since moved on, so this is a re-test rather than a rebuild.
+
+**The one-hex-one-unit variant lives as a mode behind the existing seams**, not as
+a parallel branch. `IPathfinder`, `IRoutePlanner` and `IWayRound` are already the
+right joints, and combat, morale, vision, content and turn structure are then
+shared by construction rather than by discipline. The arithmetic that makes it
+tempting: a hexagon containing an 80x40 m regiment needs a circumradius near 46 m,
+which is about **770 cells** on the 1800x2400 m map - A* over 770 nodes with
+binary occupancy against the 109/176/121 ms per hundred routes measured today.
+What it deletes is most of the movement work - crabbing, corridors, press-through,
+shared frontage, the ladder, the lattice - none of which has an analogue on a
+one-unit-per-cell board. **That is why cross-applying every change to a parallel
+branch was argued against and dropped: most changes would have nothing to apply
+to.**
+
+**Two consequences of simultaneous turns, neither yet built.** It **un-postpones
+[Mx2b] and [M16b]** - two players committing blind will conflict, and with no
+player to arbitrate something must give way. And resolution must become
+**order-independent**: movement currently iterates units in list order and moves
+them one at a time, so who resolves first can change the outcome. That is
+tolerable for one player and fatal both for simultaneous turns and for the
+battle-resolver audience, which needs a referee whose answer can be verified.

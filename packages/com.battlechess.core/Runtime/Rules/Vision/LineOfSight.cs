@@ -54,7 +54,15 @@ namespace BattleChess.Rules
 
             float bonus = battle.TerrainAt(observer.Position).Get(TerrainAttributes.VisionBonus);
 
-            return observer.Def.Get(UnitAttributes.Vision) * (1f + bonus);
+            // [M141]. The catalogue's vision is a *proportion*, not a distance:
+            // what turns it into metres is how far the fastest unit marches in
+            // the window a simultaneous turn is committed blind for. Ground
+            // still has the last word on top of it.
+            float range = SightHorizon.InUse
+                ? SightHorizon.BaseRangeOf(battle.UnitCatalogue, observer.Def)
+                : observer.Def.Get(UnitAttributes.Vision);
+
+            return range * (1f + bonus);
         }
 
         /// <summary>
