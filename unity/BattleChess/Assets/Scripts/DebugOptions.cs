@@ -90,6 +90,22 @@ namespace BattleChess.Unity
         /// </remarks>
         public bool PlanThenFire = true;
 
+        /// <summary>Play the board game: one regiment to a hex ([M147]).</summary>
+        /// <remarks>
+        /// <para>
+        /// Read once, at load, and never again - it decides which route planner
+        /// the rules are given and whether the army is mustered onto hexes. The
+        /// simulation itself has no idea which game it is running, which is the
+        /// point: there is no rule with a board branch and a continuous branch
+        /// to keep in step.
+        /// </para>
+        /// <para>
+        /// Consequently it does nothing if flipped mid-battle. Changing games
+        /// halfway is not a thing a game does.
+        /// </para>
+        /// </remarks>
+        public bool GridMode = true;
+
         public bool Running = true;
 
         /// <summary>

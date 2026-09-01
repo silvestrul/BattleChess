@@ -134,6 +134,27 @@ namespace BattleChess.Rules
         /// <summary>The same thing. Kept while callers that name it are tidied up.</summary>
         public static IRoutePlanner SettledDefault { get; } = TheStaged;
 
+        /// <summary>
+        /// The planner a march that names none actually gets.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M147].</b> <see cref="Default"/> says what the continuous game
+        /// settled on and never changes; this says which game is being played.
+        /// The grid mode swaps it for <c>BoardRoutePlanner</c> and swaps it back,
+        /// which is the whole of how a board game and a continuous one live in
+        /// one codebase.
+        /// </para>
+        /// <para>
+        /// One seam and not two, for the reason recorded on <see cref="Default"/>
+        /// itself: both re-plan sites in <c>OrderSystem</c> ask without naming a
+        /// planner, so a regiment given a board route and re-planned by the
+        /// staged planner the moment it was held up would be playing neither
+        /// game.
+        /// </para>
+        /// </remarks>
+        public static IRoutePlanner InUse { get; set; } = TheStaged;
+
         private sealed class Search : IRoutePlanner
         {
             public string Name => "over places and fronts";

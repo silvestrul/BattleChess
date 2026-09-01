@@ -708,7 +708,7 @@ namespace BattleChess.Rules
 
             try
             {
-                return (planner ?? RoutePlanners.Default).PlanTo(
+                return (planner ?? RoutePlanners.InUse).PlanTo(
                     battle, unit, pathfinder, destination, log, wayRound, arriveOn);
             }
             finally

@@ -1815,6 +1815,31 @@ off so nobody builds it twice.
 **Recommended: waiting, first.** The timetable it needs is already built and is
 exact under plan-then-fire, since every queued route starts at the same instant.
 
+## 33. On the board, a gun train and a line of spearmen move exactly alike
+
+**Found by measuring [M147], not by playing it.** Pinned by
+`BoardTests.WhatAWholeTurnActuallyBuysInWholeHexes`, which prints the ladder and
+fails if artillery and foot ever come apart.
+
+A turn must end on a hex, so a regiment walks whole hexes and the fraction is
+thrown away. On paper artillery buys 1,6 hexes a turn and foot 1,9; on the board
+**both walk one**. Seven unit types collapse to three distinct allowances - 1, 5
+and 6 - and every slow thing in the game moves identically.
+
+This is a consequence of the design and not a bug in it, which is why it is
+recorded rather than patched. **Three ways out, and the choice is the designer's.**
+
+- **Carry the unspent seconds into the next turn.** Foot then averages its real
+  1,9 and artillery its 1,6. Costs one float of state per regiment and is what
+  most board wargames do.
+- **Lengthen the turn until the ratios survive the rounding.** At 60 s they do
+  not; the separation only appears once the slow end is several hexes.
+- **Accept it.** On a board, slow things moving alike is a normal simplification,
+  and the fast end - 1 against 5 against 6 - still has the whole spread in it.
+
+**Recommended: carry the remainder**, since it keeps the speeds in `units.cfg`
+meaning what they say and needs no other number retuned.
+
 ---
 
 ## Older debts, not from this sweep

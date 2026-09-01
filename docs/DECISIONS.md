@@ -3354,3 +3354,96 @@ real time. The pass that uses it is switched off, and
 
 Open finding 32.
 
+
+### M147 - the board game, as a mode and not a fork
+
+**Asked for: "first can we try to switch to the grid-based game? I want to see how
+it goes."** Built and playable. The earlier instruction was that the hex idea
+"might be a different game, so it should be a parallel branch and each change
+should be applied to both", and the designer's answer to how that should be
+arranged was a mode behind the seams. A second branch is two codebases and a
+merge; a mode is one codebase where every fix lands on both games because there is
+only one set of rules.
+
+**What turning it on does, in full. Two things.** The route planner becomes
+`BoardRoutePlanner`, and every regiment is mustered onto a hex. That is the entire
+mode. Combat, morale, vision, contact, the clock, plan-then-fire and the drawn
+lines are untouched and stay correct, because none of them ever asked *where a
+regiment may stand* - they ask where it *is*, and it is still a `Vec2` with a
+`Facing`. The designer chose this over discrete steps, which would have thrown the
+continuous walk away and forced contact and combat to be re-answered.
+
+**The cell size is derived and not chosen, and the derivation is checkable.**
+Every regiment collides as the same rectangle - **40 x 20 m**, the equal ground
+rule, measured across all seven types in content and identical for every one -
+whose bounding circle is **44,7 m**. A pointy-top hex holds a circle of that
+diameter once its flat-to-flat width is as wide, so the cell is **50 m**, with
+five metres of air. `EveryRegimentInContentFitsOneHex` checks it against the
+catalogue rather than against a written-down number, so it also fails the day a
+unit is authored that breaks the equal ground rule.
+
+**What falls out of it, measured rather than predicted.** The Great Field is 1800
+x 2400 m; the Crucible 1400 x 1800. Mustering a real deployment - authored in
+metres for the continuous game, so regiments stand closer together than a hex is
+wide - gives **40 of 40 and 80 of 80 regiments a hex of their own**, nought
+crowded, with worst drift 0 m off a centre and 0 degrees off a hex bearing.
+
+**Facing snaps to the six**, on the designer's call. That keeps a flank a flank -
+"degrees off the front" becomes a whole number of sixty-degree steps - and it
+makes the board readable at a glance. The steering still turns freely on the way;
+arriving is when it settles.
+
+**A turn must end on a hex, and that is what makes the board a board.** A regiment
+left mid-leg holds neither of the two hexes it is between, so the one promise the
+mode exists to keep would hold only for whoever happened to arrive. So a board
+route is truncated to what this turn's walking buys. The price is that a long
+march is ordered again each turn, which is how a board wargame has always worked,
+and the gain is that the drawn line stops exactly where the regiment will be.
+
+**The gate, and it is the one the continuous game has never passed.** Ordering
+every regiment on the Crucible straight at every other - **6 320 orders, 5 136
+routed** - produced **nought press-throughs**. Not "few": there is no such move to
+make. A held hex is not an expensive edge, it is an absent one, so `PressedThrough`
+is false on every plan this returns and everything downstream that asks gets a
+straight no with no other change. Five planners and five sessions of the
+continuous game went into that question and it still put bodies inside each other.
+
+**One seam, not two.** `RoutePlanners.InUse` is what a march that names no planner
+actually gets; `Default` still says what the continuous game settled on. One seam
+for the reason already recorded on `Default`: both re-plan sites in `OrderSystem`
+ask without naming a planner, so a regiment given a board route and re-planned by
+the staged planner the moment it was held up would be playing neither game.
+
+**What the measurement found, which the arithmetic had not.** A turn buys whole
+hexes and throws the fraction away, so the paper allowances - artillery 1,6 and
+foot 1,9 - are **both one hex**. Seven unit types collapse to **three** distinct
+allowances (1, 5, 6), and the difference between a gun train and a line of
+spearmen disappears entirely at the slow end. Recorded and pinned by
+`WhatAWholeTurnActuallyBuysInWholeHexes` rather than fixed, because the fix is a
+design decision: carry the unspent seconds into the next turn, lengthen the turn
+until the ratios survive the rounding, or accept that on a board the slow things
+move alike. Open finding 33.
+
+**A test that measured nothing, caught by reading its own output.** The first
+draft of `AMarchGoesRoundWhatIsInTheWayAndStopsWhereTheTurnDoes` used foot, which
+buys 1,9 hexes - so the route was truncated to a single leg that never reached the
+wall it was supposed to avoid, and it passed. Rebuilt with cavalry: **5 legs
+against 4 hexes apart**, 250 m, 53 s of a 60 s turn, going round a wall that is
+separately asserted to block the straight line. This is the fourth non-discriminating
+test this sweep, and the only one found by printing the number rather than by
+being told.
+
+**And a test that should not exist, kept skipped as the record of why.**
+`TheModeIsWhatDecidesWhichPlannerAMarchGets` turned 12 failures into **105**.
+`RoutePlanners.InUse` is process-wide and xunit runs classes in parallel, so it
+swapped the planner out from under every other test that happened to be planning a
+march. Putting the state back afterwards does nothing for whoever read it in
+between. Every other test in the file therefore calls `Muster` and names
+`BoardRoutePlanner` outright rather than turning the mode on.
+
+**Drawn as one wireframe mesh**, built once, of line topology, with interior edges
+shared between neighbouring hexes and drawn once. Fifteen hundred `LineRenderer`s
+redrawn every frame for a thing that never changes is not a board, it is a stall.
+
+Suite: 689 passing, 12 failing - the same 12 - 87 skipped, 788 total. Unity
+compiles clean.

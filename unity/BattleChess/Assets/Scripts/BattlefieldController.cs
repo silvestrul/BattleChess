@@ -3,6 +3,7 @@ using System.IO;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using BattleChess.Rules.GridPlanning;
+using GridGame = BattleChess.Rules.Grid;
 using UnityEngine;
 
 namespace BattleChess.Unity
@@ -213,6 +214,35 @@ namespace BattleChess.Unity
             }
         }
 
+        /// <summary>
+        /// Musters the army onto hexes and hands the rules the board planner.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M147].</b> Deployments are authored in metres for the continuous
+        /// game - regiments forty metres apart on a fifty-metre board - so some
+        /// of them share a hex and have to be shuffled aside. That is reported
+        /// rather than absorbed: a regiment left sharing a hex has broken the
+        /// board's only promise, and finding that out from a play-test instead
+        /// of from a line in the log is how the last five sessions went.
+        /// </para>
+        /// </remarks>
+        private void PutTheArmyOnTheBoard()
+        {
+            int crowded = GridGame.GridMode.TurnOn(_battle);
+
+            GridGame.Board board = GridGame.Board.For(_battle);
+
+            _console.Info("Board",
+                $"The board game. {board}, and a turn buys a regiment its pace times " +
+                $"{BattleClock.TicksPerTurn * BattleClock.SecondsPerTick:0} s of hexes.");
+
+            if (crowded > 0)
+                _console.Warning("Board",
+                    $"{crowded} regiment{(crowded == 1 ? " is" : "s are")} sharing a hex with somebody " +
+                    "else - the deployment is packed tighter than the board can hold, so one hex holds two.");
+        }
+
         private void LoadBattle()
         {
             _terrainCatalogue = TerrainCatalogueReader.Read(File.ReadAllText(UnityContentLocator.TerrainFile()));
@@ -225,7 +255,14 @@ namespace BattleChess.Unity
             _trueMovement = new TerrainMovementModel(_terrainCatalogue);
             _battle = setup.Build(_map, _terrainCatalogue, units, _formations, _trueMovement);
 
+            // [M147]. Read once and here, before anything has looked at where a
+            // regiment stands: turning the board on moves every one of them.
+            if (_options.GridMode) PutTheArmyOnTheBoard();
+            else GridGame.GridMode.TurnOff();
+
             TerrainView.Build(_map, _terrainCatalogue, transform);
+
+            if (_options.GridMode) BoardView.Build(GridGame.Board.For(_battle), transform);
 
             foreach (UnitInstance unit in _battle.UnitsOnField())
                 _views.Add(UnitView.Create(unit, ColourFor(unit.Owner), transform));
@@ -1563,6 +1600,16 @@ namespace BattleChess.Unity
                     // spend part of a turn nobody has ordered yet.
                     _resolving = 0;
                     _tickAccumulator = 0f;
+
+                    // [M147]. Every board route is drawn to end inside one turn,
+                    // so a regiment finishes on a hex - within a metre or so of
+                    // its centre, since the walk is continuous and stops on a
+                    // tick boundary rather than on arrival. This puts it on the
+                    // centre exactly and settles its front onto one of the six.
+                    // Without it the drift accumulates over a dozen turns until
+                    // regiments stand visibly off the board they are playing on.
+                    if (_options.GridMode) GridGame.GridMode.Muster(_battle);
+
                     break;
                 }
             }
