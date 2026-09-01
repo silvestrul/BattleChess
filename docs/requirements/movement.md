@@ -35,7 +35,7 @@ code before it is relied on.
 | M7a | Bound regiments move as one, at the pace of whichever is slowest — by base speed or by ground. | Mandatory | ✅ |
 | M7b | Each regiment pathfinds individually, so a wing does not walk into itself. | Mandatory | ✅ |
 | **M8** | **Grouped armies.** Grouped regiments that are "glued" pathfind as one larger unit with the shared frontage. | Mandatory | ❌ **the only movement requirement now wholly unbuilt** |
-| **M11** | **Cadence.** Routes are rebuilt on a cadence. | Mandatory | ✅ [M135] — a march in progress is asked on a five-second beat whether its detour is still needed and whether its next two legs still fit |
+| **M11** | **Cadence.** Routes are rebuilt on a cadence. | Mandatory | ⚠ [M135] - a march in progress is asked on a five-second beat whether its detour is still needed and whether its next two legs still fit. **The beat cannot currently be shortened** ([M137]): every faster setting walks a regiment into a neighbour, because the fault is the mid-march route hand-over and not the beat. |
 | M12 | The rectangle is what travels, not a point. | Mandatory | ⚠ the cast asks the whole body; the terrain fallback is still 2 m (`HexPathfinder.DefaultClearanceMetres`) |
 | **M13** | **Crabbing.** A regiment that cannot fit its full length but can fit sideways may walk sideways, at a movement-speed penalty. *(Penalty value not yet stated.)* | Mandatory | ✅ |
 | **M15** | **Obstacle definition.** An obstacle is whatever will not get out of your way — impassable terrain, enemy regiments. | Mandatory | ✅ [M134], same rule as Mx2d |

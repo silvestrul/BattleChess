@@ -1706,6 +1706,40 @@ parity with going straight through it deserves its own look.
 
 ---
 
+## 30. A route handed over mid-march is drawn from a place the body is leaving
+
+**Raised by [M137](DECISIONS.md#m137), 1 Sep 2026, and it is what pins the march
+cadence at five ticks.**
+
+Re-planning a march in progress swaps the route under a body that is still
+walking, still turning, and typically some metres off the line it was on. The new
+first leg is drawn from the position the planner was handed and checked at the
+front that leg wants - and the body has neither by the time it walks. Measured:
+**eight centimetres of a neighbour, twice in six marches**, in
+`ARouteThePlannerCalledClearIsWalkedClear`, at every beat faster than five ticks
+and at none slower.
+
+It does not show at the current cadence because re-plans are rare enough that the
+odds do not come up. It is why the cadence cannot be made to notice sooner, which
+is what the designer asked for.
+
+**Three guards were tried and all three are recorded in [M137](DECISIONS.md#m137)
+as failures**, including the one that looks obviously right - refusing to swap
+mid-wheel - which breaks wing manoeuvres, because a wing coming round on a new
+bearing is one long wheel and a guard that waits for it to finish never lets the
+wing re-plan at all.
+
+**What a fix looks like:** the swap needs the leg wanted, the front carried and
+the ground under the body to agree before it happens - and it must defer the
+*swap* without deferring the *look*, so a march that has noticed something can
+act on it at the first moment it safely can rather than at the next beat.
+
+Close this and the cadence question together: with the hand-over fixed, [M137]'s
+ground-based beat can be switched back on, and it is written out in full in that
+entry.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

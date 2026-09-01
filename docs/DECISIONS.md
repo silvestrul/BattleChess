@@ -2939,3 +2939,65 @@ and the reason this is not simply queued as work:
 
 Until those are answered, building it would be choosing a mechanism before knowing
 what it is for.
+
+### M137 - the march cadence cannot go faster, and the beat was never the lever
+
+**The designer asked what the cadence is and said it looked too slow. It is five
+ticks - five battle seconds, since `BattleClock.SecondsPerTick` is one - and both
+legs ride it.** Measured against the speeds in the 1 Sep recording, that is coarse
+in the only unit that matters, which is metres and not seconds:
+
+| | ground covered between looks |
+|---|---:|
+| Spearmen at 1,59 m/s | 8 m |
+| Cavalry at 4,76 m/s | **24 m** |
+| The two crossing at right angles | **~32 m of closure** |
+
+Against an eighty-by-forty body, thirty-two metres between looks is most of the
+depth of the thing being avoided, so a fast body can enter and cross a leg almost
+entirely inside one beat. Two further faults in the beat as built, both mine: it
+is aliased to **time** rather than to ground, so a regiment barely moving is
+checked as often as cavalry at the gallop; and `tick % 5` is a **global phase**,
+so every marching regiment in the army casts on the same frame and none on the
+other four.
+
+**A ground-based beat was built** - look again when the mover's own pace plus the
+fastest regiment on the move could have closed ten metres, floored at one tick,
+capped at the old five, phased by unit id. It is the right shape and it does not
+work.
+
+**Every beat faster than five ticks walks a regiment into a neighbour.**
+`ARouteThePlannerCalledClearIsWalkedClear` reports eight centimetres of overlap
+twice in six marches, and reports it at **ten, fifteen, twenty, twenty-five and
+thirty metres alike**. Setting the ground term out of reach so only the old
+ceiling fires makes it pass again. That bisection is the finding: **the limit is
+not how often the route is looked at.**
+
+**What is actually wrong is the hand-over.** A route re-planned mid-stride is
+drawn from a place the steering is already leaving - the recording shows the body
+4,5 m off its own line and still turning when it takes the new one, so the first
+leg is checked at a front the body does not yet have. Three guards were built
+against exactly that and none of them holds:
+
+- **Refuse the swap mid-wheel.** Fixes
+  `ComingRoundOntoAnOrdinaryLegDoesNotClipTheNeighbours` and not the other, and
+  then breaks `AWingOrderedOnANewBearingAllComesRoundToIt` - a wing manoeuvre
+  *is* one long wheel, so a guard that defers re-planning through a wheel leaves
+  a regiment at 151 degrees off its ordered bearing.
+- **Refuse the swap while off the line.** No effect.
+- **Check the new route from the body's real position before taking it.** Rejects
+  legitimate ways round and presses, and made things worse.
+
+**So the whole experiment is reverted, including the phase stagger**, which was
+free on its own but is not worth carrying alone. The cadence stays at five ticks.
+
+**What would have to change**, and it is a piece of work rather than a number: a
+march must be able to take a new route *without* being teleported onto its first
+leg - the leg wanted, the front carried, and the ground under the body all agreed
+before the swap, or the swap deferred to the moment they do agree without
+deferring the *look* with it. Open finding 30.
+
+**[W5], and it is the point of writing this down:** the honest answer to "make it
+faster" was five failed attempts and a bisection, not a smaller constant. Setting
+the number lower and shipping it would have looked like progress and put eight
+centimetres of a neighbour under every regiment on the field.
