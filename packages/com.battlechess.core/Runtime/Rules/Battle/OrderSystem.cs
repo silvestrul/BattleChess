@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using BattleChess.Contracts;
 
 namespace BattleChess.Rules
@@ -252,6 +253,25 @@ namespace BattleChess.Rules
             // as its own side moves out of the way.
             if (!unit.IsMarching)
             {
+                // W7 again. The fourth thing the 1 Sep recording could not
+                // distinguish: a regiment that never re-planned because the
+                // cadence declined, from one that never re-planned because it
+                // was standing still and the cadence was never asked. Said
+                // once per hold-up rather than per tick.
+                if (unit.HeldUpBy.IsValid && unit.SaidItWasHeldUpBy != unit.HeldUpBy)
+                {
+                    unit.SaidItWasHeldUpBy = unit.HeldUpBy;
+
+                    log.Info("Move",
+                        $"{unit.Def.DisplayName} is standing still with {battle.Get(unit.HeldUpBy).Def.DisplayName} " +
+                        "in front of it, so the march cadence is not looking at its route at all.",
+                        unit.Id);
+                }
+                else if (!unit.HeldUpBy.IsValid)
+                {
+                    unit.SaidItWasHeldUpBy = UnitId.None;
+                }
+
                 KeepTryingIfItStoppedShort(battle, unit, tick, log);
                 return;
             }
@@ -527,9 +547,9 @@ namespace BattleChess.Rules
                     meets = WhatTheLegMeets(battle, unit, route.Target, route.Waypoints[after], null);
             }
 
-            // The first look records rather than reacts. Without it every fresh
-            // route reads its own first blocker as news and re-plans once for
-            // nothing, which is a check firing on its own arrangement (W9).
+            // The first look records rather than reacts, so a route that was
+            // drawn as a press-through knows who it agreed to press before it
+            // is ever asked about him.
             if (!route.LegsLookedAt)
             {
                 route.LegsLookedAt = true;
@@ -538,31 +558,116 @@ namespace BattleChess.Rules
                 return false;
             }
 
+            // <b>Identity, and it is a compromise that is known to be one.</b>
+            //
+            // A re-plan fires when the leg meets a *different* body than the
+            // one this route was drawn around. That is what stops a route
+            // deliberately pressing through a friend from re-planning for ever
+            // over the friend it already agreed to press - and, less
+            // obviously, what stops a marching body from re-planning every
+            // beat as the view of a blocker it is closing on changes.
+            //
+            // Asking instead whether the leg is blocked *at all* was built and
+            // reverted the same day: it swaps the route mid-leg while the body
+            // is still coming round onto the old one, which put two
+            // overlapping ticks into `ARouteThePlannerCalledClearIsWalkedClear`
+            // - the M29 fault by a new door - and had the planner announcing
+            // itself 29 times in twelve turns.
+            //
+            // <b>It is also the leading suspect for the fault recorded on
+            // 1 Sep 2026</b>, where spearmen re-planned once and then walked
+            // two hundred ticks with the same friendly cavalry crossing their
+            // route. That suspicion is unproven: the arrangement built to
+            // demonstrate it passes with the latch and without it. Open
+            // finding 29, and the diagnostics below are there to settle it
+            // from the next recording rather than by guessing again.
             UnitId now = meets?.Id ?? UnitId.None;
 
-            bool somebodyNew = now.IsValid && now != route.LegsPlannedAgainst;
+            bool blocked = now.IsValid && now != route.LegsPlannedAgainst;
 
             // (1) Still going the long way round something that may have gone.
             bool detourMayBeStale =
-                !somebodyNew &&
+                !blocked &&
                 route.Waypoints.Count > 2 &&
                 !route.IsComplete &&
                 IsTheStraightWayOpenAgain(battle, unit);
 
-            if (!somebodyNew && !detourMayBeStale)
+            if (!blocked && !detourMayBeStale)
             {
-                // Keep the answer current even when nothing is done about it,
-                // or a blocker that steps aside and is replaced by a second one
-                // reads as the same body and is never noticed.
                 route.LegsPlannedAgainst = now;
 
                 return false;
             }
 
-            if (!battle.Planning.MayPlan(unit.Id)) return false;
+            if (!battle.Planning.MayPlan(unit.Id))
+            {
+                // <b>W7: the recording has to be able to answer this on its
+                // own.</b> The play-test of 1 Sep 2026 showed spearmen that
+                // re-planned once and then walked two hundred ticks with
+                // friendly cavalry standing on their route, and the log could
+                // not say which of four things had held the cadence back -
+                // whether it saw the cavalry at all, whether the ration was
+                // spent, whether the regiment had been halted instead, or
+                // whether the answer simply came back the same. Every one of
+                // those is now said out loud, once per beat it happens.
+                WhyItHeldItsHand(unit, meets, "the frame had no route left to give", log);
+
+                return false;
+            }
 
             return ReplanTheSameMarch(battle, unit, meets, detourMayBeStale, log);
         }
+
+        /// <summary>
+        /// Says that the cadence saw something in the way and did not act on
+        /// it, and why.
+        /// </summary>
+        /// <remarks>
+        /// Said once per reason per route rather than once per beat, or a
+        /// regiment held up for two hundred ticks writes forty identical lines
+        /// and `NoSingleRuleDrownsOutTheRest` fails the build for it. What a
+        /// reader needs is that it happened and what the reason was, not how
+        /// many times the same answer was reached.
+        /// </remarks>
+        private static void WhyItHeldItsHand(
+            UnitInstance unit, UnitInstance? meets, string because, IBattleLog log)
+        {
+            if (meets == null) return;
+            if (unit.Route == null) return;
+            if (unit.Route.HeldItsHandBecause == because) return;
+
+            unit.Route.HeldItsHandBecause = because;
+
+            log.Info("Move",
+                $"{unit.Def.DisplayName} has {meets.Def.DisplayName} on the way ahead and is keeping the " +
+                $"route it has: {because}.",
+                unit.Id);
+        }
+
+        /// <summary>Whether a fresh plan says the same thing as the route already being walked.</summary>
+        /// <remarks>
+        /// Compared from the waypoint the regiment is walking at rather than
+        /// from the start of the route, because the part it has already walked
+        /// is not in the new plan at all - that one begins where the body now
+        /// stands.
+        /// </remarks>
+        private static bool SameRoute(MovementRoute had, IReadOnlyList<Vec2> fresh)
+        {
+            int left = had.Waypoints.Count - had.NextWaypoint;
+
+            // The fresh plan carries the regiment's own position as its first
+            // waypoint; the old route does not.
+            if (left != fresh.Count - 1) return false;
+
+            for (int i = 0; i < left; i++)
+                if (Vec2.Distance(had.Waypoints[had.NextWaypoint + i], fresh[i + 1]) > SameRouteMetres)
+                    return false;
+
+            return true;
+        }
+
+        /// <summary>How far two routes may differ and still count as the same answer.</summary>
+        private const float SameRouteMetres = 1f;
 
         /// <summary>The first body standing on one leg of a route, if any.</summary>
         private static UnitInstance? WhatTheLegMeets(
@@ -603,10 +708,27 @@ namespace BattleChess.Rules
         {
             Vec2 goal = unit.Order.Destination;
 
+            MovementRoute had = unit.Route!;
+
             Plan plan = Marching.PlanTo(battle, unit, _pathfinder, goal, log);
 
             if (plan.Path.Found && plan.Path.Waypoints.Count >= 2)
             {
+                // Asking again is cheap on a five-second beat; *acting* on the
+                // same answer is not. A regiment held up by a body that is
+                // simply standing there gets handed the identical route every
+                // beat, and swapping it would restart the walk at waypoint
+                // nought and reset the stall detector along with it - so a
+                // genuinely stuck regiment would never be noticed as stuck.
+                if (SameRoute(had, plan.Path.Waypoints))
+                {
+                    had.LegsPlannedAgainst = meets?.Id ?? UnitId.None;
+
+                    WhyItHeldItsHand(unit, meets, "the planner gave back the same route", log);
+
+                    return false;
+                }
+
                 unit.Route = plan.ToRoute(unit.Order.WheelFirst);
 
                 // Said once, when it is news. A dropped detour is an event -
@@ -633,6 +755,8 @@ namespace BattleChess.Rules
             // away a route that works. Failing to find a shorter answer simply
             // means the old one stands.
             if (detourMayBeStale) return false;
+
+            WhyItHeldItsHand(unit, meets, "no route could be drawn at all", log);
 
             // Mx2e. A friend on the line is somebody else's problem: the planner
             // presses through him, or the stall detector gives up on him in its

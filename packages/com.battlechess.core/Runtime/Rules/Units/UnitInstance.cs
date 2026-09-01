@@ -181,6 +181,13 @@ namespace BattleChess.Rules
         /// </remarks>
         public UnitId HeldUpBy { get; set; } = UnitId.None;
 
+        /// <summary>Who this unit has already reported being held up by.</summary>
+        /// <remarks>
+        /// So a regiment standing behind one of its own for two hundred ticks
+        /// says so once rather than two hundred times (W7).
+        /// </remarks>
+        public UnitId SaidItWasHeldUpBy { get; set; } = UnitId.None;
+
         /// <summary>
         /// Who the first leg of this unit's chase route was planned against, or
         /// <see cref="UnitId.None"/> if that leg was clear when it was planned.

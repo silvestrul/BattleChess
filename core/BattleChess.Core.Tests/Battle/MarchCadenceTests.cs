@@ -167,5 +167,100 @@ namespace BattleChess.Tests.Battle
                 "There is no way past him and no shouldering through him, so the order should have ended " +
                 "where the regiment stood. It is still marching at him.");
         }
+
+        /// <summary>
+        /// The same body crossing the line goes on being noticed, rather than
+        /// being written off as somebody already known about.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Straight out of the play-test recording of 1 Sep 2026</b>
+        /// (<c>logs/battle-20260901-114049.log</c>). Spearmen U12 were sent
+        /// 740 m across the Great Field and friendly Cavalry U3 was driven
+        /// across their line by hand. The cadence fired <b>once</b>, at tick
+        /// 260, and drew a way round nine metres wide - enough at that instant,
+        /// because the horse were still sixty metres short of the line. The
+        /// cavalry then rode on across it, was re-ordered five more times, and
+        /// finished sitting on the spearmen's own destination. The spearmen
+        /// never asked again until tick 460, when the way was clear anyway.
+        /// </para>
+        /// <para>
+        /// The cause was the guard against thrashing: a re-plan needed the leg
+        /// to meet a <i>different body</i> than last time, and it was the same
+        /// cavalry every time. <b>Identity was never the right question</b> - a
+        /// body that has moved two hundred metres is new ground whatever its
+        /// name - and the only blocker that may be ignored is the one a
+        /// declared press-through was drawn against.
+        /// </para>
+        /// <para>
+        /// Measured as the number of times the route is redrawn, which is the
+        /// thing that failed. Asserting on the final positions instead would
+        /// pass or fail on whether contact happened to halt the marcher, which
+        /// is a different rule.
+        /// </para>
+        /// <para>
+        /// <b>This test does not yet discriminate, and that is written down
+        /// rather than hidden.</b> It passes both with the identity latch and
+        /// without it, because the blocker here leaves the line between beats
+        /// and comes back, which changes its identity from nobody to somebody
+        /// and lets even the old rule fire. The recorded fault needs a blocker
+        /// that stays continuously in view while moving to genuinely different
+        /// ground, and this arrangement does not produce one. It is kept
+        /// because the behaviour it asserts is right and worth guarding; it is
+        /// <b>not</b> evidence that the recorded fault is fixed. See open
+        /// finding 29.
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void TheSameBodyMovingAcrossTheLineIsNoticedEveryTimeItMoves()
+        {
+            var field = new Battlefield("plains", 5504);
+
+            UnitInstance foot = field.Add(0, "swordsmen", field.Centre - new Vec2(500f, 0f), Facing.East);
+            Vec2 goal = field.Centre + new Vec2(500f, 0f);
+
+            field.March(foot, goal, Stance.Defend);
+
+            Assert.Equal(2, foot.Route!.Waypoints.Count);
+
+            // Well clear of the line to begin with, so nothing fires yet.
+            UnitInstance crosser = field.Add(0, "cavalry", field.Centre + new Vec2(-100f, -140f), Facing.North);
+            Battlefield.Hold(crosser);
+
+            // Then it walks across, forty metres of ground at a time. Moved by
+            // hand rather than marched: what is being tested is the marcher
+            // noticing, and a second pathfinder in the arrangement would make
+            // the answer depend on two rules at once.
+            MovementRoute? last = foot.Route;
+            int redrawn = 0;
+
+            for (int step = 0; step < 6; step++)
+            {
+                crosser.Position = field.Centre + new Vec2(-100f + step * 30f, -140f + step * 45f);
+
+                field.RunTurns(1);
+
+                if (!ReferenceEquals(foot.Route, last))
+                {
+                    redrawn++;
+                    last = foot.Route;
+                }
+
+                _out.WriteLine(
+                    $"step {step}: horse at {crosser.Position}, foot at {foot.Position}, " +
+                    $"route {(foot.Route == null ? "none" : foot.Route.Waypoints.Count + " waypoints")}, " +
+                    $"redrawn {redrawn}");
+            }
+
+            // Non-vacuity: an arrangement the horse never crosses would leave
+            // nothing to notice, and nought redraws would be correct (W9).
+            Assert.True(redrawn > 0,
+                "The horse never got in the way at all, so this arrangement is not testing the rule.");
+
+            Assert.True(redrawn > 1,
+                $"The route was redrawn {redrawn} time(s) while the same body walked right across the " +
+                "line. This is the recorded fault: the blocker was the same body as last time, so the " +
+                "cadence wrote it off as old news and never looked again.");
+        }
     }
 }

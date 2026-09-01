@@ -58,6 +58,12 @@ namespace BattleChess.Rules
         /// </remarks>
         public UnitId LegsPlannedAgainst { get; set; } = UnitId.None;
 
+        /// <summary>
+        /// The last reason the cadence gave for leaving this route alone with
+        /// something in front of it, so the same reason is not written twice.
+        /// </summary>
+        public string? HeldItsHandBecause { get; set; }
+
         /// <summary>Whether <see cref="LegsPlannedAgainst"/> has been taken yet.</summary>
         /// <remarks>
         /// The first look records rather than reacts. Without it every fresh

@@ -1652,6 +1652,60 @@ test. Close this entry and that skip together.
 
 ---
 
+## 29. A march re-planned once, then walked 200 ticks with a friend on its route
+
+**Recorded 1 Sep 2026, `logs/battle-20260901-114049.log`. Cause not established.**
+
+Spearmen U12 were sent 740 m across the Great Field. Friendly Cavalry U3 was
+driven across their line by hand, taking six orders over a hundred ticks.
+
+    84   U12  walking straight there - 740 m clear, 466 s
+    260  U12  going round its own Cavalry - 291 s against 291 s straight,
+              by (640,1058) -> (718,1073) -> (1101,1093), 9 m off the line
+    460  U12  can see straight to where it was sent again, dropped the way round
+
+**Both halves of [M135] fired**, which is not what the report said would happen -
+the designer's words were "infantry didn't repath". What actually happened is
+worse than nothing happening:
+
+- **The one re-plan was nine metres wide against an eighty-metre body**, and
+  priced at 291 s against 291 s straight. From the player's chair a nine-metre
+  dodge is indistinguishable from no dodge at all.
+- **Nothing fired again for two hundred ticks**, while the cavalry rode on
+  across, was re-ordered five more times, and finished at (896,1081) - squarely
+  on U12's remaining leg, and then aimed at (1101,1059), beside U12's own
+  destination.
+
+**Four candidate causes, none of them proven from the recording:**
+
+1. The identity latch in `ReconsiderTheMarch`: a re-plan needs the leg to meet a
+   *different* body, and it was the same cavalry throughout.
+2. The frame's route ration was spent.
+3. U12 was halted by contact, so `KeepTheMarchHonest` never reached the cadence
+   at all - in which case it waited rather than re-planned, and waiting may be
+   the right answer.
+4. The planner kept returning the same route.
+
+**A test was built to demonstrate (1) and does not discriminate** - it passes with
+the latch and without it, because its blocker leaves the line between beats and
+returns, which changes its identity. Removing the latch outright was tried and
+breaks `ARouteThePlannerCalledClearIsWalkedClear` (two overlapping ticks, the M29
+fault by a new door) and `DecisionsAreSaidOnceAndNotEveryTick`. **The latch is
+therefore left in place and the theory left unproven**, rather than shipping a
+change that breaks two tests on the strength of a guess.
+
+**What was done instead.** All four causes now say themselves in the log, once per
+reason per route: the cadence reports when it sees a body ahead and keeps the
+route anyway, naming which of the reasons it was; and a regiment standing still
+behind one of its own reports that the cadence is not looking at its route at all.
+**Close this entry from the next recording, not from reasoning.** [W7]
+
+**The nine-metre way round is a second finding inside this one** and may be the
+whole of the visible symptom. That a detour round an 80 m body is costed at
+parity with going straight through it deserves its own look.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the
