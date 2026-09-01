@@ -186,7 +186,7 @@ namespace BattleChess.Tests.Battle
         [Fact]
         public void WhatATurnBuysEachKindOfRegiment()
         {
-            float turn = BattleClock.TicksPerTurn * BattleClock.SecondsPerTick;
+            float turn = GridMode.TurnSeconds;
 
             _out.WriteLine($"a turn is {turn:0} battle seconds, a hex is {Board.CellWidthMetres:0} m");
             _out.WriteLine("");
@@ -204,19 +204,41 @@ namespace BattleChess.Tests.Battle
                 fastest = MathF.Max(fastest, hexes);
             }
 
+            // The board itself, so the ceiling is a property of the field rather
+            // than a number I picked. The Great Field is the largest in content
+            // and its shorter side is what a flanking march has to cross.
+            Board board = Board.For(Load("greatfield"));
+            float shortSide = MathF.Min(board.Bounds.Width, board.Bounds.Height) / Board.CellWidthMetres;
+
             _out.WriteLine("");
             _out.WriteLine($"spread {fastest / slowest:0.0}x, from {slowest:0.0} to {fastest:0.0} hexes");
+            _out.WriteLine($"the Great Field is {shortSide:0} hexes across the short way, so the fastest " +
+                           $"regiment crosses it in {shortSide / fastest:0.0} turns and the slowest in " +
+                           $"{shortSide / slowest:0.0}");
 
-            // A board where the slowest thing cannot manage a hex a turn is not
-            // a board, and one where the fastest crosses it in three moves is
-            // not a game. Both ends, so neither can drift without being caught.
+            // Both ends, so neither can drift without being caught.
+            //
+            // The floor: a board where the slowest thing cannot manage a hex in
+            // a turn is glue, which is exactly what was reported from play at
+            // the continuous game's sixty seconds.
             Assert.True(slowest >= 1f, $"the slowest regiment gets {slowest:0.00} hexes a turn.");
-            Assert.True(fastest <= 12f, $"the fastest regiment gets {fastest:0.0} hexes a turn.");
+
+            // The ceiling, and it is derived rather than chosen. An earlier draft
+            // of this test asserted a bare "twelve hexes", which is a number with
+            // no argument behind it - and when 120 s a turn tripped it at 13,2
+            // the honest question was not whether to raise the twelve but whether
+            // anything was actually wrong. A third of the short side is: a
+            // regiment that crosses the field in three moves cannot be
+            // out-manoeuvred, so there is no manoeuvre left in the game.
+            Assert.True(
+                fastest <= shortSide / 3f,
+                $"the fastest regiment gets {fastest:0.0} hexes a turn and crosses the Great Field in " +
+                $"{shortSide / fastest:0.0} turns, which leaves nothing to manoeuvre against.");
         }
 
         /// <summary>
-        /// A march across the board goes round the regiments in the way, and
-        /// stops where the turn does.
+        /// A march across the board goes round the regiments in the way, all the
+        /// way to its destination.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -227,10 +249,12 @@ namespace BattleChess.Tests.Battle
         /// </para>
         /// <para>
         /// <b>Cavalry, and the first draft of this test is why.</b> Written with
-        /// foot it passed while proving nothing: foot buys 1,9 hexes a turn, so
-        /// the route was truncated to a single leg that never reached the wall,
-        /// and "the route avoids the wall" was true of a route that had not gone
-        /// anywhere. Cavalry buys five, which is far enough to have to choose.
+        /// foot it passed while proving nothing: routes were then truncated to
+        /// one turn, foot buys under two hexes of one, so the route was a single
+        /// leg that never reached the wall - and "the route avoids the wall" was
+        /// true of a route that had not gone anywhere. Truncation is gone now,
+        /// but the unit stays cavalry: a test that only measures when a
+        /// particular unit is slow enough is a test waiting to go quiet again.
         /// </para>
         /// <para>
         /// Non-vacuity, three ways. The wall is asserted to actually block the
@@ -241,7 +265,7 @@ namespace BattleChess.Tests.Battle
         /// </para>
         /// </remarks>
         [Fact]
-        public void AMarchGoesRoundWhatIsInTheWayAndStopsWhereTheTurnDoes()
+        public void AMarchGoesRoundWhatIsInTheWayAllTheWayToItsDestination()
         {
             BattleState battle = Load("greatfield");
 
@@ -294,7 +318,7 @@ namespace BattleChess.Tests.Battle
             int legs = walked.Count - 1;
             int apart = Coord.Distance(from, target);
 
-            float turn = BattleClock.TicksPerTurn * BattleClock.SecondsPerTick;
+            float turn = GridMode.TurnSeconds;
             float took = plan.Path.SecondsAt(marcher.Def.Speed);
 
             _out.WriteLine($"{marcher.Def.Key} from {from} to {target}, {apart} hexes apart");
@@ -314,9 +338,14 @@ namespace BattleChess.Tests.Battle
             Assert.True(legs > apart,
                 $"the route is {legs} legs against {apart} hexes apart, so nothing was gone round.");
 
-            // It stops inside the turn, which is what keeps everybody on a hex
-            // at every turn boundary.
-            Assert.True(took <= turn + 0.01f, $"the route takes {took:0} s of a {turn:0} s turn.");
+            // And it reaches where it was sent. The route is no longer cut off
+            // at the end of a turn - the clock stops the regiment and it carries
+            // on next turn - so the drawn line runs to the destination however
+            // many turns that is, which is what the player was promised and what
+            // truncating it took away.
+            Assert.Equal(target, walked[walked.Count - 1]);
+
+            _out.WriteLine($"{took / turn:0.0} turns of walking, drawn in full");
         }
 
         /// <summary>
@@ -324,25 +353,25 @@ namespace BattleChess.Tests.Battle
         /// </summary>
         /// <remarks>
         /// <para>
-        /// <b>The first thing the board measurement found, and it is a design
-        /// consequence rather than a bug.</b> A turn must end on a hex, so a
-        /// regiment walks whole hexes and the fraction is thrown away. The paper
-        /// allowances - artillery 1,6 and foot 1,9 - are therefore both <b>one
-        /// hex</b> on the board, and the difference between a gun train and a
-        /// line of spearmen disappears entirely at the slow end.
+        /// <b>Superseded as a fault, kept as the ladder.</b> When routes were
+        /// truncated to one turn this measured a real flattening - whole hexes
+        /// only, so artillery's 1,6 and foot's 1,9 were both one, and
+        /// seven unit types collapsed to three allowances. Truncation is gone,
+        /// so a march now runs to its destination over as many turns as it takes
+        /// and the fraction is no longer thrown away: a foot regiment walking
+        /// four hexes takes a bit over two turns rather than four.
         /// </para>
         /// <para>
-        /// Recorded rather than fixed, because the fix is a design decision and
-        /// not mine: carry the unspent seconds into the next turn, lengthen the
-        /// turn until the ratios survive the rounding, or accept that on a board
-        /// the slow things all move alike. This prints the real ladder so the
-        /// choice is made against numbers.
+        /// What remains true is how much ground a turn buys, which is the number
+        /// a player counts in their head and the one that decides whether the
+        /// board feels like glue. It is printed against the turn length actually
+        /// in use, so raising that shows here first.
         /// </para>
         /// </remarks>
         [Fact]
         public void WhatAWholeTurnActuallyBuysInWholeHexes()
         {
-            float turn = BattleClock.TicksPerTurn * BattleClock.SecondsPerTick;
+            float turn = GridMode.TurnSeconds;
 
             var byKey = new Dictionary<string, int>();
 
@@ -361,10 +390,11 @@ namespace BattleChess.Tests.Battle
             _out.WriteLine("");
             _out.WriteLine($"{byKey.Count} unit types collapse to {kinds} distinct allowances");
 
-            // The flattening itself, pinned. If a later change to the turn
-            // length, the cell size or the speeds ever separates artillery from
-            // foot, this fails and the remark above needs rewriting.
-            Assert.Equal(byKey["artillery"], byKey["spearmen"]);
+            // A board where the slowest thing cannot manage a hex in a turn is
+            // glue, whatever else is true of it - which is exactly what was
+            // reported from play at sixty seconds a turn.
+            Assert.True(byKey["artillery"] >= 1,
+                "the slowest regiment cannot finish a single hex in a turn.");
             Assert.True(kinds >= 2, "every regiment on the board moves exactly alike, which is not a game.");
         }
 

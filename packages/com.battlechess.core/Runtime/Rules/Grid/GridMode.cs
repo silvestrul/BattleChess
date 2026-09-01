@@ -47,6 +47,40 @@ namespace BattleChess.Rules.Grid
         /// </remarks>
         public const int ShufflesWithinRings = 6;
 
+        /// <summary>How many battle seconds one board turn lasts.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Reported from play: "the units move too little".</b> A turn buys a
+        /// regiment its pace times this over the fifty metres a hex is wide, so
+        /// at the continuous game's sixty seconds a line of foot walks 95 m -
+        /// under two hexes - and the board reads as glue.
+        /// </para>
+        /// <para>
+        /// <b>A hundred and twenty.</b> Foot buys 3,8 hexes, artillery 3,1,
+        /// cavalry 11,4, scouts 13,2. The slow end is a move worth making and
+        /// the fast end is about a third of the board, which is roughly the
+        /// shape a mounted arm ought to have.
+        /// </para>
+        /// <para>
+        /// <b>Here rather than in the harness toggles, and that is a correction.</b>
+        /// It was written as a view option first, which left the rules measuring
+        /// a sixty-second turn while the game ran a hundred-and-twenty-second
+        /// one - so the test that prints what a turn buys printed a number
+        /// nobody was playing. How long a turn lasts is a rule of the board
+        /// game. It stays settable, because it is a feel question and feel
+        /// questions are settled by playing.
+        /// </para>
+        /// <para>
+        /// It does not touch <see cref="BattleClock"/>, so the continuous game
+        /// keeps its own sixty and every test counting on them stays correct.
+        /// </para>
+        /// </remarks>
+        public static float TurnSeconds { get; set; } = 90f;
+
+        /// <summary>The same, in ticks, which is what the clock counts in.</summary>
+        public static int TicksPerTurn =>
+            Math.Max(1, (int)MathF.Round(TurnSeconds / BattleClock.SecondsPerTick));
+
         /// <summary>Whether the board game is the one being played.</summary>
         public static bool On { get; private set; }
 
@@ -132,6 +166,69 @@ namespace BattleChess.Rules.Grid
 
             return crowded;
         }
+
+        /// <summary>
+        /// Stands every regiment that has finished marching back on the centre
+        /// of a hex of its own. Regiments still on the road are left alone.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>What the board actually promises, stated exactly.</b> Not "every
+        /// regiment is on a hex at every instant" - that was the first draft of
+        /// [M147], and enforcing it meant truncating every route to one turn's
+        /// walking, which made a foot march a 50 m stub and had to be ordered
+        /// again every turn. The promise is <b>a regiment that has stopped
+        /// stands on a hex of its own</b>. One in the middle of a march is
+        /// between hexes, which is what marching looks like.
+        /// </para>
+        /// <para>
+        /// That is enough to keep the mode's real guarantee, because everything
+        /// that reads occupancy - the planner above all - is asking about
+        /// regiments that are standing somewhere, and the ones that are not are
+        /// on their way through rather than settled in.
+        /// </para>
+        /// <para>
+        /// <b>And it is what stops the drift.</b> A regiment walks continuously
+        /// and so finishes a leg within a metre or two of a centre rather than
+        /// on it; without this the error accumulates over a dozen turns until
+        /// regiments stand visibly off the board they are playing on. Snapping
+        /// the front at the same moment is what makes the six bearings hold: the
+        /// steering turns freely on the way, and arriving is when it settles.
+        /// </para>
+        /// </remarks>
+        public static void SettleThoseWhoHaveStopped(BattleState battle)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+
+            Board board = Board.For(battle);
+
+            // Regiments still marching are not standing anywhere, but they are
+            // still somewhere, so the hexes they are crossing are spoken for as
+            // far as anybody settling is concerned.
+            var taken = new Dictionary<Coord, UnitId>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (!HasStopped(unit)) taken[board.Of(unit.Position)] = unit.Id;
+            }
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (!HasStopped(unit)) continue;
+
+                if (!board.NearestFree(
+                        battle, unit, board.Of(unit.Position), taken, ShufflesWithinRings, out Coord hex))
+                    continue;
+
+                taken[hex] = unit.Id;
+
+                unit.Position = board.CentreOf(hex);
+                unit.Facing = Board.Snap(unit.Facing);
+            }
+        }
+
+        private static bool HasStopped(UnitInstance unit) =>
+            unit.Route == null || unit.Route.IsComplete;
 
         /// <summary>
         /// Puts one regiment back on the centre of the hex it has stopped in.

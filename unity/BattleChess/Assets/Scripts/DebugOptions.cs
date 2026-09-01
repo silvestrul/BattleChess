@@ -106,6 +106,20 @@ namespace BattleChess.Unity
         /// </remarks>
         public bool GridMode = true;
 
+        /// <summary>Battle seconds one board turn lasts.</summary>
+        /// <remarks>
+        /// The knob only. The value itself lives on
+        /// <see cref="BattleChess.Rules.Grid.GridMode.TurnSeconds"/>, because how
+        /// long a turn lasts is a rule of the board game rather than a debugging
+        /// preference, and having two copies of it meant the rules once measured
+        /// a sixty-second turn while the game ran a hundred and twenty.
+        /// </remarks>
+        public float GridTurnSeconds
+        {
+            get => BattleChess.Rules.Grid.GridMode.TurnSeconds;
+            set => BattleChess.Rules.Grid.GridMode.TurnSeconds = value;
+        }
+
         public bool Running = true;
 
         /// <summary>

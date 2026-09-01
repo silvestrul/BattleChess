@@ -234,8 +234,9 @@ namespace BattleChess.Unity
             GridGame.Board board = GridGame.Board.For(_battle);
 
             _console.Info("Board",
-                $"The board game. {board}, and a turn buys a regiment its pace times " +
-                $"{BattleClock.TicksPerTurn * BattleClock.SecondsPerTick:0} s of hexes.");
+                $"The board game. {board}, and a turn of {GridGame.GridMode.TurnSeconds:0} s buys " +
+                $"foot {1.59f * GridGame.GridMode.TurnSeconds / GridGame.Board.CellWidthMetres:0.0} hexes " +
+                $"and cavalry {4.76f * GridGame.GridMode.TurnSeconds / GridGame.Board.CellWidthMetres:0.0}.");
 
             if (crowded > 0)
                 _console.Warning("Board",
@@ -1601,14 +1602,15 @@ namespace BattleChess.Unity
                     _resolving = 0;
                     _tickAccumulator = 0f;
 
-                    // [M147]. Every board route is drawn to end inside one turn,
-                    // so a regiment finishes on a hex - within a metre or so of
-                    // its centre, since the walk is continuous and stops on a
-                    // tick boundary rather than on arrival. This puts it on the
-                    // centre exactly and settles its front onto one of the six.
-                    // Without it the drift accumulates over a dozen turns until
-                    // regiments stand visibly off the board they are playing on.
-                    if (_options.GridMode) GridGame.GridMode.Muster(_battle);
+                    // [M147]. A regiment that has finished its march is put
+                    // back on its hex centre exactly and its front settled onto
+                    // one of the six. Only the ones that have stopped: a board
+                    // route now runs to its destination over as many turns as it
+                    // takes, so a regiment caught mid-march is between hexes,
+                    // which is what marching looks like. Without this the drift
+                    // off a centre accumulates over a dozen turns until
+                    // regiments stand visibly off the board they play on.
+                    if (_options.GridMode) GridGame.GridMode.SettleThoseWhoHaveStopped(_battle);
 
                     break;
                 }
@@ -3458,11 +3460,21 @@ namespace BattleChess.Unity
         /// impossible to reason about - both sides have to be resolving the
         /// same window.
         /// </remarks>
+        /// <summary>How many ticks one turn of the game being played lasts.</summary>
+        /// <remarks>
+        /// The board runs a longer turn than the continuous game - see
+        /// <see cref="DebugOptions.GridTurnSeconds"/> - because a turn there is
+        /// measured in hexes walked rather than in seconds watched, and sixty
+        /// seconds is under two hexes for a line of foot.
+        /// </remarks>
+        private int TicksInATurn =>
+            _options.GridMode ? GridGame.GridMode.TicksPerTurn : BattleClock.TicksPerTurn;
+
         private void EndTheTurn()
         {
             int given = _book.Fire(_battle, _console);
 
-            _resolving = BattleClock.TicksPerTurn;
+            _resolving = TicksInATurn;
             _tickAccumulator = 0f;
             _options.Running = true;
 

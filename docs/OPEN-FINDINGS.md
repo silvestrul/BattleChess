@@ -1815,7 +1815,7 @@ off so nobody builds it twice.
 **Recommended: waiting, first.** The timetable it needs is already built and is
 exact under plan-then-fire, since every queued route starts at the same instant.
 
-## 33. On the board, a gun train and a line of spearmen move exactly alike
+## ~~33. On the board, a gun train and a line of spearmen move exactly alike~~ - FIXED by [M148](DECISIONS.md), and not by the fix recommended below
 
 **Found by measuring [M147], not by playing it.** Pinned by
 `BoardTests.WhatAWholeTurnActuallyBuysInWholeHexes`, which prints the ladder and
@@ -1839,6 +1839,18 @@ recorded rather than patched. **Three ways out, and the choice is the designer's
 
 **Recommended: carry the remainder**, since it keeps the speeds in `units.cfg`
 meaning what they say and needs no other number retuned.
+
+**What actually happened.** None of the three. The flattening was an artefact of
+truncating each route at the turn, which threw the fraction away *every turn*;
+[M148] stopped truncating, so a march runs to its destination and spends the
+fraction. Foot crossing four hexes now takes a bit over a turn and a half rather
+than four turns. The turn was lengthened to 90 s as well, for the separate reason
+that 60 s was too little ground - but the remainder needs no carrying, because
+nothing discards it any more.
+
+Kept as the record of a finding whose recommended fix was superseded by removing
+the thing that caused it. The measurement was right; the diagnosis was one level
+too shallow.
 
 ---
 

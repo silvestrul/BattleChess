@@ -3447,3 +3447,64 @@ redrawn every frame for a thing that never changes is not a board, it is a stall
 
 Suite: 689 passing, 12 failing - the same 12 - 87 skipped, 788 total. Unity
 compiles clean.
+
+### M148 - the board draws the whole march, and a board turn is longer than a battle turn
+
+**Reported from play on the [M147] build: "the drawn line is very short and the
+units move too little."** One fault wearing two hats, and half of it was a
+regression I introduced.
+
+**The line.** [M147] truncated every route to one turn's walking, reasoning that a
+regiment left mid-leg holds neither of the two hexes it stands between, so the
+board's promise would hold only for whoever happened to arrive. The reasoning is
+sound and the result was unplayable: foot buys under two hexes at sixty seconds,
+so every drawn line was a single 50 m stub and every march had to be ordered again
+each turn. It also broke a standing requirement outright - **lines are drawn for
+each move until they reach their destination** - because a route truncated at the
+turn does not know where its destination is.
+
+**So the turn is enforced where it belongs: in the walking, not in the drawing.**
+The route runs to the destination and the line shows all of it; the clock stops
+the regiment wherever it has got to and it carries on next turn.
+
+**What the board gives up, said plainly.** Not "every regiment stands on a hex at
+every instant". The promise is now **a regiment that has stopped stands on a hex
+of its own**, enforced at each turn boundary by
+`GridMode.SettleThoseWhoHaveStopped`, which leaves marchers alone and counts the
+hexes they are crossing as spoken for. A regiment in the middle of a march is
+between hexes, which is what marching looks like. That is enough, because
+everything that reads occupancy is asking about regiments that are standing
+somewhere.
+
+**The turn length.** A board turn is measured in hexes walked, not seconds
+watched, and the continuous game's sixty seconds is 95 m for a line of foot.
+`GridMode.TurnSeconds` is **90**: artillery 2,3 hexes, foot 2,9, horse archers
+7,6, cavalry 8,6, scouts 9,9. It does not touch `BattleClock`, so the continuous
+game keeps its own sixty and every test counting on them stays correct.
+
+**Two corrections to my own work, both found by the tests rather than by playing.**
+
+*It was a view toggle first*, which left the rules measuring a sixty-second turn
+while the game ran a hundred and twenty - so `WhatATurnBuysEachKindOfRegiment`
+printed a number nobody was playing. How long a turn lasts is a rule of the board
+game; `DebugOptions.GridTurnSeconds` is now a pass-through to it and there is one
+copy.
+
+*The ceiling in that test was a bare "twelve hexes"*, a number with no argument
+behind it, and 120 s tripped it at 13,2. The honest question was not whether to
+raise the twelve but whether anything was actually wrong - so the ceiling is now
+**a third of the Great Field's short side**, derived from the board: a regiment
+that crosses the field in three moves cannot be out-manoeuvred, so there is no
+manoeuvre left in the game. At 90 s the fastest crosses in **3,6 turns** and the
+slowest in 15,4. That is what chose 90 over 120, and the number now defends
+itself.
+
+**Open finding 33 is closed by this** and not by the fix it recommended. The
+flattening - artillery and foot both walking one hex - was an artefact of
+truncation throwing the fraction away every turn. A march that runs to its
+destination spends the fraction, so a foot regiment crossing four hexes takes a
+bit over a turn and a half rather than four turns. Carrying the remainder is no
+longer needed.
+
+Suite: 689 passing, 12 failing - the same 12 - 87 skipped, 788 total. Unity
+compiles clean.

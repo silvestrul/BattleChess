@@ -213,36 +213,40 @@ namespace BattleChess.Rules.Grid
         /// where it is and not from where it ought to have been.
         /// </para>
         /// <para>
-        /// <b>The route stops at the end of this turn's walking, and that is
-        /// what makes the board a board.</b> A regiment left mid-leg when the
-        /// turn ends is standing between two hexes and holds neither, so the
-        /// one promise the whole mode exists to keep - one regiment to a hex -
-        /// would hold only for whoever happened to arrive. Truncating means
-        /// every regiment ends every turn <i>on</i> a hex, and the drawn line
-        /// stops where the regiment will actually be, which is the other thing
-        /// a player is owed.
+        /// <b>The whole route, to the destination, however many turns it takes -
+        /// and the first draft of this got it wrong.</b> [M147] truncated the
+        /// route to one turn's walking, on the reasoning that a regiment left
+        /// mid-leg holds neither of the two hexes it stands between. The
+        /// reasoning is sound and the result was unplayable: foot buys under two
+        /// hexes a turn, so every drawn line was a single 50 m stub and every
+        /// march had to be ordered again each turn. Reported from play as "the
+        /// drawn line is very short and the units move too little", which is one
+        /// fault wearing two hats.
         /// </para>
         /// <para>
-        /// The price is that a long march is ordered again each turn rather than
-        /// once. That is how a board wargame has always worked, and it is the
-        /// same allowance a player is counting in their head: foot 1,9 hexes,
-        /// cavalry 5,7.
+        /// It also broke a standing requirement outright: lines are drawn for
+        /// each move <i>until they reach their destination</i>. A route
+        /// truncated at the turn cannot draw that line, because it does not know
+        /// it.
         /// </para>
         /// <para>
-        /// <b>At least one hex, always.</b> Ground slow enough that a single
-        /// step costs more than a whole turn would otherwise pin a regiment
-        /// where it stands for ever, which reads as a bug however correct the
-        /// arithmetic is. It walks the one hex and overruns.
+        /// <b>So the turn is enforced where it belongs - in the walking, not in
+        /// the drawing.</b> The route runs to the destination and the line shows
+        /// all of it; the clock stops the regiment wherever it has got to, and
+        /// it carries on next turn. What the board gives up is the promise that
+        /// every regiment stands on a hex at every instant. What it keeps is the
+        /// promise that matters: a regiment that has <i>stopped</i> stands on a
+        /// hex of its own, which is what <c>GridMode.SettleThoseWhoHaveStopped</c>
+        /// enforces at each turn boundary. A regiment in the middle of a march
+        /// is between hexes, which is what marching looks like.
         /// </para>
         /// </remarks>
         private static Plan Drawn(
             BattleState battle, Board board, UnitInstance unit, List<Coord> hexes, int looked, Facing? arriveOn)
         {
             float pace = MathF.Max(0.1f, unit.Def.Speed);
-            float turn = BattleClock.TicksPerTurn * BattleClock.SecondsPerTick;
             float step = Board.CellWidthMetres;
 
-            var walked = new List<Coord>(hexes.Count) { hexes[0] };
             var waypoints = new List<Vec2>(hexes.Count) { unit.Position };
 
             float seconds = 0f;
@@ -250,18 +254,11 @@ namespace BattleChess.Rules.Grid
             for (int i = 1; i < hexes.Count; i++)
             {
                 float going = board.GoingOn(battle, hexes[i], unit.Def.Movement);
-                float leg = step / (pace * MathF.Max(0.01f, going));
 
-                // The first step is taken whatever it costs; see the remarks.
-                if (i > 1 && seconds + leg > turn) break;
+                seconds += step / (pace * MathF.Max(0.01f, going));
 
-                seconds += leg;
-
-                walked.Add(hexes[i]);
                 waypoints.Add(board.CentreOf(hexes[i]));
             }
-
-            hexes = walked;
 
             float metres = 0f;
 
