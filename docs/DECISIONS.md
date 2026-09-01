@@ -3263,3 +3263,40 @@ who has hidden the harness must still be able to end their turn.
 behaviour intact - which is what keeps every existing test meaningful, since the
 suite drives the rules directly and never goes through the button.
 
+### M144 - every route is on the field, and stays there until it is walked out
+
+**[M143] made a turn a set of routes looked at together before any of them is
+committed, and the field could only show one of them.** A single `LineRenderer`
+held whichever route was ordered last, so drawing a second regiment's march
+rubbed out the first one's line while it was still waiting to be fired - and under
+plan-then-fire that is the whole point of the phase.
+
+A pool of line renderers, rebuilt from scratch every frame from two sources:
+every order in the book, and every unit with a route it has not finished.
+
+**Two colours, because they mean different things.** Amber for a drawn order,
+which is still the player's to change; green for one being walked, which is out of
+their hands until the turn ends. Nothing else distinguishes them on screen, and
+without it a player cannot tell what they may still rub out.
+
+**A walking route is drawn from where the regiment stands**, not from the waypoint
+it set off from, so the line shortens as it goes rather than trailing road already
+covered. `firstAhead` is the route's own `NextWaypoint`, so what is drawn is
+exactly what is left to walk.
+
+**Rebuilt every frame rather than kept in step with events**, which is the choice
+worth recording. There is no bookkeeping to get out of date - no "clear the line
+when the order is cancelled", which is precisely the kind of rule that was already
+wrong once here (`ForgetAFinishedRoute` exists because a stale line outlived its
+march). It costs a few dozen renderers being handed new points against a tick that
+moves forty regiments; the renderers are pooled because allocating them per frame
+would not be free.
+
+`DrawPath`'s single line stands down while plan-then-fire is on, or the same route
+is drawn twice in two colours a metre apart and reads as two.
+
+**One thing it does not do:** it draws every route on the field, including the
+enemy's. That is right while the designer is driving both sides by hand and wrong
+the moment there is an opponent, at which point it wants filtering by who is
+looking - the same question `PlayerViewProjector` already answers for units.
+

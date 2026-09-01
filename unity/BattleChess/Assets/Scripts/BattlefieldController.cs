@@ -153,6 +153,16 @@ namespace BattleChess.Unity
         /// <summary>Ticks still to run of the turn that was set going, or nought while planning.</summary>
         private int _resolving;
 
+        /// <summary>One line per route the player can see, drawn until it is walked out.</summary>
+        /// <remarks>
+        /// A pool rather than one renderer. The single <c>_pathLine</c> showed
+        /// the route of whatever was ordered last, so ordering a second
+        /// regiment rubbed out the first one's line while it was still walking
+        /// - which under [M143] is most of a turn, with every drawn order
+        /// supposed to be on the field at once.
+        /// </remarks>
+        private readonly List<LineRenderer> _routeLines = new List<LineRenderer>();
+
         private readonly List<UnitView> _views = new List<UnitView>();
 
         /// <summary>
@@ -498,6 +508,10 @@ namespace BattleChess.Unity
             int before = _clock?.Tick ?? 0;
             AdvanceClock();
             _ticksThisFrame = (_clock?.Tick ?? 0) - before;
+
+            // After the clock, so a route that finished this tick is gone from
+            // the field on the same frame the regiment stops.
+            DrawEveryRoute();
             SimMarker.End();
             _simClock.Stop();
 
@@ -3120,8 +3134,138 @@ namespace BattleChess.Unity
         }
 
 
+        /// <summary>
+        /// Draws a line for every route the player has - drawn and waiting, or
+        /// being walked - and keeps each one until its regiment arrives.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M144].</b> Under [M143] a turn is a set of routes looked at
+        /// together before any of them is committed, so they all have to be on
+        /// the field at once. The old single line could only ever show one, and
+        /// showed whichever was ordered last.
+        /// </para>
+        /// <para>
+        /// <b>Two kinds, and they are told apart by colour</b>, because they
+        /// mean different things: a <i>drawn</i> order is still yours to change,
+        /// and a <i>walking</i> one is out of your hands until the turn ends.
+        /// </para>
+        /// <para>
+        /// A walking route is drawn from where the regiment actually stands
+        /// rather than from the waypoint it set off from, so the line shortens
+        /// as it goes and a regiment is never trailing a tail of road it has
+        /// already covered.
+        /// </para>
+        /// <para>
+        /// Rebuilt from scratch every frame rather than kept in step with
+        /// events. There is no bookkeeping to get wrong, and it costs a few
+        /// dozen line renderers being handed new points - against a tick that
+        /// moves forty regiments and re-plans some of them, that is nothing.
+        /// The renderers themselves are pooled, because allocating them per
+        /// frame would not be.
+        /// </para>
+        /// </remarks>
+        private void DrawEveryRoute()
+        {
+            if (_battle == null) return;
+
+            int used = 0;
+
+            // Orders drawn and waiting for the turn to end.
+            if (_options.PlanThenFire)
+            {
+                foreach (TurnOrders.Pending pending in _book.Drawn)
+                {
+                    UnitInstance unit = _battle.Get(pending.Unit);
+
+                    if (!unit.IsOnField) continue;
+
+                    used = Draw(used, unit.Position, pending.Plan.Path.Waypoints, 1, DrawnOrderColour);
+                }
+            }
+
+            // Routes being walked, whether they were fired from the book or
+            // given straight through with plan-then-fire switched off.
+            foreach (UnitInstance unit in _battle.UnitsOnField())
+            {
+                MovementRoute route = unit.Route;
+
+                if (route == null || route.IsComplete) continue;
+
+                used = Draw(used, unit.Position, route.Waypoints, route.NextWaypoint, WalkingColour);
+            }
+
+            // Anything left over from a busier frame is hidden rather than
+            // destroyed, so the next order reuses it.
+            for (int i = used; i < _routeLines.Count; i++) _routeLines[i].positionCount = 0;
+        }
+
+        /// <summary>Amber: still yours to change.</summary>
+        private static readonly Color DrawnOrderColour = new Color(1f, 0.78f, 0.25f, 1f);
+
+        /// <summary>Green: committed, and walking.</summary>
+        private static readonly Color WalkingColour = new Color(0.45f, 0.95f, 0.5f, 1f);
+
+        /// <summary>
+        /// Puts one route on the field, starting from where the regiment is
+        /// now rather than from where the route began.
+        /// </summary>
+        /// <returns>How many lines are in use once this one is drawn.</returns>
+        private int Draw(int used, Vec2 from, IReadOnlyList<Vec2> waypoints, int firstAhead, Color colour)
+        {
+            if (waypoints == null || waypoints.Count == 0) return used;
+
+            int ahead = waypoints.Count - firstAhead;
+
+            if (ahead <= 0) return used;
+
+            LineRenderer line = LineAt(used);
+
+            line.startColor = line.endColor = colour;
+            line.positionCount = ahead + 1;
+            line.SetPosition(0, new Vector3(from.X, from.Y, -1f));
+
+            for (int i = 0; i < ahead; i++)
+            {
+                Vec2 at = waypoints[firstAhead + i];
+                line.SetPosition(i + 1, new Vector3(at.X, at.Y, -1f));
+            }
+
+            return used + 1;
+        }
+
+        /// <summary>One of the pooled line renderers, made on the spot the first time.</summary>
+        private LineRenderer LineAt(int index)
+        {
+            while (_routeLines.Count <= index)
+            {
+                var go = new GameObject($"Route {_routeLines.Count}");
+                go.transform.SetParent(transform, false);
+
+                var made = go.AddComponent<LineRenderer>();
+                made.material = new Material(Shader.Find("Sprites/Default"));
+                made.startWidth = made.endWidth = 5f;
+                made.useWorldSpace = true;
+                made.sortingOrder = 19;
+                made.positionCount = 0;
+
+                _routeLines.Add(made);
+            }
+
+            return _routeLines[index];
+        }
+
         private void DrawPath(PathResult path)
         {
+            // [M144] draws every route, including this one, so the single line
+            // would only double it - in a different colour, a metre off, which
+            // reads as two routes rather than one.
+            if (_options.PlanThenFire)
+            {
+                _pathLine.positionCount = 0;
+                return;
+            }
+
             _pathLine.positionCount = path.Waypoints.Count;
 
             for (int i = 0; i < path.Waypoints.Count; i++)
