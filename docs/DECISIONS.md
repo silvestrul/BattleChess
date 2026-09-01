@@ -3300,3 +3300,57 @@ enemy's. That is right while the designer is driving both sides by hand and wron
 the moment there is an opponent, at which point it wants filtering by who is
 looking - the same question `PlayerViewProjector` already answers for units.
 
+### M145 - the line was not the route, because the book planned without the order
+
+**Reported from play: "line drawn doesn't show the actual planned route that used
+to be shown."** True, and the cause is exact.
+
+`RouteSearch` reads the front an order asks to arrive on off
+`UnitInstance.OrderFacing`, which is set by `GiveOrder`. Under [M143] the order is
+*not* given when it is drawn - that is the whole point - so the book planned with
+whatever front the regiment was last ordered on, and got a different route from
+the one the order would actually produce. The player was shown one line and the
+regiment would have walked another.
+
+Fixed with `BorrowForPlanning` / `ReturnAfterPlanning` on `UnitInstance`: the
+three fields the planner reads are set for the duration of the plan and put back
+after. **Deliberately not `GiveOrder`**, which also clears the route, the hold-up,
+the dressing bearing and six counters besides - right when an order is really
+being given, destructive when one is only being costed, since a regiment part-way
+through last turn's march would have it thrown away by the act of drawing an order
+it may never be given.
+
+### M146 - re-routing round where a body will be does not converge, and waiting would
+
+**Reported from play: "collision during the turn, they should not collide at
+all."** Confirmed and not fixed. What was built, measured and switched off is
+recorded because the measurement is the useful part.
+
+**The idea.** [M143] plans each order against where the earlier ones *finish*,
+which is not enough - two regiments can both end up somewhere sensible and walk
+through each other on the way. Since every queued route starts at the same instant
+and its pace is known, where any regiment will be at second *t* is arithmetic
+rather than a prediction, so: walk the turn through, find the first crossing,
+stand the offender where it will be *at that moment*, and draw the route again.
+
+**It does not work.** Two horse regiments crossing at right angles overlap by
+**46%** of a body at the worst moment. After the pass: **50%**. Moving the route
+changes how long it takes to walk, so the crossing does not go away - it happens
+somewhere else, and three passes chase it round the field.
+
+**The lesson, stated so nobody builds it again: a static snapshot cannot answer a
+question about time.** Only two things can. Either the search itself carries time,
+which is what [M16] is and what open finding 9 is about. Or **nobody re-routes and
+one of the two waits** - a start delay on the later order, which converges,
+because pushing a body later in time removes an overlap without moving it
+anywhere. The second is far cheaper, needs no change to the planner at all, and is
+what the designer asked for at the outset: *"they could just wait behind one
+another."*
+
+**The timetable is kept** - where any regiment will be at second *t* - because
+both answers need it and it is exact under plan-then-fire in a way it never was in
+real time. The pass that uses it is switched off, and
+`TwoOrdersThatWouldCrossAreDrawnApart` is kept skipped as the reproduction.
+
+Open finding 32.
+

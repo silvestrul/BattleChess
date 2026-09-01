@@ -1786,6 +1786,37 @@ what actually closes the designer's report.
 
 ---
 
+## 32. Regiments cross during a turn, and re-routing cannot fix it
+
+**Reported from play on the [M143] build, 1 Sep 2026. Cause understood, not
+fixed.** Pinned by `TurnOrdersTests.TwoOrdersThatWouldCrossAreDrawnApart`, skipped.
+
+Orders are planned against where the earlier ones **finish**, so two regiments can
+both end somewhere sensible and walk through each other in the middle of the turn.
+Two horse regiments crossing at right angles reach **46% of a body** overlapping.
+
+**Re-routing was built and measured and made it worse - 50%.** Standing the
+offender where it will be at the moment of the crossing and drawing again moves
+the route, which changes how long it takes to walk, so the crossing happens
+somewhere else instead. See [M146](DECISIONS.md#m146); the code is kept switched
+off so nobody builds it twice.
+
+**Two things can actually answer it.**
+
+- **Time in the search** - [M16], open finding 9. Correct and expensive, and it
+  was reverted once for breaking crabbing.
+- **Waiting.** A start delay on the later of two crossing orders. This converges
+  where re-routing does not, because pushing a body later in time removes an
+  overlap without moving it anywhere; it needs no change to the planner; and it
+  is what the designer asked for at the very beginning of this work - *"they could
+  just wait behind one another"*. It needs a delay honoured by `MovementSystem`
+  and a rule for which of the two waits, which is [M16b] arriving by a third door.
+
+**Recommended: waiting, first.** The timetable it needs is already built and is
+exact under plan-then-fire, since every queued route starts at the same instant.
+
+---
+
 ## Older debts, not from this sweep
 
 Tracked here only so this file is the one place to look. These are all in the

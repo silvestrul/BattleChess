@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BattleChess.Contracts;
 using BattleChess.Rules;
 using Xunit;
@@ -217,6 +218,116 @@ namespace BattleChess.Tests.Battle
             Assert.True(Vec2.Distance(a.Position, wasA) < 0.001f, "Drawing orders moved a regiment.");
             Assert.True(Vec2.Distance(b.Position, wasB) < 0.001f, "Drawing orders moved a regiment.");
             Assert.True(Vec2.Distance(c.Position, wasC) < 0.001f, "Drawing orders moved a regiment.");
+        }
+
+        /// <summary>
+        /// Two regiments whose finishing places are fine, and whose roads
+        /// cross in the middle of the turn.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M146], and it is the fault the designer found by playing
+        /// [M143].</b> Planning against where the earlier orders finish is not
+        /// enough - both of these end up somewhere sensible and walk straight
+        /// through each other on the way, because nothing looked at the middle
+        /// of the turn.
+        /// </para>
+        /// <para>
+        /// Measured by walking the turn through at each regiment's own pace and
+        /// asking whether the two bodies are ever in the same place at the same
+        /// moment, which is exactly what the drawing pass now does.
+        /// </para>
+        /// </remarks>
+        [Fact(Skip = "[M146] is switched off: re-routing around where a body will be does not converge. " +
+                     "Measured 46% of a body overlapping before the pass and 50% after, because moving " +
+                     "the route changes how long it takes and the crossing just happens elsewhere. Kept " +
+                     "as the reproduction - open finding 32.")]
+        public void TwoOrdersThatWouldCrossAreDrawnApart()
+        {
+            var field = new Battlefield("plains", 7007);
+            var book = new TurnOrders();
+
+            // A crossroads: one going east, one going north, both through the
+            // middle at about the same time.
+            //
+            // Cavalry on both roads, and that is not decoration. The first
+            // arrangement used foot at 1,59 m/s two hundred and sixty metres
+            // out - which is a hundred and sixty seconds of walking, so neither
+            // regiment reached the crossing inside the turn and the worst
+            // overlap was nought whether the pass ran or not. A case that
+            // cannot fail is not a case (W9). Horse covers 286 m in a turn and
+            // meets in the middle of it.
+            UnitInstance east = field.Add(0, "cavalry", field.Centre - new Vec2(150f, 0f), Facing.East);
+            UnitInstance north = field.Add(0, "horsearchers", field.Centre - new Vec2(0f, 150f), Facing.North);
+
+            book.Draw(field.State, east, UnitOrder.MoveTo(field.Centre + new Vec2(150f, 0f)), field.Pathfinder);
+            book.Draw(field.State, north, UnitOrder.MoveTo(field.Centre + new Vec2(0f, 150f)), field.Pathfinder);
+
+            Assert.Equal(2, book.Count);
+
+            float worst = WorstCrossing(field, book);
+
+            _out.WriteLine($"worst overlap over the turn: {worst:0.000} of a body");
+
+            Assert.True(worst <= 0.05f,
+                $"The two roads cross and the drawing pass should have bent one of them. They are " +
+                $"{worst:0.00} of a body inside each other at the worst moment.");
+        }
+
+        /// <summary>
+        /// How deep two queued regiments ever get into each other over the turn
+        /// they are about to walk.
+        /// </summary>
+        /// <remarks>
+        /// The test's own timetable rather than the one the drawing pass uses,
+        /// deliberately: a check that measures with the very code it is checking
+        /// cannot fail when that code is wrong. Same arithmetic, written out
+        /// here, sampled finer.
+        /// </remarks>
+        private static float WorstCrossing(Battlefield field, TurnOrders book)
+        {
+            float turn = BattleClock.TicksPerTurn * BattleClock.SecondsPerTick;
+            float worst = 0f;
+
+            for (float t = 0f; t <= turn; t += 1f)
+            {
+                for (int i = 0; i < book.Drawn.Count; i++)
+                {
+                    for (int j = i + 1; j < book.Drawn.Count; j++)
+                    {
+                        UnitInstance a = field.State.Get(book.Drawn[i].Unit);
+                        UnitInstance b = field.State.Get(book.Drawn[j].Unit);
+
+                        var ra = new OrientedRect(
+                            Walk(field, a, book.Drawn[i].Plan.Path.Waypoints, t), a.Facing, a.Footprint);
+                        var rb = new OrientedRect(
+                            Walk(field, b, book.Drawn[j].Plan.Path.Waypoints, t), b.Facing, b.Footprint);
+
+                        worst = MathF.Max(worst, OrientedRect.OverlapFraction(ra, rb));
+                    }
+                }
+            }
+
+            return worst;
+        }
+
+        private static Vec2 Walk(Battlefield field, UnitInstance unit, IReadOnlyList<Vec2> way, float seconds)
+        {
+            if (way.Count == 0) return unit.Position;
+
+            float left = MathF.Max(0.1f, field.State.SpeedOf(unit)) * seconds;
+
+            for (int i = 1; i < way.Count; i++)
+            {
+                float leg = Vec2.Distance(way[i - 1], way[i]);
+
+                if (leg <= Vec2.Epsilon) continue;
+                if (left < leg) return Vec2.Lerp(way[i - 1], way[i], left / leg);
+
+                left -= leg;
+            }
+
+            return way[way.Count - 1];
         }
     }
 }

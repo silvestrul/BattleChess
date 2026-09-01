@@ -103,6 +103,7 @@ namespace BattleChess.Rules
 
             if (!TryPlan(battle, unit, order, pathfinder, log, out Pending drawn)) return false;
 
+
             if (had >= 0) _pending.Insert(had, drawn);
             else _pending.Add(drawn);
 
@@ -196,7 +197,8 @@ namespace BattleChess.Rules
         /// </remarks>
         private bool TryPlan(
             BattleState battle, UnitInstance unit, UnitOrder order,
-            IPathfinder pathfinder, IBattleLog? log, out Pending drawn)
+            IPathfinder pathfinder, IBattleLog? log, out Pending drawn,
+            UnitId standInstead = default, Vec2 standAt = default)
         {
             drawn = default;
 
@@ -214,8 +216,24 @@ namespace BattleChess.Rules
                 if (!other.IsOnField) continue;
 
                 moved.Add((other, other.Position));
-                other.Position = pending.Ends;
+
+                // [M146]. Normally a queued regiment is stood where its order
+                // finishes. When this plan is being taken to get *out of the
+                // way* of one of them, that one is stood where it will be at
+                // the moment of the crossing instead - which is the place that
+                // matters and is nowhere near where it ends up. Without this
+                // the second plan sees exactly what the first one saw and comes
+                // back identical, which is how the pass looked as though it did
+                // nothing at all.
+                other.Position = other.Id == standInstead ? standAt : pending.Ends;
             }
+
+            // [M145]. The order has to be on the unit while the route is
+            // taken, because the planner reads the front it is to arrive on off
+            // OrderFacing. Without this the book drew a different route from
+            // the one the order would produce - the player was shown one line
+            // and the regiment walked another.
+            (UnitOrder, Vec2, Facing) wasOrdered = unit.BorrowForPlanning(order, unit.Position);
 
             try
             {
@@ -230,11 +248,200 @@ namespace BattleChess.Rules
             }
             finally
             {
+                unit.ReturnAfterPlanning(wasOrdered);
+
                 for (int i = moved.Count - 1; i >= 0; i--)
                     moved[i].Unit.Position = moved[i].Was;
 
                 moved.Clear();
             }
+        }
+
+        // ---- [M146]: built, measured, and switched off ------------------------
+        //
+        // Re-routing a queued order around where another regiment *will be* does
+        // not work, and the reason is worth keeping the code to show. Two horse
+        // regiments crossing at right angles overlap by 46% of a body at the
+        // worst moment. Stand the offender at the crossing point, re-plan, and
+        // the answer comes back overlapping by 50% - because moving the route
+        // changes how long it takes, so the crossing simply happens somewhere
+        // else. Three passes chase it round the field.
+        //
+        // A static snapshot cannot answer a question about time. What can:
+        // either the search itself carries time (which is what M16 is), or
+        // nobody re-routes at all and one of the two *waits* - a start delay on
+        // the later order, which converges because pushing a body later in time
+        // removes the overlap without moving it. The second is far cheaper and
+        // is what the designer asked for in the first place ("they could just
+        // wait behind one another"). Open finding 32.
+        //
+        // Kept rather than deleted because the timetable below - where any
+        // regiment will be at second t, which is exact under plan-then-fire
+        // since every route starts at the same instant - is the part both
+        // answers need.
+
+        /// <summary>How many times a route is redrawn to get out of somebody else's way.</summary>
+        /// <remarks>
+        /// Three. Each pass moves one body out of the way and asks again, and
+        /// the arrangements that are still crossing after three were not going
+        /// to be solved by a fourth - they want somebody to give way [Mx2b],
+        /// not a cleverer line.
+        /// </remarks>
+        private const int TriesToGetOutOfTheWay = 3;
+
+        /// <summary>How far apart two bodies count as having crossed.</summary>
+        private const float CrossedFraction = 0.02f;
+
+        /// <summary>Seconds between samples when the turn is walked through.</summary>
+        /// <remarks>
+        /// Two. Cavalry covers under ten metres in that, which is a quarter of
+        /// a regiment's depth, so nothing crosses a body between two samples.
+        /// </remarks>
+        private const float SampleSeconds = 2f;
+
+        /// <summary>
+        /// Redraws this order until it stops crossing the ones already queued.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M146], and it is the designer's second reading of "plans for the
+        /// previous one too".</b> Planning against where the earlier orders
+        /// <i>finish</i> is not enough: two regiments can both end up somewhere
+        /// sensible and still walk through each other in the middle of the
+        /// turn, which is what a play-test of [M143] showed.
+        /// </para>
+        /// <para>
+        /// <b>The whole turn is known at draw time</b>, which is what makes
+        /// this affordable here and made [M16] hard in real time. Every queued
+        /// route starts at the same instant and its pace is known, so where any
+        /// regiment will be at second <i>t</i> is arithmetic rather than a
+        /// prediction.
+        /// </para>
+        /// <para>
+        /// <b>The trick is the same one the endpoint pass uses.</b> When a
+        /// crossing is found, the offender is stood where it will be <i>at the
+        /// moment of the crossing</i> and the route is drawn again - so the
+        /// planner sees a body in the way at the place that actually matters,
+        /// without the planner itself having to learn about time. Three passes,
+        /// then it is left alone.
+        /// </para>
+        /// <para>
+        /// <b>What it does not promise.</b> Sampling every two seconds and
+        /// walking at flat pace ignores what turning costs, so the timetable is
+        /// approximate and a regiment held up on the day will be somewhere this
+        /// did not expect. It removes the crossings that come from nobody
+        /// looking; it cannot remove the ones that come from the world not
+        /// going to plan. Those want [Mx2b] - somebody giving way while it
+        /// happens - which is still not built.
+        /// </para>
+        /// </remarks>
+        private Pending KeepClearOfTheOthers(
+            BattleState battle, UnitInstance unit, UnitOrder order,
+            IPathfinder pathfinder, Pending drawn, IBattleLog? log)
+        {
+            for (int attempt = 0; attempt < TriesToGetOutOfTheWay; attempt++)
+            {
+                if (!FirstCrossing(battle, unit, drawn, out UnitInstance other, out Vec2 theirPlace))
+                    return drawn;
+
+                Vec2 stood = other.Position;
+                other.Position = theirPlace;
+
+                try
+                {
+                    if (!TryPlan(
+                            battle, unit, order, pathfinder, log, out Pending again,
+                            other.Id, theirPlace))
+                        return drawn;
+
+                    drawn = again;
+                }
+                finally
+                {
+                    other.Position = stood;
+                }
+            }
+
+            log?.Info("Order",
+                $"{unit.Def.DisplayName} could not be drawn a route that keeps clear of everybody for the " +
+                "whole turn. It will have to sort it out on the way.",
+                unit.Id);
+
+            return drawn;
+        }
+
+        /// <summary>
+        /// Walks the turn through and reports the first moment this route puts
+        /// its regiment inside one of the others.
+        /// </summary>
+        private bool FirstCrossing(
+            BattleState battle, UnitInstance unit, Pending drawn,
+            out UnitInstance other, out Vec2 theirPlace)
+        {
+            other = null!;
+            theirPlace = default;
+
+            float turn = BattleClock.TicksPerTurn * BattleClock.SecondsPerTick;
+
+            for (float t = SampleSeconds; t <= turn; t += SampleSeconds)
+            {
+                Vec2 ours = Along(battle, unit, drawn.Plan.Path.Waypoints, t);
+                OrientedRect us = new OrientedRect(ours, unit.Facing, unit.Footprint);
+
+                foreach (Pending pending in _pending)
+                {
+                    if (pending.Unit == unit.Id) continue;
+
+                    UnitInstance them = battle.Get(pending.Unit);
+
+                    if (!them.IsOnField) continue;
+
+                    Vec2 theirs = Along(battle, them, pending.Plan.Path.Waypoints, t);
+
+                    if (OrientedRect.OverlapFraction(
+                            us, new OrientedRect(theirs, them.Facing, them.Footprint)) <= CrossedFraction)
+                        continue;
+
+                    other = them;
+                    theirPlace = theirs;
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Where a regiment walking this route at its own pace will be after
+        /// <paramref name="seconds"/>.
+        /// </summary>
+        /// <remarks>
+        /// Flat pace along the drawn line. It ignores what coming round costs,
+        /// which makes every estimate optimistic by the same sign - a regiment
+        /// is never further along than this says. For finding crossings that is
+        /// the safe direction: it looks for trouble slightly ahead of where the
+        /// trouble will be.
+        /// </remarks>
+        private static Vec2 Along(
+            BattleState battle, UnitInstance unit, IReadOnlyList<Vec2> way, float seconds)
+        {
+            if (way.Count == 0) return unit.Position;
+
+            float left = MathF.Max(0.1f, battle.SpeedOf(unit)) * seconds;
+
+            for (int i = 1; i < way.Count; i++)
+            {
+                float leg = Vec2.Distance(way[i - 1], way[i]);
+
+                if (leg <= Vec2.Epsilon) continue;
+
+                if (left < leg) return Vec2.Lerp(way[i - 1], way[i], left / leg);
+
+                left -= leg;
+            }
+
+            return way[way.Count - 1];
         }
 
         /// <summary>Redraws every order from this position in the book onward.</summary>

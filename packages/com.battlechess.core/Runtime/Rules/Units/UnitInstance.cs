@@ -602,6 +602,48 @@ namespace BattleChess.Rules
             return Facing.FromVector(toDestination);
         }
 
+        /// <summary>
+        /// The three fields the planner reads off an order, set without any of
+        /// the rest of what giving an order does.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M145].</b> A route depends on the front the order asks to arrive
+        /// on - <c>RouteSearch</c> reads <see cref="OrderFacing"/> - so a plan
+        /// taken for an order that has not been given comes out different from
+        /// the one that order will actually produce. Under [M143] that is the
+        /// difference between the line the player is shown and the route the
+        /// regiment walks, which is the one thing plan-then-fire must never get
+        /// wrong.
+        /// </para>
+        /// <para>
+        /// <b>Deliberately not <see cref="GiveOrder"/>.</b> That clears the
+        /// route, the hold-up, the dressing bearing and six counters besides,
+        /// which is right when an order is really being given and destructive
+        /// when one is only being costed - a regiment part-way through last
+        /// turn's march would have it thrown away by the act of drawing a new
+        /// order it may never be given.
+        /// </para>
+        /// </remarks>
+        public (UnitOrder Order, Vec2 Anchor, Facing Front) BorrowForPlanning(UnitOrder order, Vec2 anchor)
+        {
+            (UnitOrder, Vec2, Facing) was = (Order, OrderAnchor, OrderFacing);
+
+            Order = order;
+            OrderAnchor = anchor;
+            OrderFacing = order.Bearing ?? FrontFor(order, anchor);
+
+            return was;
+        }
+
+        /// <summary>Puts back what <see cref="BorrowForPlanning"/> took.</summary>
+        public void ReturnAfterPlanning((UnitOrder Order, Vec2 Anchor, Facing Front) was)
+        {
+            Order = was.Order;
+            OrderAnchor = was.Anchor;
+            OrderFacing = was.Front;
+        }
+
         /// <summary>Gives the unit a new instruction, clearing any current march.</summary>
         public void GiveOrder(UnitOrder order, Vec2 anchor)
         {
