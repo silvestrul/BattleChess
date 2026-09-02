@@ -98,13 +98,13 @@ namespace BattleChess.Tests.Battle
                     board.Holds(unit.Footprint),
                     $"{field}: {unit.Def.Key} at {unit.Strength} is " +
                     $"{2f * unit.Footprint.BoundingRadius:0.0} m across the diagonal and will not fit a " +
-                    $"{board.CellWidth:0} m hex.");
+                    $"{board.CellWidth:0} m cell.");
             }
 
             _out.WriteLine(
                 $"{field,-16} widest {widestOne}: {widestShape.Width:0.0} x {widestShape.Depth:0.0} m, " +
-                $"{widest:0.0} m across -> {board.CellWidth:0} m hexes, " +
-                $"{board.ShortSideInHexes:0} across the short side");
+                $"{widest:0.0} m across -> {board.CellWidth:0} m {board.Cells.Name}, " +
+                $"{board.ShortSideInCells:0} across the short side");
         }
 
         /// <summary>
@@ -195,8 +195,8 @@ namespace BattleChess.Tests.Battle
 
             UnitInstance first = battle.UnitsOnField().First();
 
-            Facing front = Board.Snap(first.Facing);
-            HexDirection shoulder = Board.ShoulderDirectionOf(front);
+            Facing front = board.Snap(first.Facing);
+            Coord shoulder = board.ShoulderStep(front);
 
             // Four regiments drawn up from one hex along the shoulder axis,
             // every one on the same front. Taken off the field so this measures
@@ -212,7 +212,7 @@ namespace BattleChess.Tests.Battle
                 unit.Position = board.CentreOf(at);
                 unit.Facing = front;
 
-                at += HexMath.Offset(shoulder);
+                at += shoulder;
             }
 
             // Along the line and across it, in the regiments' own frame.
@@ -220,7 +220,8 @@ namespace BattleChess.Tests.Battle
             Vec2 acrossIt = front.ToVector();
 
             _out.WriteLine($"{field}: {drawnUp.Count} regiments on {front}, shouldering {shoulder}");
-            _out.WriteLine($"a hex is {board.CellWidth:0} m; a regiment is {first.Footprint.Width:0} m wide");
+            _out.WriteLine($"a cell is {board.CellWidth:0} m of {board.Cells.Name}; " +
+                           $"a regiment is {first.Footprint.Width:0} m wide");
 
             var worstStagger = 0f;
             var worstOverlap = 0f;
@@ -241,7 +242,7 @@ namespace BattleChess.Tests.Battle
 
                 Assert.True(
                     MathF.Abs(MathF.Abs(along) - board.CellWidth) < 0.01f,
-                    $"regiments a hex apart are {MathF.Abs(along):0.0} m apart along the line, not " +
+                    $"regiments a cell apart are {MathF.Abs(along):0.0} m apart along the line, not " +
                     $"{board.CellWidth:0}.");
             }
 
@@ -251,15 +252,15 @@ namespace BattleChess.Tests.Battle
             Assert.True(
                 worstStagger < 0.01f,
                 $"{field}: regiments in a line are staggered by {worstStagger:0.0} m, so this is a " +
-                "staircase and not a line. A hex board can align marching or lines, never both - see " +
-                "Board.FacingOffsetDegrees.");
+                "staircase and not a line. A hex board can align marching or lines and never both, " +
+                "which is what the square lattice exists to answer - see ILattice.");
 
             // And they are beside each other rather than inside each other.
             Assert.True(worstOverlap <= 0.001f, $"{field}: neighbours in the line overlap by {worstOverlap:0.000}.");
 
             // Non-vacuity on the arrangement itself: a line of one proves nothing,
             // and a frontage wider than the hex could not be a line at all.
-            Assert.True(first.Footprint.Width <= board.CellWidth, "the regiment is wider than its hex.");
+            Assert.True(first.Footprint.Width <= board.CellWidth, "the regiment is wider than its cell.");
         }
     }
 }

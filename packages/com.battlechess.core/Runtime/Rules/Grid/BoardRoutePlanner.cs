@@ -51,19 +51,19 @@ namespace BattleChess.Rules.Grid
 
         /// <summary>How far from a taken destination a regiment will settle for.</summary>
         /// <remarks>
-        /// Three rings is thirty-six hexes - three regiment-widths of ground in
-        /// every direction, since a hex is sized to a regiment. Further than
-        /// that and the regiment is no longer going where it was sent, so the
-        /// order is better refused than silently rewritten.
+        /// Three rings is three regiment-widths of ground in every direction,
+        /// since a cell is sized to a regiment. Further than that and the
+        /// regiment is no longer going where it was sent, so the order is better
+        /// refused than silently rewritten.
         /// </remarks>
         public const int WillSettleWithinRings = 3;
 
         /// <summary>A ceiling on the search, so a hopeless order cannot hang a turn.</summary>
         /// <remarks>
-        /// The Great Field is a few hundred hexes at the cell size its
-        /// regiments ask for, so this exhausts any board this game has and then
-        /// some. It is a guard against a bug, not a budget: unlike the lattice,
-        /// exhausting the whole board is cheap and is the worst this can do.
+        /// The Great Field is a few hundred cells at the size its regiments
+        /// ask for, so this exhausts any board this game has and then some. It
+        /// is a guard against a bug, not a budget: exhausting the whole board is
+        /// cheap, and it is the worst this can ever do.
         /// </remarks>
         public const int MostHexesSearched = 20000;
 
@@ -123,15 +123,18 @@ namespace BattleChess.Rules.Grid
             looked = 0;
 
             float pace = MathF.Max(0.1f, unit.Def.Speed);
-            float step = board.CellWidth;
 
             var cameFrom = new Dictionary<Coord, Coord>();
             var best = new Dictionary<Coord, float> { [from] = 0f };
             var open = new CoordMinHeap();
 
-            open.Push(from, Guess(from, goal, step, pace));
+            open.Push(from, Guess(board, from, goal, pace));
 
-            Span<Coord> neighbours = stackalloc Coord[HexMath.DirectionCount];
+            // Room for the widest lattice this board could be. Eight for
+            // squares, six for hexes, and the loop below only reads the ones
+            // the lattice actually wrote.
+            Span<Coord> neighbours = stackalloc Coord[MostWaysOut];
+            int ways = board.Cells.DirectionCount;
 
             while (open.TryPop(out Coord at))
             {
@@ -146,9 +149,9 @@ namespace BattleChess.Rules.Grid
 
                 float here = best[at];
 
-                HexMath.Neighbours(at, neighbours);
+                board.Cells.Neighbours(at, neighbours);
 
-                for (int i = 0; i < neighbours.Length; i++)
+                for (int i = 0; i < ways; i++)
                 {
                     Coord next = neighbours[i];
 
@@ -161,14 +164,14 @@ namespace BattleChess.Rules.Grid
 
                     if (going <= 0f) continue;
 
-                    float through = here + step / (pace * going);
+                    float through = here + board.Cells.StepMetres(at, next) / (pace * going);
 
                     if (best.TryGetValue(next, out float already) && already <= through) continue;
 
                     best[next] = through;
                     cameFrom[next] = at;
 
-                    open.Push(next, through + Guess(next, goal, step, pace));
+                    open.Push(next, through + Guess(board, next, goal, pace));
                 }
             }
 
@@ -176,8 +179,17 @@ namespace BattleChess.Rules.Grid
         }
 
         /// <summary>Seconds the rest of the march cannot possibly take less than.</summary>
-        private static float Guess(Coord at, Coord goal, float step, float pace) =>
-            Coord.Distance(at, goal) * step / (pace * FastestGoingAllowedFor);
+        /// <remarks>
+        /// The distance comes from the lattice rather than from
+        /// <see cref="Coord"/>, which only knows the hex answer - on a square
+        /// board the shortest walk is the octile distance and not the straight
+        /// line, because a route may only move on the eight bearings.
+        /// </remarks>
+        private static float Guess(Board board, Coord at, Coord goal, float pace) =>
+            board.Cells.LeastMetresBetween(at, goal) / (pace * FastestGoingAllowedFor);
+
+        /// <summary>Room to ask any lattice for its neighbours.</summary>
+        private const int MostWaysOut = 8;
 
         private static List<Coord> Retrace(IReadOnlyDictionary<Coord, Coord> cameFrom, Coord from, Coord goal)
         {
@@ -245,7 +257,6 @@ namespace BattleChess.Rules.Grid
             BattleState battle, Board board, UnitInstance unit, List<Coord> hexes, int looked, Facing? arriveOn)
         {
             float pace = MathF.Max(0.1f, unit.Def.Speed);
-            float step = board.CellWidth;
 
             var waypoints = new List<Vec2>(hexes.Count) { unit.Position };
 
@@ -255,7 +266,8 @@ namespace BattleChess.Rules.Grid
             {
                 float going = board.GoingOn(battle, hexes[i], unit.Def.Movement);
 
-                seconds += step / (pace * MathF.Max(0.01f, going));
+                seconds += board.Cells.StepMetres(hexes[i - 1], hexes[i])
+                           / (pace * MathF.Max(0.01f, going));
 
                 waypoints.Add(board.CentreOf(hexes[i]));
             }
@@ -277,7 +289,7 @@ namespace BattleChess.Rules.Grid
             // six bearings already, so the steering arrives on a hex direction
             // without being told to; the last leg is the one where the player
             // may have asked for something other than the way of travel.
-            hold[hold.Length - 1] = Board.Snap(
+            hold[hold.Length - 1] = board.Snap(
                 arriveOn ?? Facing.Towards(waypoints[waypoints.Count - 2], waypoints[waypoints.Count - 1]));
 
             return new Plan(

@@ -16,11 +16,16 @@ namespace BattleChess.Unity
     /// all.
     /// </para>
     /// <para>
-    /// <b>One mesh, built once, of line topology.</b> The Great Field is about
-    /// fifteen hundred hexes, so a <c>LineRenderer</c> apiece would be fifteen
-    /// hundred objects redrawn every frame for a thing that never changes. Edges
-    /// are shared between neighbours and drawn once, keyed by their rounded
-    /// endpoints, which very nearly halves the segment count.
+    /// <b>One mesh, built once, of line topology.</b> A <c>LineRenderer</c> per
+    /// cell would be several hundred objects redrawn every frame for a thing
+    /// that never changes. Edges are shared between neighbours and drawn once,
+    /// keyed by their rounded endpoints, which very nearly halves the segment
+    /// count.
+    /// </para>
+    /// <para>
+    /// <b>It asks the lattice for corners [M151]</b> rather than knowing what
+    /// shape a cell is, so the same mesh builder draws a hex board and a square
+    /// one and there is no second drawing path to keep in step with the first.
     /// </para>
     /// <para>
     /// Faint on purpose, and under the units. The board is a reference the eye
@@ -47,19 +52,21 @@ namespace BattleChess.Unity
             var indices = new List<int>();
             var drawn = new HashSet<long>();
 
-            var corners = new Vec2[HexMath.DirectionCount];
+            var corners = new Vec2[board.Cells.CornerCount];
 
-            // The board is walked in world space rather than in hex space, so
-            // the sweep covers the map whatever the layout's origin happens to
-            // be. The margin of one hex either way is what stops the board
-            // stopping short of the map edge.
+            // The board is walked in world space rather than in cell space, so
+            // the sweep covers the map whatever the origin happens to be. The
+            // margin either way is what stops the board stopping short of the
+            // map edge, and it is generous because a hex lattice's coordinates
+            // are skewed and a plain rectangle of them does not cover a
+            // rectangle of ground.
             Coord min = board.Of(new Vec2(board.Bounds.Min.X, board.Bounds.Min.Y));
             Coord max = board.Of(new Vec2(board.Bounds.Max.X, board.Bounds.Max.Y));
 
-            int lowQ = Mathf.Min(min.Q, max.Q) - 2;
-            int highQ = Mathf.Max(min.Q, max.Q) + 2;
-            int lowR = Mathf.Min(min.R, max.R) - 2;
-            int highR = Mathf.Max(min.R, max.R) + 2;
+            int lowQ = Mathf.Min(min.Q, max.Q) - 3;
+            int highQ = Mathf.Max(min.Q, max.Q) + 3;
+            int lowR = Mathf.Min(min.R, max.R) - 3;
+            int highR = Mathf.Max(min.R, max.R) + 3;
 
             for (int q = lowQ; q <= highQ; q++)
             for (int r = lowR; r <= highR; r++)
@@ -68,7 +75,7 @@ namespace BattleChess.Unity
 
                 if (!board.OnBoard(hex)) continue;
 
-                board.Layout.GetCorners(hex, corners);
+                board.Cells.CornersOf(hex, corners);
 
                 for (int i = 0; i < corners.Length; i++)
                 {
@@ -87,7 +94,7 @@ namespace BattleChess.Unity
 
             var mesh = new Mesh { name = "Board" };
 
-            // Fifteen hundred hexes is well past the sixteen-bit vertex limit.
+            // A full board is well past the sixteen-bit vertex limit.
             mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(vertices);
             mesh.SetIndices(indices, MeshTopology.Lines, submesh: 0);

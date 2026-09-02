@@ -3644,3 +3644,52 @@ coordinate type and neighbour set change.
 
 Suite: 716 passing, 12 failing - the same 12 - 87 skipped, 815 total. Unity
 compiles clean.
+
+### M151 - squares, because a square axis has a square axis at right angles to it
+
+**The designer, after playing the hex board: "let's try going with the square
+grid."** Implemented behind `ILattice`, squares by default, hexes kept beside
+them.
+
+**The whole argument is one sentence.** A rectangle's frontage runs perpendicular
+to its facing, so whether regiments can stand in a line depends on whether the
+perpendicular of a cell axis is another cell axis. On a hex it never is - the six
+bearings are multiples of sixty and ninety plus a multiple of sixty is not one -
+so [M150] had to choose, and chose lines, leaving every advance weaving between
+the two bearings either side of its front. **On a square it always is**: the eight
+bearings are multiples of forty-five, and ninety plus a multiple of forty-five is
+another multiple of forty-five. Marching straight ahead and standing shoulder to
+shoulder are both real steps, on all four axes. Nothing is given up.
+
+**`ILattice` is where the difference now lives**, rather than spread through the
+board: cells, neighbours, rings, step cost, the admissible distance, the facings,
+the shoulder step, and the corners to draw. `Board`, `GridMode`, `BoardRoutePlanner`,
+the muster, the turn logic and `BoardView` are all indifferent to the shape, which
+is what makes the two comparable rather than merely both present.
+
+**Two things the square lattice must get right that the hex did not have to.**
+A diagonal step is the cell width times root two and is **priced as such**, or a
+route would prefer a staircase to the straight line it imitates and every march
+would come out bent. And the A* heuristic is the **octile** distance rather than
+the straight line, because a route may only move on the eight bearings - the
+straight line would overstate nothing but understate badly enough to make the
+search wander. Both come off the lattice; `Coord.Distance` is the hex answer and
+is no longer asked.
+
+**Cells stay `Coord`.** On a hex that is axial (q, r); on a square it is plainly
+(column, row), with the cube axis and the hex distance simply not used. Sharing
+the type is what lets `PathResult.SearchCells`, `CoordMinHeap` and the rest carry
+over untouched.
+
+**Cell size and turn length are unchanged**, and neither depends on the shape: the
+cell is still the widest body that stands on the field rounded up to five metres
+([M149]), and a turn is still ninety seconds, which buys metres rather than cells -
+foot 143 m, cavalry 428 - so the same numbers land on either board.
+
+**Not verified beyond building, on the designer's instruction** - "just implement
+it but dont run tests or do too much verification". Rules, tests and Unity all
+compile clean; the suite was not run and no measurement was taken. The line and
+overlap gates in `BoardSizeProbeTests` are shape-agnostic and will report on the
+square board the first time they are run, and `RegimentsInAdjacentHexesStandInALine`
+should now hold with the *straight* march as well, which is the claim this pass is
+actually making and the one still unmeasured.

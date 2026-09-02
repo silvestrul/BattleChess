@@ -21,7 +21,7 @@ namespace BattleChess.Rules.Grid
     /// <para>
     /// <b>What turning it on does, in full.</b> Two things. The route planner
     /// becomes <see cref="BoardRoutePlanner"/>, and every regiment is mustered
-    /// onto a hex. That is the entire mode. Combat, morale, vision, contact, the
+    /// onto a cell. That is the entire mode. Combat, morale, vision, contact, the
     /// clock, plan-then-fire, the drawn lines and every test in the suite are
     /// untouched and stay correct, because none of them ever asked where a
     /// regiment may stand - they ask where it <i>is</i>, and it is still a
@@ -37,29 +37,50 @@ namespace BattleChess.Rules.Grid
     /// </remarks>
     public static class GridMode
     {
-        /// <summary>How far a mustering regiment will be shuffled to find a free hex.</summary>
+        /// <summary>How far a mustering regiment will be shuffled to find a free cell.</summary>
         /// <remarks>
-        /// Six rings is 300 m, which is enough to unpack a deployment line where
-        /// several regiments share a hex and not enough to move one to a
-        /// different part of the field. Beyond it the regiment is left where it
-        /// stands, sharing a hex, and <see cref="Muster"/> says so in its count
-        /// rather than pretending it succeeded.
+        /// Six rings is six regiment-widths of ground, which is enough to unpack
+        /// a deployment line where several regiments share a cell and not enough
+        /// to move one to a different part of the field. Beyond it the regiment
+        /// is left where it stands, sharing a cell, and <see cref="Muster"/> says
+        /// so in its count rather than pretending it succeeded.
         /// </remarks>
         public const int ShufflesWithinRings = 6;
+
+        /// <summary>Which shape of cell the board is made of.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Squares [M151], on the designer's call after playing the hex
+        /// board.</b> A rectangle's frontage runs perpendicular to its facing,
+        /// and only on a square lattice is the perpendicular of an axis another
+        /// axis - so only there can a regiment march straight ahead <i>and</i>
+        /// stand shoulder to shoulder with its neighbours. On a hex board one of
+        /// those has to be given up; [M150] gave up straight marching, which
+        /// worked and left every advance weaving.
+        /// </para>
+        /// <para>
+        /// Read when a board is first built for a battle, so it must be set
+        /// before the battle starts. Changing it afterwards does nothing to a
+        /// board that already exists, which is deliberate: a board that changed
+        /// shape underneath a battle would move every regiment on it.
+        /// </para>
+        /// </remarks>
+        public static LatticeShape Shape { get; set; } = LatticeShape.Square;
 
         /// <summary>How many battle seconds one board turn lasts.</summary>
         /// <remarks>
         /// <para>
         /// <b>Reported from play: "the units move too little".</b> A turn buys a
-        /// regiment its pace times this over the fifty metres a hex is wide, so
-        /// at the continuous game's sixty seconds a line of foot walks 95 m -
-        /// under two hexes - and the board reads as glue.
+        /// regiment its pace times this, so at the continuous game's sixty
+        /// seconds a line of foot walks 95 m - barely a cell - and the board
+        /// reads as glue.
         /// </para>
         /// <para>
-        /// <b>A hundred and twenty.</b> Foot buys 3,8 hexes, artillery 3,1,
-        /// cavalry 11,4, scouts 13,2. The slow end is a move worth making and
-        /// the fast end is about a third of the board, which is roughly the
-        /// shape a mounted arm ought to have.
+        /// <b>Ninety.</b> Seconds times pace is metres whatever a cell is worth,
+        /// so this buys foot 143 m, artillery 117, cavalry 428 and scouts 495 -
+        /// which on the Great Field's 90 m cells is 1,6 cells for foot and 5,5
+        /// for scouts, against a short side of 20. The slow end is a move worth
+        /// making and the fast end is a quarter of the board.
         /// </para>
         /// <para>
         /// <b>Here rather than in the harness toggles, and that is a correction.</b>
@@ -88,10 +109,10 @@ namespace BattleChess.Rules.Grid
         private static IRoutePlanner? _wasPlanning;
 
         /// <summary>
-        /// Puts a battle on the board: musters everybody onto a hex and makes
+        /// Puts a battle on the board: musters everybody onto a cell and makes
         /// the board planner the one that draws routes.
         /// </summary>
-        /// <returns>How many regiments could not be given a hex of their own.</returns>
+        /// <returns>How many regiments could not be given a cell of their own.</returns>
         public static int TurnOn(BattleState battle)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
@@ -108,7 +129,7 @@ namespace BattleChess.Rules.Grid
 
         /// <summary>Gives the continuous game back.</summary>
         /// <remarks>
-        /// Regiments are left standing on their hexes rather than being put back
+        /// Regiments are left standing on their cells rather than being put back
         /// where they were. Where they were is gone - a mustered regiment moved,
         /// and the continuous game is perfectly happy with a tidy deployment.
         /// </remarks>
@@ -122,20 +143,19 @@ namespace BattleChess.Rules.Grid
         }
 
         /// <summary>
-        /// Stands every regiment on the centre of a hex of its own, facing one
-        /// of the six ways.
+        /// Stands every regiment on the centre of a cell of its own, on one of
+        /// the facings the board allows.
         /// </summary>
         /// <remarks>
         /// <para>
         /// Deployments are authored in metres for the continuous game, so
-        /// several regiments in a line can land in the same hex - a fifty-metre
-        /// hex against regiments authored forty metres apart. They are shuffled
-        /// outward one ring at a time, in the order the battle holds them, which
-        /// keeps a deployment line recognisably a line: the first of a pair
-        /// keeps the hex it wanted and the second steps aside.
+        /// several regiments in a line can land in the same cell. They are
+        /// shuffled outward one ring at a time, in the order the battle holds
+        /// them, which keeps a deployment line recognisably a line: the first of
+        /// a pair keeps the cell it wanted and the second steps aside.
         /// </para>
         /// <para>
-        /// <b>It reports what it could not do.</b> A regiment with no free hex
+        /// <b>It reports what it could not do.</b> A regiment with no free cell
         /// within <see cref="ShufflesWithinRings"/> is left where it stands and
         /// counted, because a muster that quietly leaves two bodies in one hex
         /// has broken the board's only promise, and a silent count of nought
@@ -161,7 +181,7 @@ namespace BattleChess.Rules.Grid
                 taken[hex] = unit.Id;
 
                 unit.Position = board.CentreOf(hex);
-                unit.Facing = Board.Snap(unit.Facing);
+                unit.Facing = board.Snap(unit.Facing);
             }
 
             return crowded;
@@ -169,7 +189,7 @@ namespace BattleChess.Rules.Grid
 
         /// <summary>
         /// Stands every regiment that has finished marching back on the centre
-        /// of a hex of its own. Regiments still on the road are left alone.
+        /// of a cell of its own. Regiments still on the road are left alone.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -223,7 +243,7 @@ namespace BattleChess.Rules.Grid
                 taken[hex] = unit.Id;
 
                 unit.Position = board.CentreOf(hex);
-                unit.Facing = Board.Snap(unit.Facing);
+                unit.Facing = board.Snap(unit.Facing);
             }
         }
 
@@ -231,7 +251,7 @@ namespace BattleChess.Rules.Grid
             unit.Route == null || unit.Route.IsComplete;
 
         /// <summary>
-        /// Puts one regiment back on the centre of the hex it has stopped in.
+        /// Puts one regiment back on the centre of the cell it has stopped in.
         /// </summary>
         /// <remarks>
         /// Called when a march ends. A regiment walks continuously between hexes
@@ -249,7 +269,7 @@ namespace BattleChess.Rules.Grid
             Board board = Board.For(battle);
 
             unit.Position = board.CentreOf(board.Of(unit.Position));
-            unit.Facing = Board.Snap(unit.Facing);
+            unit.Facing = board.Snap(unit.Facing);
         }
     }
 }

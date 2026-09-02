@@ -131,7 +131,7 @@ namespace BattleChess.Tests.Battle
                 // round so that lines could form - correctly, but it was
                 // measuring the constant and not the promise. The promise is
                 // that a mustered regiment is already on a board facing.
-                float off = Facing.AbsoluteDelta(unit.Facing, Board.Snap(unit.Facing)) * 180f / MathF.PI;
+                float off = Facing.AbsoluteDelta(unit.Facing, board.Snap(unit.Facing)) * 180f / MathF.PI;
 
                 worstTurn = MathF.Max(worstTurn, off);
             }
@@ -179,7 +179,7 @@ namespace BattleChess.Tests.Battle
             // The board itself, so the ceiling is a property of the field rather
             // than a number I picked. The Great Field is the largest in content
             // and its shorter side is what a flanking march has to cross.
-            float shortSide = board.ShortSideInHexes;
+            float shortSide = board.ShortSideInCells;
 
             _out.WriteLine("");
             _out.WriteLine($"spread {fastest / slowest:0.0}x, from {slowest:0.0} to {fastest:0.0} hexes");
