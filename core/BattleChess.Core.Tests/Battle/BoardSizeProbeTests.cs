@@ -405,5 +405,101 @@ namespace BattleChess.Tests.Battle
 
             Assert.True(gaveWay > 0, "nothing had to give way, so this arrangement is not testing the shove.");
         }
+
+        /// <summary>
+        /// A wing sent at one enemy forms up against it rather than queueing for
+        /// a single cell.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M153], reported from play: the wing fix "works for movement order
+        /// but not for attack order".</b> Correct, and half of it was [M152]'s
+        /// doing. A marching wing is handed a cell apiece by
+        /// <c>Board.FormUpAt</c> before a single route is asked for. An
+        /// attacking wing is handed nothing: every regiment works out its own
+        /// aim point from its own bearing to the quarry, and re-works it every
+        /// time the chase re-plans. [M152] then stopped wing-mates blocking each
+        /// other - right for a march, and for an attack it removed the only
+        /// thing keeping four regiments off the same cell.
+        /// </para>
+        /// <para>
+        /// So what is <i>in the way</i> and what <i>holds ground</i> became two
+        /// questions. A wing-mate is never in the way, because it is leaving;
+        /// whether it holds the ground a march may finish on depends on whether
+        /// it has a destination of its own, which under a move order it has and
+        /// under an attack order it has not.
+        /// </para>
+        /// <para>
+        /// Driven through <c>TurnOrders</c> rather than the planner directly,
+        /// because the book standing each drawn order at its finishing place is
+        /// half of what makes the answers distinct, and a test that skipped it
+        /// would be checking a mechanism the game does not use.
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void AWingSentAtOneEnemyFormsUpAgainstItRatherThanQueueing()
+        {
+            BattleState battle = Load("greatfield");
+
+            GridMode.Muster(battle);
+
+            Board board = Board.For(battle);
+
+            UnitInstance quarry = battle.UnitsOnField().First();
+
+            List<UnitInstance> wing = battle.UnitsOnField()
+                .Where(u => u.Owner != quarry.Owner)
+                .OrderBy(u => Vec2.Distance(u.Position, quarry.Position))
+                .Take(4)
+                .ToList();
+
+            Assert.Equal(4, wing.Count);
+
+            foreach (UnitInstance unit in wing) unit.Bond = -1;
+
+            var book = new TurnOrders();
+            var pathfinder = new HexPathfinder(
+                battle.Terrain, battle.Movement, battle.TerrainCatalogue);
+
+            // Named outright rather than through RoutePlanners.InUse, which is
+            // process-wide - see TheModeIsWhatDecidesWhichPlannerAMarchGets for
+            // what swapping it in a test costs.
+            var planner = new BoardRoutePlanner();
+
+            foreach (UnitInstance unit in wing)
+                Assert.True(
+                    book.Draw(battle, unit, UnitOrder.Attack(quarry.Id), pathfinder, null, planner),
+                    $"{unit.Def.Key} could not be drawn a route at {quarry.Def.Key}.");
+
+            var ends = new List<Coord>();
+
+            foreach (TurnOrders.Pending pending in book.Drawn)
+            {
+                Coord at = board.Of(pending.Ends);
+
+                ends.Add(at);
+
+                _out.WriteLine(
+                    $"{battle.Get(pending.Unit).Def.Key,-12} finishes at {at}, " +
+                    $"{Vec2.Distance(pending.Ends, quarry.Position) / board.CellWidth:0.0} cells from the quarry");
+            }
+
+            _out.WriteLine($"{ends.Count} attackers, {ends.Distinct().Count()} distinct cells");
+
+            // Every attacker has ground of its own to fight from.
+            Assert.Equal(ends.Count, ends.Distinct().Count());
+
+            // And none of them is standing where the quarry is.
+            Assert.DoesNotContain(board.Of(quarry.Position), ends);
+
+            // Non-vacuity: they really were all sent at the same regiment, so
+            // the aim points genuinely competed rather than being spread out by
+            // the arrangement.
+            foreach (Coord at in ends)
+                Assert.True(
+                    Coord.Distance(at, board.Of(quarry.Position)) <= 6 ||
+                    Math.Abs(at.Q - board.Of(quarry.Position).Q) <= 6,
+                    $"{at} is nowhere near the quarry, so this is not measuring a converging attack.");
+        }
     }
 }

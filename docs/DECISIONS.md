@@ -3753,3 +3753,46 @@ otherwise leave it measuring an arrangement where nothing was ever in doubt.
 
 Suite: 718 passing, 12 failing - the same 12 - 87 skipped, 817 total. Unity
 compiles clean.
+
+### M153 - what is in the way and what holds ground are two questions
+
+**Reported from play: the wing fix "works for movement order but not for attack
+order."** Correct, and half of it was [M152] making attacks worse rather than
+merely not better. Said plainly because it is the second time this sweep that a
+fix has broken the thing beside it.
+
+**Why a marching wing works and an attacking one did not.** A wing that marches
+is handed a cell apiece by `Board.FormUpAt` before a single route is asked for,
+so its members' destinations are distinct by construction. **A wing that attacks
+is handed nothing**: every regiment works out its own aim point from its own
+bearing to the quarry, and re-works it every time the chase re-plans. Those aim
+points converge, and [M152] then removed the one thing keeping the regiments
+apart - it stopped wing-mates counting as occupying ground, which is right for a
+march and exactly wrong here.
+
+**Measured red-first: four regiments sent at one enemy all finished on cell
+(3,22).** One distinct cell for four attackers.
+
+**So the two questions are separated.** A wing-mate is **never in the way** - a
+bond sets off as one body, so its cell is one it is leaving. Whether it **holds
+ground a march may finish on** depends on whether it has a destination of its
+own: under a move order it has one, under an attack order it has not. The
+planner now builds one set for the path and another for the goal, and takes the
+order kind as the test.
+
+**And the fix spreads a wing round its quarry for free.** `NearestFree` pushes
+each attacker in turn a ring further out, so four regiments sent at one enemy now
+finish on **four distinct cells, 1,0 to 1,4 cells from it** - a line forming up
+against an enemy rather than a queue behind one cell.
+
+**`TurnOrders.Draw` can now be told which planner to use.** Needed because the
+first draft of the reproduction drove the book with `GridMode.Muster` and got the
+*continuous* planner - `Muster` does not swap `RoutePlanners.InUse` and
+deliberately never will, since that static is process-wide and swapping it in a
+test cost 93 unrelated failures once already. The test names
+`BoardRoutePlanner` outright. That the first draft failed for this reason rather
+than for the fault it was written about is worth recording: a reproduction that
+does not go through the game's own path proves nothing about the game.
+
+Suite: 719 passing, 12 failing - the same 12 - 87 skipped, 818 total. Unity
+compiles clean.

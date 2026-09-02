@@ -79,9 +79,25 @@ namespace BattleChess.Rules.Grid
             Board board = Board.For(battle);
             MovementType moving = unit.Def.Movement;
 
-            // The mover's own wing is not in the way of it [M152]: a bond
-            // marches as one body, so a wing-mate's cell is one it is leaving.
-            Dictionary<Coord, UnitId> taken = board.WhoIsWhere(battle, unit);
+            // What is in the way, and what holds ground, are two different
+            // questions on a board [M153].
+            //
+            // The mover's own wing is not in the way of it [M152]: a bond sets
+            // off as one body, so a wing-mate's cell is one it is leaving, and
+            // treating it as held is what made a line come apart as it advanced.
+            Dictionary<Coord, UnitId> blockingTheWay = board.WhoIsWhere(battle, unit);
+
+            // Where a march may FINISH is a different matter, and getting it
+            // wrong is what broke group attacks. A wing that is marching has
+            // already been handed a cell apiece by Board.FormUpAt, so leaving
+            // its mates out costs nothing - their goals are distinct by
+            // construction. A wing that is ATTACKING has been handed nothing:
+            // every regiment works out its own aim point from its own bearing to
+            // the quarry, and re-works it every time the chase re-plans. Leave
+            // the mates out there and they all resolve to the same cell in front
+            // of the target and fight each other for it.
+            Dictionary<Coord, UnitId> holdingGround =
+                unit.Order.Kind == OrderKind.Move ? blockingTheWay : board.WhoIsWhere(battle);
 
             Coord from = board.Of(unit.Position);
             Coord wanted = board.Of(destination);
@@ -89,14 +105,17 @@ namespace BattleChess.Rules.Grid
             if (!board.OnBoard(wanted))
                 return NoRoute(PathFailure.GoalOffMap, $"{wanted} is off the board.");
 
-            // The hex asked for, or the nearest one this regiment could stand
-            // on. Its own hex never counts as taken, so an order that resolves
+            // The cell asked for, or the nearest one this regiment could stand
+            // on. Its own cell never counts as taken, so an order that resolves
             // to where it already is comes back as a route of no legs rather
-            // than as a failure.
-            if (!board.NearestFree(battle, unit, wanted, taken, WillSettleWithinRings, out Coord goal))
+            // than as a failure. For an attack this is also what spreads a wing
+            // around its quarry: each regiment in turn is pushed a ring further
+            // out, which is a line forming up against an enemy rather than a
+            // queue behind one cell.
+            if (!board.NearestFree(battle, unit, wanted, holdingGround, WillSettleWithinRings, out Coord goal))
                 return NoRoute(
                     PathFailure.GoalTooTight,
-                    $"nothing within {WillSettleWithinRings} hexes of {wanted} is free ground for " +
+                    $"nothing within {WillSettleWithinRings} cells of {wanted} is free ground for " +
                     $"{unit.Def.DisplayName}.");
 
             if (board.GoingOn(battle, from, moving) <= 0f && from != goal)
@@ -108,7 +127,8 @@ namespace BattleChess.Rules.Grid
                     hold: null,
                     pressedThrough: false);
 
-            if (!Search(battle, board, unit, taken, from, goal, moving, out List<Coord> hexes, out float _, out int looked))
+            if (!Search(battle, board, unit, blockingTheWay, from, goal, moving,
+                    out List<Coord> hexes, out float _, out int looked))
                 return NoRoute(PathFailure.NoRouteExists, $"no line of free hexes joins {from} to {goal}.", looked);
 
             return Drawn(battle, board, unit, hexes, looked, arriveOn);

@@ -93,7 +93,7 @@ namespace BattleChess.Rules
         /// </remarks>
         public bool Draw(
             BattleState battle, UnitInstance unit, UnitOrder order,
-            IPathfinder pathfinder, IBattleLog? log = null)
+            IPathfinder pathfinder, IBattleLog? log = null, IRoutePlanner? planner = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (unit == null) throw new ArgumentNullException(nameof(unit));
@@ -101,7 +101,7 @@ namespace BattleChess.Rules
             int had = IndexOf(unit.Id);
             if (had >= 0) _pending.RemoveAt(had);
 
-            if (!TryPlan(battle, unit, order, pathfinder, log, out Pending drawn)) return false;
+            if (!TryPlan(battle, unit, order, pathfinder, log, out Pending drawn, planner: planner)) return false;
 
 
             if (had >= 0) _pending.Insert(had, drawn);
@@ -195,10 +195,17 @@ namespace BattleChess.Rules
         /// drawing an order is a click.
         /// </para>
         /// </remarks>
+        /// <param name="planner">
+        /// Which planner draws the route, or null for whichever the game is
+        /// being played with. Naming one is what lets a test drive the book over
+        /// the board without swapping <c>RoutePlanners.InUse</c>, which is
+        /// process-wide and cost 93 unrelated failures the one time a test did
+        /// swap it.
+        /// </param>
         private bool TryPlan(
             BattleState battle, UnitInstance unit, UnitOrder order,
             IPathfinder pathfinder, IBattleLog? log, out Pending drawn,
-            UnitId standInstead = default, Vec2 standAt = default)
+            UnitId standInstead = default, Vec2 standAt = default, IRoutePlanner? planner = null)
         {
             drawn = default;
 
@@ -237,7 +244,7 @@ namespace BattleChess.Rules
 
             try
             {
-                Plan plan = Marching.PlanTo(battle, unit, pathfinder, destination, log);
+                Plan plan = Marching.PlanTo(battle, unit, pathfinder, destination, log, planner: planner);
 
                 if (!plan.Path.Found || plan.Path.Waypoints.Count < 2) return false;
 
