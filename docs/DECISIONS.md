@@ -3852,3 +3852,234 @@ is a move order **or a station**, which is the thing the rule was always about.
 
 Suite: 721 passing, 12 failing - the same 12 - 87 skipped, 820 total. Unity
 compiles clean.
+
+---
+
+## M155 - A cell is a piece of ground, not a parking space for a regiment
+
+Reported, and correctly: *"the grid isnt fine at all its very coarse"*, *"hex
+doesnt allow for line formations"*, *"square is just stupid"*. All three are true,
+and all three descend from **one** assumption made in M147 and never revisited:
+**one cell holds one unit**.
+
+Measure it. The Great Field is 1800 x 2400 m and its **terrain** grid is 25 m -
+72 x 96 cells. The board grid M147 built is **90 m** - 20 x 26 cells, for forty
+regiments a side. Nine metres of resolution were thrown away per cell, and the
+reason is arithmetic: a regiment is 80 x 40 m, a rotating regiment sweeps a circle
+89.4 m across, and a cell that must contain that circle at any facing cannot be
+smaller than 90 m. The coarseness was never a property of squares or hexes. It was
+the bounding circle of a rotating rectangle, and it was mine.
+
+### Octagons do not tile the plane
+
+Asked directly, so answered directly. Regular octagons tile only alongside squares,
+leaving a square hole at every corner (the truncated square tiling). An "octagonal
+grid" with no holes **is** the 8-neighbour square lattice, which `SquareLattice`
+already is. There is nothing to build and nothing to gain.
+
+The useful fact underneath the question is different: **on a fine lattice, angular
+resolution comes from the length of a move, not from the number of neighbours.** A
+one-cell step on squares has 8 headings. A six-cell move has about forty distinct
+end cells on its ring - roughly 9 degrees apart, finer than a hex ever offers. Square
+is not the problem. Square *at 90 m* is the problem.
+
+### The inversion
+
+A unit no longer stands **on** a cell. A unit **covers** a set of cells: the
+rasterisation of its oriented rectangle onto a fine lattice, recomputed for the
+facing it holds. Everything the designer asked for falls out of that rather than
+having to be arranged:
+
+- **lines are exact**, because a shoulder offset is a vector of cells and a line is
+  a translation, so there is no stagger to weave out of
+- **rotation on 15 degrees** works, because nothing must fit a body inside one cell -
+  only decide which cells the body covers
+- **speed is an integer budget** in fine cells - artillery 1, swordsman 2, cavalry 6
+  per turn as asked - and nobody stops midway, because 25 m is a step rather than a
+  journey
+- **competition for a destination stops being a heuristic.** Two units conflict if
+  and only if their cell sets intersect. That is a fact, checkable, not an estimate
+  of one; the whole of M152 to M154 was an attempt to approximate it from points.
+
+### Decided this turn, with the designer
+
+- **Cell size is a setting, not a derivation.** 25 m to start, because it is exactly
+  the terrain grid and a third coordinate system is a third thing to keep in step.
+  12.5 m is to be measured as well, so the setting must be real rather than nominal.
+  `Board.CellFor(widestBody)` is superseded: cell size no longer depends on what is
+  standing on the field.
+- **Turns resolve simultaneously, and clashes are settled afterwards.** Not
+  reserve-then-move. Chosen for how it plays, against my recommendation, which is
+  the designer's call to make; the cost is that a drawn order can fail after it was
+  committed to, so the resolution rule must be deterministic and it must be visible
+  in the log.
+- **A wing in mode 2 translates rigidly, approximately.** Exact relative offsets are
+  what the designer drew, so they are what is aimed at; where a slot is unreachable
+  or contested the regiment takes the nearest place it can and the shape gives a
+  little, rather than the wing re-forming itself into something nobody asked for.
+  This is `Board.FormUpAt` generalised off the board.
+
+### What is being kept
+
+`ILattice` survives untouched - the shape seam was right even though the scale was
+wrong, and it is what lets 25 m and 12.5 m be compared honestly. `HexLattice`
+survives with it: with multi-cell footprints the M150 line-versus-march
+incompatibility weakens, because a line is a set of cells rather than a bearing, so
+the question is worth reopening once this is measurable rather than being closed by
+the old arithmetic.
+
+### Measured
+
+The board, on the Great Field, with the whole order of battle standing on it:
+
+| | 25 m cells | 12,5 m cells |
+|---|---|---|
+| board | 72 x 96 = 6 912 cells | 144 x 192 = 27 648 |
+| a regiment (80 x 40 m) covers | 15 cells | 35 cells |
+| spearmen a turn | **2** | 4 |
+| cavalry a turn | **6** | 11 |
+| ground claimed twice after mustering | **0** | **0** |
+| 24 fronts give | 12 distinct footprints - the most a rectangle can have | |
+
+The pace at 25 m is the designer's own guess, arrived at from the other end.
+
+Twelve regiments then ordered at one piece of ground - converging orders, which
+is what every earlier model broke on - and marched six turns:
+
+| | 25 m | 12,5 m |
+|---|---|---|
+| routed | 9 of 12 | 12 of 12 |
+| steps taken | 175 | 395 |
+| clashes settled | 13 | 25 |
+| ground claimed twice, any turn | **0** | **0** |
+| anybody between cells at a turn's end | **none** | **none** |
+
+**The three that cannot be routed at 25 m are the finding, and they are kept.**
+They are exactly the three with a neighbour on both sides. The Great Field deploys
+its line at 100 m intervals; a regiment is 89 m across its diagonal; turning one
+onto a diagonal inside a 100 m corridor needs 85 m of width, which a 25 m grid
+rounds up until it does not fit. **The army is packed finer than the cell it is
+being played on.** That is the price of 25 m stated honestly, against 12,5 m
+costing about nine times the search, and both sizes are left working rather than
+one being declared the winner from the desk.
+
+The free game, five regiments in line marched onto ground with an outsider
+standing in the middle of it: four keep their place exactly, one gives way 23 m,
+and no two of the five places overlap. Rigid, approximately, which is what was
+asked for.
+
+Suite: to be recorded below. Unity compiles clean.
+
+---
+
+## M156 - Ask the obstacles where they are, not the board what is on it
+
+Reported after M155 landed, in three words: *"performance is horrible"*. Correct,
+and the cause was the new occupancy model asked the wrong way round.
+
+**Measured before touching anything.** One route on the Great Field:
+
+| | 25 m cells | 12,5 m cells |
+|---|---|---|
+| one route | 92 ms, 5 408 cells explored | 566 ms, 18 665 explored |
+
+Thirty microseconds per cell expanded, for a Dijkstra step that should cost a
+fraction of one. The cost is not in the search; it is in the question the search
+asks. Every expansion tests 8 fronts, and every front test walks the mover's whole
+footprint - 35 cells on a 12,5 m board. **280 inner steps to expand one cell.**
+
+### Three fixes, and only the third one mattered
+
+Kept in that order because the first two are the ones that looked obvious.
+
+1. **The stencil.** Which cells a body covers was worked out by flooding its
+   rectangle, every time, allocating three collections a go. But cell centres form
+   a lattice and coverage depends only on the offset between the body's centre and
+   a cell's, so **the covered set is the same everywhere** - compute it once per
+   footprint and front and it is a handful of array reads afterwards. True on
+   hexes as well as squares, since both map cells to world linearly. **Bought
+   about 5x.**
+2. **Numbering the cells,** so the going underfoot and the fits-here memo could be
+   arrays rather than dictionaries. Squares only - an axial box round a rectangle
+   either loses corners or wastes a great deal of room, and hexes are kept for
+   comparison, which is allowed to be slower. **Bought nothing measurable, and it
+   is recorded because it was the change I was most confident about.**
+3. **Turning the question round.** Asking each of 27 000 cells "would a body here
+   hit anything" is the expensive direction. Take instead the few thousand cells
+   that *are* something - bodies, and ground this mover cannot cross - and mark
+   the places a body would have to stand to touch one. That is the stencil
+   reflected through its centre, it costs *obstacles x footprint* rather than
+   *board x footprint*, it is done once per search instead of once per expansion,
+   and every question afterwards is a single array read. **Bought 5 to 8x on top.**
+
+### After
+
+| | 25 m | 12,5 m |
+|---|---|---|
+| one route | **17 ms** (was 92) | **70 ms** (was 566) |
+| twelve converging orders and six turns | **0,19 s** (was 3 s) | **0,9 s** (was 26 s) |
+
+**Cells explored are identical - 5 408 and 18 665 - so this is provably the same
+search returning the same routes, only cheaper.** Three runs each, as the bench
+rule requires; the spread was under 10 per cent.
+
+The remaining cost is Dijkstra's own `best` and `cameFrom` dictionaries, about
+150 000 lookups a route. They could be arrays on the same numbering as above.
+Left alone deliberately: 17 ms an order is a wing of twenty in a third of a second
+on a worker thread, and the next optimisation should be chosen after somebody has
+played it rather than before.
+
+### And a bug of my own, which the suite caught and I nearly did not
+
+[M155] had `MovementSystem.Step` stand aside while `GridMode.On` was set - a flag
+**on the process**. xunit runs test classes in parallel, so the moment one test
+mustered a board, every other battle running beside it stopped walking. The suite
+went from 12 failures to 29, then to 33 on an identical re-run, **and the set of
+failing tests changed between the two**: Charge, Closing, Marching, Stance and
+TurnOrders one time; Crabbing and SharedFrontage the next.
+
+A shifting failure set is the tell. It is not a regression, it is contention, and
+chasing any one of those tests would have been chasing a symptom.
+
+Two causes, both mine, both the same shape:
+
+- **The walker gated on a global.** Which game a battle is playing is a fact about
+  *the battle*, so it is stored against the battle now (`GridMode.IsBoard`), not
+  read off a static.
+- **My own test called `GridMode.TurnOn`,** which swaps `RoutePlanners.InUse`
+  process-wide - for a second or so, every battle on the machine was routed over a
+  board it was not standing on. This is the *third* time that switch has done
+  this; `BoardTests` already carries a skipped test as the record of the first.
+  The test musters and passes the planner by hand instead.
+
+And every board-touching test class now shares one xunit collection, because the
+cell size, lattice and facing count are settings on a static and two of those
+classes change them.
+
+**The baseline was also measured rather than remembered.** I had been quoting "the
+same 12" all session without ever having the list; it was taken properly this time,
+by stashing the work and running the suite on a clean tree.
+
+### Three board tests were re-recorded, not repaired
+
+They encoded the rule [M155] removed, and loosening them would have been the
+dishonest fix:
+
+- `TheBoardHoldsEveryRegimentThatStandsOnIt` asserted a cell holds a whole
+  regiment at any facing - the very rule that forced a 90 m cell. It is now
+  `EveryRegimentCoversSeveralCellsOfTheBoard`, and asserts the opposite: the cell
+  must be **narrower** than the widest body on the field, and that body must lie
+  over more than one. Asked of the widest regiment and not of every one, because a
+  scout of a hundred men really is smaller than a cell and there is nothing wrong
+  with that.
+- `RegimentsInAdjacentHexesStandInALine` built its line by putting regiments in
+  **adjacent cells**, which on a fine board stands them through one another. It is
+  now `RegimentsAFrontageApartStandInALine`, and its non-vacuity guard was turned
+  over too: it used to require the regiment be no wider than its cell, and now
+  requires that a frontage span at least two.
+- `AMarchGoesRoundWhatIsInTheWayAllTheWayToItsDestination` measured its wall and
+  its target **in cells**, so on a 25 m board the target sat inside the wall. It
+  is measured in frontages.
+
+Suite: **729 passing, 12 failing - the same 12 as the baseline, name for name,
+twice running** - 87 skipped, 828 total. Unity compiles clean.

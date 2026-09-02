@@ -27,6 +27,7 @@ namespace BattleChess.Tests.Battle
     /// instead, passed for a day, and was wrong by a factor of two - see [M149].
     /// </para>
     /// </remarks>
+    [Collection("the board")]
     public sealed class BoardTests : IDisposable
     {
         private readonly ITestOutputHelper _out;
@@ -246,8 +247,20 @@ namespace BattleChess.Tests.Battle
 
             UnitInstance marcher = battle.UnitsOnField().First(u => u.Def.Key == "cavalry");
 
+            // [M155] Everything here is measured in FRONTAGES, not in cells. A
+            // cell used to be a regiment wide, so "four cells east" was four
+            // regiment-widths and five regiments in adjacent cells were a wall.
+            // On a fine board four cells is a hundred metres, the target sits
+            // inside the wall, and the five wall regiments stand through one
+            // another - the arrangement stopped describing the thing it was
+            // written to describe.
+            int step = Math.Max(1, (int)MathF.Ceiling(marcher.Footprint.Width / board.CellWidth));
+
+            var east = new Coord(step, 0);
+            var sideways = new Coord(0, step);
+
             Coord from = board.Of(marcher.Position);
-            Coord target = from + HexMath.Offset(HexDirection.East) * 4;
+            Coord target = from + east * 8;
 
             // Everybody else is moved well out of the way first, so the only
             // thing this march has to avoid is the thing the test puts there.
@@ -255,19 +268,19 @@ namespace BattleChess.Tests.Battle
             {
                 if (other.Id == marcher.Id) continue;
 
-                other.Position = board.CentreOf(from + HexMath.Offset(HexDirection.SouthEast) * 40);
+                other.Position = board.CentreOf(from + sideways * 40);
             }
 
-            // A wall right across the way, two hexes out.
-            Coord ahead = from + HexMath.Offset(HexDirection.East) * 2;
+            // A wall right across the way, two frontages out and five wide.
+            Coord ahead = from + east * 2;
 
             var wall = new List<Coord>
             {
                 ahead,
-                ahead + HexMath.Offset(HexDirection.NorthEast),
-                ahead + HexMath.Offset(HexDirection.NorthWest),
-                ahead + HexMath.Offset(HexDirection.SouthEast),
-                ahead + HexMath.Offset(HexDirection.SouthWest)
+                ahead + sideways,
+                ahead + sideways * 2,
+                ahead - sideways,
+                ahead - sideways * 2
             };
 
             List<UnitInstance> spare = battle.UnitsOnField()

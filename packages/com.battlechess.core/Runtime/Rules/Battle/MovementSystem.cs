@@ -171,6 +171,12 @@ namespace BattleChess.Rules
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
+            // [M155] On the board, movement is not walked. BoardTurn takes whole
+            // cells at the end of a turn, so a regiment is never between two of
+            // them - and if the walker also ran, the same march would be
+            // advanced twice by two models that price it differently.
+            if (Grid.GridMode.StepsOverCells && Grid.GridMode.IsBoard(battle)) return;
+
             // Ascending unit id, always — the ordering guarantee the whole
             // simulation's reproducibility rests on.
             foreach (UnitInstance unit in battle.UnitsOnField())

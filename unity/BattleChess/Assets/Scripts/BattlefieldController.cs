@@ -233,10 +233,19 @@ namespace BattleChess.Unity
 
             GridGame.Board board = GridGame.Board.For(_battle);
 
+            // [M155] Read off the units rather than off two speeds written into
+            // this string, which is how the old line came to quote "hexes" on a
+            // square board sized for a regiment nobody fields.
+            var pace = new List<string>();
+            var seen = new HashSet<string>();
+
+            foreach (UnitInstance one in _battle.UnitsOnField())
+                if (seen.Add(one.Def.Key))
+                    pace.Add($"{one.Def.Key} {GridGame.GridMode.CellsPerTurn(one)}");
+
             _console.Info("Board",
-                $"The board game. {board}, and a turn of {GridGame.GridMode.TurnSeconds:0} s buys " +
-                $"foot {1.59f * GridGame.GridMode.TurnSeconds / board.CellWidth:0.0} hexes " +
-                $"and cavalry {4.76f * GridGame.GridMode.TurnSeconds / board.CellWidth:0.0}.");
+                $"The board game. {board}, {GridGame.GridMode.FacingCount} fronts, and a turn of " +
+                $"{GridGame.GridMode.TurnSeconds:0} s buys, in cells: {string.Join(", ", pace)}.");
 
             if (crowded > 0)
                 _console.Warning("Board",
@@ -1134,13 +1143,18 @@ namespace BattleChess.Unity
             // So the shoving is settled here, once, in order, before a single
             // route is asked for. What comes back is a cell apiece and no two
             // the same.
-            if (_options.GridMode)
-            {
-                Vec2[] formed = GridGame.Board.For(_battle).FormUpAt(
-                    _battle, wing, wanted, GridGame.GridMode.ShufflesWithinRings);
+            //
+            // [M155] And off the board the same thing is true for the same
+            // reason - there are just no cells to be exact about, so two wanted
+            // places can overlap by a metre and both planners will route to them
+            // quite happily. WingFormation is the continuous twin: rigid, and
+            // approximate exactly where being exact is impossible.
+            Vec2[] formed = _options.GridMode
+                ? GridGame.Board.For(_battle).FormUpAt(
+                    _battle, wing, wanted, GridGame.GridMode.ShufflesWithinRings)
+                : WingFormation.FormUpAt(_battle, wing, wanted, bearing);
 
-                for (int i = 0; i < wanted.Length; i++) wanted[i] = formed[i];
-            }
+            for (int i = 0; i < wanted.Length; i++) wanted[i] = formed[i];
 
             // Handed to a worker and applied when it lands. The clock is held
             // meanwhile, so the field the wing is planned against is the field
@@ -1642,7 +1656,22 @@ namespace BattleChess.Unity
                     // which is what marching looks like. Without this the drift
                     // off a centre accumulates over a dozen turns until
                     // regiments stand visibly off the board they play on.
-                    if (_options.GridMode) GridGame.GridMode.SettleThoseWhoHaveStopped(_battle);
+                    if (_options.GridMode)
+                    {
+                        // [M155] The turn's movement, all of it, resolved at
+                        // once. Everybody advances their whole allowance of cells
+                        // and clashes over ground are settled as they happen -
+                        // which is the designer's choice of simultaneous
+                        // movement, and the reason MovementSystem does not walk
+                        // anybody while the board is on.
+                        GridGame.BoardTurn.Summary moved =
+                            GridGame.BoardTurn.Resolve(_battle, _console);
+
+                        if (moved.Steps > 0 || moved.Clashes > 0)
+                            _console.Info("Board", $"Turn resolved: {moved}.");
+
+                        GridGame.GridMode.SettleThoseWhoHaveStopped(_battle);
+                    }
 
                     break;
                 }

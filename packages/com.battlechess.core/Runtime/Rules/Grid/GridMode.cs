@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -45,7 +46,7 @@ namespace BattleChess.Rules.Grid
         /// is left where it stands, sharing a cell, and <see cref="Muster"/> says
         /// so in its count rather than pretending it succeeded.
         /// </remarks>
-        public const int ShufflesWithinRings = 6;
+        public const int ShufflesWithinRings = 24;
 
         /// <summary>Which shape of cell the board is made of.</summary>
         /// <remarks>
@@ -66,6 +67,104 @@ namespace BattleChess.Rules.Grid
         /// </para>
         /// </remarks>
         public static LatticeShape Shape { get; set; } = LatticeShape.Square;
+
+        /// <summary>How many metres a cell is across, flat to flat.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M155]. A setting, and no longer a derivation.</b> It was worked
+        /// out from the widest regiment on the field, because one cell had to
+        /// hold one regiment however it was turned - which for an 80 x 40 m body
+        /// means 90 m, and gave the Great Field a 20 x 26 board. A regiment now
+        /// covers several cells, so the cell answers to the ground instead of to
+        /// the regiment.
+        /// </para>
+        /// <para>
+        /// <b>Twenty-five metres, because that is what the maps are drawn at.</b>
+        /// The Great Field is authored as 72 x 96 terrain cells of 25 m. Matching
+        /// it exactly means the going under a cell is one terrain cell's going
+        /// rather than a sample of several, and it means there is no third
+        /// coordinate system in the codebase to keep in step with the other two.
+        /// </para>
+        /// <para>
+        /// 12,5 m is the other size to measure, and it is deliberately a half
+        /// rather than some other fraction: halving keeps every cell boundary on
+        /// a terrain boundary, so the two are comparable and the finer one is not
+        /// quietly also testing a misalignment.
+        /// </para>
+        /// </remarks>
+        public static float CellMetres { get; set; } = 25f;
+
+        /// <summary>How many fronts a regiment may hold, evenly round the circle.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M155]. Twenty-four, which is a front every 15 degrees</b>, as
+        /// asked for. It is deliberately not the lattice's own count any more:
+        /// the number of directions a cell has neighbours in decided how a
+        /// regiment could face only while a regiment had to fit inside one cell.
+        /// A body that covers a set of cells can be turned to any angle the set
+        /// can be computed for.
+        /// </para>
+        /// <para>
+        /// 24 is chosen over 12 or 8 because it is a superset of both lattices'
+        /// own facings - 45 is three steps of 15, and the hex's 30-degree-offset
+        /// 60s are two steps - so nothing that was a legal front before has
+        /// stopped being one, and the M150 and M152 recordings still mean what
+        /// they meant.
+        /// </para>
+        /// </remarks>
+        public static int FacingCount { get; set; } = 24;
+
+        /// <summary>
+        /// Whether movement on the board is taken in whole cells at the end of a
+        /// turn rather than walked metre by metre through the ticks.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M155]. On, and it is what makes the board game turn-based rather
+        /// than a continuous game played on squared paper.</b> The designer's
+        /// requirement was that a regiment cannot stop midway, and a walker that
+        /// covers 143 m in a 90 s turn stops wherever 143 m happens to land. A
+        /// stepped regiment ends every turn on a cell centre because a step is
+        /// the only thing it can take.
+        /// </para>
+        /// <para>
+        /// Movement only. Fighting, morale, sighting and the clock all still run
+        /// through the ticks exactly as they do in the free game - the board was
+        /// always meant to constrain <i>where a regiment may stand</i> and
+        /// nothing else, and a second combat model would be a second thing that
+        /// can disagree with the first.
+        /// </para>
+        /// </remarks>
+        public static bool StepsOverCells { get; set; } = true;
+
+        /// <summary>
+        /// How many cells a regiment of this kind covers in one turn of the
+        /// board game.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M155], and it is derived rather than tabled.</b> The designer
+        /// guessed "swordsman advances 2, cavalry 6, artillery 1", and that guess
+        /// turns out to be a <b>30-second turn on a 25 m grid</b> almost exactly:
+        /// artillery 1,3 m/s is 1,6 cells, foot 1,59 is 1,9, cavalry 4,76 is 5,7.
+        /// So the turn length was set to the designer's numbers rather than the
+        /// numbers being written down beside a turn length that disagreed with
+        /// them - which is the M148 mistake, and it is not being made twice.
+        /// </para>
+        /// <para>
+        /// Rounded, with a floor of one: a regiment that cannot move at all in a
+        /// turn is not slow, it is broken, and the going underfoot already has a
+        /// multiplier for being slow.
+        /// </para>
+        /// </remarks>
+        public static int CellsPerTurn(UnitInstance unit)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            float metres = unit.Def.Speed * TurnSeconds;
+
+            return Math.Max(1, (int)MathF.Round(metres / CellMetres));
+        }
 
         /// <summary>How many battle seconds one board turn lasts.</summary>
         /// <remarks>
@@ -96,7 +195,7 @@ namespace BattleChess.Rules.Grid
         /// keeps its own sixty and every test counting on them stays correct.
         /// </para>
         /// </remarks>
-        public static float TurnSeconds { get; set; } = 90f;
+        public static float TurnSeconds { get; set; } = 30f;
 
         /// <summary>The same, in ticks, which is what the clock counts in.</summary>
         public static int TicksPerTurn =>
@@ -124,6 +223,11 @@ namespace BattleChess.Rules.Grid
                 On = true;
             }
 
+            // [M156] And remembered against THIS battle, not only as a flag on
+            // the process. See IsBoard.
+            Boarded.Remove(battle);
+            Boarded.Add(battle, Yes);
+
             return Muster(battle);
         }
 
@@ -141,6 +245,34 @@ namespace BattleChess.Rules.Grid
             _wasPlanning = null;
             On = false;
         }
+
+        private static readonly ConditionalWeakTable<BattleState, object> Boarded =
+            new ConditionalWeakTable<BattleState, object>();
+
+        private static readonly object Yes = new object();
+
+        /// <summary>Whether this particular battle is being played on a board.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M156], and it is a bug I wrote and the suite caught.</b> [M155]
+        /// had <c>MovementSystem.Step</c> stand aside while <see cref="On"/> was
+        /// set - a flag on the process. The suite runs test classes in parallel,
+        /// so the moment one test mustered a board, <b>every other battle running
+        /// beside it stopped walking</b>: seventeen tests failed across marching,
+        /// charging, closing, stopping short and collision recording, none of
+        /// which has anything to do with the board.
+        /// </para>
+        /// <para>
+        /// This is the second time a process-wide switch has done this - the
+        /// first was <c>RoutePlanners.InUse</c> in [M147], and there is a skipped
+        /// test in BoardTests kept as the record of it. The lesson taken this
+        /// time is the stronger one: <b>which game a battle is playing is a fact
+        /// about the battle</b>, so it is stored against the battle. The flag
+        /// stays only for the planner swap, which has nowhere better to live yet.
+        /// </para>
+        /// </remarks>
+        public static bool IsBoard(BattleState battle) =>
+            battle != null && Boarded.TryGetValue(battle, out _);
 
         /// <summary>
         /// Stands every regiment on the centre of a cell of its own, on one of
@@ -173,15 +305,24 @@ namespace BattleChess.Rules.Grid
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
+                // [M155] The front is settled BEFORE the place is looked for,
+                // because which cells a body covers depends on which way it is
+                // turned. Snapping the facing afterwards - which is what this did
+                // while a cell held a whole regiment however it was turned - can
+                // rotate a body straight into the neighbour whose ground was just
+                // checked as clear.
+                Facing front = board.Snap(unit.Facing);
+
                 Coord wanted = board.Of(unit.Position);
 
-                if (!board.NearestFree(battle, unit, wanted, taken, ShufflesWithinRings, out Coord hex))
+                if (!board.NearestFree(battle, unit, wanted, taken, ShufflesWithinRings, front, out Coord cell))
                     crowded++;
 
-                taken[hex] = unit.Id;
+                unit.Position = board.CentreOf(cell);
+                unit.SettleFrontOn(front);
 
-                unit.Position = board.CentreOf(hex);
-                unit.SettleFrontOn(board.Snap(unit.Facing));
+                foreach (Coord under in Occupancy.Under(board.Cells, unit))
+                    taken[under] = unit.Id;
             }
 
             return crowded;

@@ -96,6 +96,20 @@ namespace BattleChess.Rules.Grid
 
         /// <summary>The corners of a cell, for drawing it.</summary>
         void CornersOf(Coord cell, Span<Vec2> into);
+
+        /// <summary>
+        /// Whether a body standing here would cover this cell, allowing
+        /// <paramref name="margin"/> metres of air around it.
+        /// </summary>
+        /// <remarks>
+        /// <b>[M155], and it is what replaced "one regiment to a cell".</b> A
+        /// regiment no longer stands <i>on</i> a cell; it <i>covers</i> the cells
+        /// its rectangle lies over, so a cell can be finer than a regiment and
+        /// two bodies clash exactly when their cell sets meet. The test belongs
+        /// to the lattice because it depends on the shape of a cell, which is the
+        /// one thing a lattice is for.
+        /// </remarks>
+        bool Covers(Coord cell, in OrientedRect body, float margin);
     }
 
     /// <summary>Six-sided cells, pointy-top. The board as [M147] first built it.</summary>
@@ -161,7 +175,28 @@ namespace BattleChess.Rules.Grid
             return HexMath.Offset((HexDirection)which);
         }
 
+        private static readonly float Root3 = MathF.Sqrt(3f);
+
         public void CornersOf(Coord cell, Span<Vec2> into) => _layout.GetCorners(cell, into);
+
+        /// <summary>
+        /// A hex is treated as its circumscribed circle: conservative, so a body
+        /// is never reported as covering less ground than it does.
+        /// </summary>
+        /// <remarks>
+        /// The error runs one way on purpose. Under-reporting coverage would let
+        /// two rectangles overlap through a corner no cell claimed, which is the
+        /// exact fault this whole model exists to make impossible. Over-reporting
+        /// costs a ring of cells nobody is really standing on.
+        /// </remarks>
+        public bool Covers(Coord cell, in OrientedRect body, float margin)
+        {
+            Vec2 centre = CentreOf(cell);
+
+            float reach = CellWidth / Root3 + margin;
+
+            return Vec2.DistanceSquared(body.ClosestPointTo(centre), centre) <= reach * reach;
+        }
     }
 
     /// <summary>
@@ -299,6 +334,60 @@ namespace BattleChess.Rules.Grid
             if (which < 0) which += Steps.Length;
 
             return Steps[which];
+        }
+
+        /// <summary>
+        /// Exact, by separating axes: a square cell and an oriented rectangle
+        /// overlap unless one of four axes separates them.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M155].</b> Squares get the exact test rather than a circle,
+        /// because squares are the default lattice and the whole value of the
+        /// fine grid is that a line of regiments packs without slack. A
+        /// circumscribed-circle test would inflate every body by 41 per cent at
+        /// the corners, which on a 25 m cell is a phantom cell of separation
+        /// between neighbours - it would put the stagger back that [M150]
+        /// measured out.
+        /// </para>
+        /// <para>
+        /// Four axes suffice: the world X and Y, which are the cell's own, and
+        /// the body's forward and right. Two convex shapes miss each other if
+        /// and only if some axis separates them, and for a box pair only the face
+        /// normals can.
+        /// </para>
+        /// </remarks>
+        public bool Covers(Coord cell, in OrientedRect body, float margin)
+        {
+            Vec2 centre = CentreOf(cell);
+
+            float half = CellWidth * 0.5f + margin;
+
+            Vec2 between = body.Centre - centre;
+
+            Vec2 forward = body.Forward;
+            Vec2 right = body.Right;
+
+            float halfDepth = body.Footprint.HalfDepth;
+            float halfWidth = body.Footprint.HalfWidth;
+
+            // The cell's own axes: the body's shadow on each is the sum of its
+            // two half-extents projected onto it.
+            if (MathF.Abs(between.X) >
+                half + MathF.Abs(forward.X) * halfDepth + MathF.Abs(right.X) * halfWidth) return false;
+
+            if (MathF.Abs(between.Y) >
+                half + MathF.Abs(forward.Y) * halfDepth + MathF.Abs(right.Y) * halfWidth) return false;
+
+            // The body's axes: the cell is a square, so its shadow on any axis
+            // is half*(|x|+|y|) of that axis.
+            if (MathF.Abs(Vec2.Dot(between, forward)) >
+                halfDepth + half * (MathF.Abs(forward.X) + MathF.Abs(forward.Y))) return false;
+
+            if (MathF.Abs(Vec2.Dot(between, right)) >
+                halfWidth + half * (MathF.Abs(right.X) + MathF.Abs(right.Y))) return false;
+
+            return true;
         }
 
         public void CornersOf(Coord cell, Span<Vec2> into)

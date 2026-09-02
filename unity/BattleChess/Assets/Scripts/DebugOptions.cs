@@ -120,6 +120,37 @@ namespace BattleChess.Unity
             set => BattleChess.Rules.Grid.GridMode.TurnSeconds = value;
         }
 
+        /// <summary>Metres a board cell is across.</summary>
+        /// <remarks>
+        /// <para>
+        /// A knob over the rule, for the same reason as the turn length above.
+        /// <b>25 m</b> is the ground the maps are drawn at, and gives the pace
+        /// the designer asked for - foot 2 cells a turn, cavalry 6. <b>12,5 m</b>
+        /// is the other size worth playing: it costs about nine times the search
+        /// and it is the one on which the Great Field's own deployment, packed
+        /// at 100 m intervals, has room to turn - see TwoModesTests.
+        /// </para>
+        /// <para>
+        /// Read when the board is built, which is once, at load.
+        /// </para>
+        /// </remarks>
+        public float GridCellMetres
+        {
+            get => BattleChess.Rules.Grid.GridMode.CellMetres;
+            set => BattleChess.Rules.Grid.GridMode.CellMetres = value;
+        }
+
+        /// <summary>Fronts a regiment may hold on the board, evenly round the circle.</summary>
+        /// <remarks>
+        /// 24, which is a front every 15 degrees. 12 and 8 are the other sensible
+        /// settings; every one of them keeps the lattice's own directions legal.
+        /// </remarks>
+        public int GridFacings
+        {
+            get => BattleChess.Rules.Grid.GridMode.FacingCount;
+            set => BattleChess.Rules.Grid.GridMode.FacingCount = value;
+        }
+
         public bool Running = true;
 
         /// <summary>

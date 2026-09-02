@@ -35,6 +35,7 @@ namespace BattleChess.Tests.Battle
     /// hexes, which was true the whole time and told nobody anything.
     /// </para>
     /// </remarks>
+    [Collection("the board")]
     public sealed class BoardSizeProbeTests
     {
         private readonly ITestOutputHelper _out;
@@ -64,17 +65,27 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>
-        /// The board built for a field holds every regiment standing on it.
+        /// Every regiment on every field covers several cells of its board.
         /// </summary>
         /// <remarks>
-        /// Non-vacuity: the cell size is derived from the widest body on the
-        /// field, so this can only fail if the derivation itself is wrong - and
-        /// it did fail, loudly, on six of fourteen fields while the cell was a
-        /// constant. It is kept as the guard on <c>Board.CellFor</c>.
+        /// <para>
+        /// <b>Rewritten for [M155], and the old promise is gone rather than
+        /// loosened.</b> This used to assert <c>board.Holds(footprint)</c> - that
+        /// one cell contains one regiment however it is turned - which was the
+        /// rule that forced a 90 m cell and made the board too coarse to play on.
+        /// A regiment now covers a set of cells, so a cell that could hold one
+        /// whole is not a virtue, it is the fault.
+        /// </para>
+        /// <para>
+        /// So the promise is turned over: <b>the board must be finer than the
+        /// bodies standing on it</b>, on every field in content, at the strengths
+        /// those files actually field. The printed line keeps the derivation
+        /// visible, which is what caught [M149].
+        /// </para>
         /// </remarks>
         [Theory]
         [MemberData(nameof(EveryBattleFile))]
-        public void TheBoardHoldsEveryRegimentThatStandsOnIt(string field)
+        public void EveryRegimentCoversSeveralCellsOfTheBoard(string field)
         {
             BattleState battle = Load(field);
             Board board = Board.For(battle);
@@ -82,6 +93,7 @@ namespace BattleChess.Tests.Battle
             var widest = 0f;
             string widestOne = "nothing on the field";
             Footprint widestShape = default;
+            int mostCells = 0;
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
@@ -94,17 +106,33 @@ namespace BattleChess.Tests.Battle
                     widestShape = unit.Footprint;
                 }
 
-                Assert.True(
-                    board.Holds(unit.Footprint),
-                    $"{field}: {unit.Def.Key} at {unit.Strength} is " +
-                    $"{2f * unit.Footprint.BoundingRadius:0.0} m across the diagonal and will not fit a " +
-                    $"{board.CellWidth:0} m cell.");
+                int cells = Occupancy.Under(board.Cells, unit).Count;
+
+                mostCells = Math.Max(mostCells, cells);
             }
 
             _out.WriteLine(
                 $"{field,-16} widest {widestOne}: {widestShape.Width:0.0} x {widestShape.Depth:0.0} m, " +
-                $"{widest:0.0} m across -> {board.CellWidth:0} m {board.Cells.Name}, " +
-                $"{board.ShortSideInCells:0} across the short side");
+                $"{widest:0.0} m across -> {board.CellWidth:0.#} m {board.Cells.Name}, " +
+                $"covering {mostCells} cells, {board.ShortSideInCells:0} across the short side");
+
+            // Asked of the widest regiment on the field and not of every one,
+            // because a scout of a hundred men really is smaller than a cell and
+            // there is nothing wrong with that. What must not happen is a cell
+            // wide enough to swallow the biggest body on the field whole - that
+            // was the rule [M155] removed, and it is what made the board coarse.
+            //
+            // Non-vacuity: under the old model a cell was sized to exactly this
+            // body, so both of these failed on every field in content.
+            Assert.True(
+                board.CellWidth < widest,
+                $"{field}: a cell is {board.CellWidth:0.#} m and the widest regiment on the field " +
+                $"({widestOne}) is {widest:0.0} m across, so a cell still holds a whole regiment.");
+
+            Assert.True(
+                mostCells >= 2,
+                $"{field}: the widest regiment covers {mostCells} cell, so the board is not finer " +
+                "than the army standing on it.");
         }
 
         /// <summary>
@@ -185,7 +213,7 @@ namespace BattleChess.Tests.Battle
         [Theory]
         [InlineData("greatfield")]
         [InlineData("crucible")]
-        public void RegimentsInAdjacentHexesStandInALine(string field)
+        public void RegimentsAFrontageApartStandInALine(string field)
         {
             BattleState battle = Load(field);
 
@@ -196,7 +224,17 @@ namespace BattleChess.Tests.Battle
             UnitInstance first = battle.UnitsOnField().First();
 
             Facing front = board.Snap(first.Facing);
-            Coord shoulder = board.ShoulderStep(front);
+
+            // [M155] A frontage apart, not one cell apart. A cell is a piece of
+            // ground now, and an 80 m regiment on a 25 m grid needs four of them
+            // to stand shoulder to shoulder with its neighbour - putting two in
+            // adjacent cells does not make a line, it makes them stand through
+            // each other. The old form of this test asked for the latter.
+            int cellsToAFrontage =
+                Math.Max(1, (int)MathF.Ceiling(first.Footprint.Width / board.CellWidth));
+
+            Coord one = board.ShoulderStep(front);
+            var shoulder = new Coord(one.Q * cellsToAFrontage, one.R * cellsToAFrontage);
 
             // Four regiments drawn up from one hex along the shoulder axis,
             // every one on the same front. Taken off the field so this measures
@@ -219,7 +257,7 @@ namespace BattleChess.Tests.Battle
             Vec2 alongTheLine = front.RightVector();
             Vec2 acrossIt = front.ToVector();
 
-            _out.WriteLine($"{field}: {drawnUp.Count} regiments on {front}, shouldering {shoulder}");
+            _out.WriteLine($"{field}: {drawnUp.Count} regiments on {front}, shouldering {shoulder} ({cellsToAFrontage} cells to a frontage)");
             _out.WriteLine($"a cell is {board.CellWidth:0} m of {board.Cells.Name}; " +
                            $"a regiment is {first.Footprint.Width:0} m wide");
 
@@ -240,10 +278,12 @@ namespace BattleChess.Tests.Battle
                 worstOverlap = MathF.Max(
                     worstOverlap, OrientedRect.OverlapFraction(drawnUp[i - 1].Shape, drawnUp[i].Shape));
 
+                float aFrontage = cellsToAFrontage * board.CellWidth;
+
                 Assert.True(
-                    MathF.Abs(MathF.Abs(along) - board.CellWidth) < 0.01f,
-                    $"regiments a cell apart are {MathF.Abs(along):0.0} m apart along the line, not " +
-                    $"{board.CellWidth:0}.");
+                    MathF.Abs(MathF.Abs(along) - aFrontage) < 0.01f,
+                    $"regiments a frontage apart are {MathF.Abs(along):0.0} m apart along the line, " +
+                    $"not {aFrontage:0}.");
             }
 
             _out.WriteLine($"worst stagger {worstStagger:0.0} m, worst overlap {worstOverlap:0.000}");
@@ -258,9 +298,16 @@ namespace BattleChess.Tests.Battle
             // And they are beside each other rather than inside each other.
             Assert.True(worstOverlap <= 0.001f, $"{field}: neighbours in the line overlap by {worstOverlap:0.000}.");
 
-            // Non-vacuity on the arrangement itself: a line of one proves nothing,
-            // and a frontage wider than the hex could not be a line at all.
-            Assert.True(first.Footprint.Width <= board.CellWidth, "the regiment is wider than its cell.");
+            // Non-vacuity on the arrangement itself, turned over for [M155]. It
+            // used to demand the regiment be no wider than its cell - the rule
+            // this model exists to remove. What matters now is the opposite: the
+            // frontage must span more than one cell, or "a frontage apart" and
+            // "a cell apart" are the same step and the test would still pass with
+            // the old, overlapping arrangement.
+            Assert.True(
+                cellsToAFrontage >= 2,
+                $"{field}: a frontage is {cellsToAFrontage} cell, so this is not measuring anything a " +
+                "one-regiment-per-cell board would have got wrong.");
         }
 
         /// <summary>

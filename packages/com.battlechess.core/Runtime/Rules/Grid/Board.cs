@@ -93,6 +93,21 @@ namespace BattleChess.Rules.Grid
             Bounds = bounds;
             Cells = cells;
             WidestBody = widestBody;
+
+            // [M156] Squares only - see SlotCount. One cell of margin on each
+            // side, so that a body whose centre is on the last cell of the field
+            // still has its overhanging cells numbered rather than falling off
+            // the end of the array and silently taking the dictionary path.
+            if (cells is SquareLattice)
+            {
+                Coord low = cells.Of(bounds.Min);
+                Coord high = cells.Of(bounds.Max);
+
+                _lowQ = low.Q - 1;
+                _lowR = low.R - 1;
+                _spanQ = high.Q - low.Q + 3;
+                _spanR = high.R - low.R + 3;
+            }
         }
 
         /// <summary>The board a battle is played on.</summary>
@@ -116,7 +131,11 @@ namespace BattleChess.Rules.Grid
             foreach (UnitInstance unit in battle.UnitsOnField())
                 widest = MathF.Max(widest, 2f * unit.Footprint.BoundingRadius);
 
-            float cell = CellFor(widest);
+            // [M155] The cell answers to the ground, not to the regiment. The
+            // widest body is still measured, but only so a log can say what is
+            // standing on the board beside how finely it is divided.
+            float cell = GridMode.CellMetres;
+
             Vec2 origin = battle.Terrain.Bounds.Min;
 
             ILattice cells = GridMode.Shape == LatticeShape.Hex
@@ -132,6 +151,159 @@ namespace BattleChess.Rules.Grid
             float wanted = MathF.Max(SmallestCellMetres, widestBodyMetres);
 
             return MathF.Ceiling(wanted / CellSizeStepMetres) * CellSizeStepMetres;
+        }
+
+        private readonly int _lowQ, _lowR, _spanQ, _spanR;
+
+        /// <summary>How many cells the board addresses, including any holes.</summary>
+        /// <remarks>
+        /// <b>[M156].</b> Cells are numbered so that the hot paths can use arrays
+        /// instead of dictionaries. On a square lattice the cell coordinates of a
+        /// rectangular field are themselves a rectangle, so the numbering is
+        /// exact and dense. On hexes they are not - an axial box round a
+        /// rectangle either misses corners or wastes a great deal of room - so
+        /// hexes keep the dictionaries and <see cref="Slot"/> answers -1. Squares
+        /// are the lattice the game is played on; hexes are kept for comparison,
+        /// and comparison is allowed to be slower.
+        /// </remarks>
+        public int SlotCount => _spanQ * _spanR;
+
+        /// <summary>The cell a number belongs to. The inverse of <see cref="Slot"/>.</summary>
+        public Coord CellOfSlot(int slot) =>
+            new Coord(_lowQ + slot % _spanQ, _lowR + slot / _spanQ);
+
+        /// <summary>This cell's number, or -1 if it has none.</summary>
+        public int Slot(Coord cell)
+        {
+            int q = cell.Q - _lowQ;
+            int r = cell.R - _lowR;
+
+            if (q < 0 || r < 0 || q >= _spanQ || r >= _spanR) return -1;
+
+            return r * _spanQ + q;
+        }
+
+        private readonly Dictionary<int, float[]> _goingByType = new Dictionary<int, float[]>();
+
+        /// <summary>
+        /// How fast the going is on every cell of the board for this movement
+        /// type, indexed by <see cref="Slot"/>.
+        /// </summary>
+        /// <remarks>
+        /// Filled once and kept. The ground under a cell does not change during a
+        /// battle, and the route search reads the same cells thousands of times -
+        /// once for every body that might stand over them, times every front it
+        /// might arrive on. About 27 000 floats on the finest board, which is
+        /// 110 kB to save tens of milliseconds on every order.
+        /// </remarks>
+        public float[]? GoingEverywhere(BattleState battle, MovementType moving)
+        {
+            if (SlotCount <= 0) return null;
+
+            if (_goingByType.TryGetValue((int)moving, out float[] known)) return known;
+
+            var going = new float[SlotCount];
+
+            for (int r = 0; r < _spanR; r++)
+            for (int q = 0; q < _spanQ; q++)
+            {
+                var cell = new Coord(_lowQ + q, _lowR + r);
+
+                going[r * _spanQ + q] = OnBoard(cell)
+                    ? battle.Movement.SpeedMultiplier(battle.Terrain.At(CentreOf(cell)), moving)
+                    : 0f;
+            }
+
+            _goingByType[(int)moving] = going;
+
+            return going;
+        }
+
+        private readonly Dictionary<(int Wide, int Deep, int Front), Coord[]> _stencils =
+            new Dictionary<(int, int, int), Coord[]>();
+
+        private readonly Dictionary<(int Moving, Coord At), float> _going =
+            new Dictionary<(int, Coord), float>();
+
+        /// <summary>
+        /// The cells a body of this size and front covers, as offsets from the
+        /// cell its centre stands on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M156], and it is the whole of the performance fix.</b> Working out
+        /// which cells a body covers is a flood fill over its own footprint - a
+        /// few hundred geometry tests and three allocations. The route search
+        /// asks that question for every cell of the board at every front it might
+        /// arrive on, which on a 12,5 m Great Field is 27 648 x 8 of them: about
+        /// thirty-three million geometry tests and six hundred thousand
+        /// allocations for one regiment's route. It was unplayable, and reported
+        /// as such.
+        /// </para>
+        /// <para>
+        /// <b>The shape does not depend on where it is.</b> Cell centres form a
+        /// regular lattice, and whether a body covers a cell depends only on the
+        /// offset between the body's centre and that cell's centre - so moving
+        /// the body a whole number of cells moves its covered set by the same
+        /// whole number of cells, exactly. This is true on hexes as well as
+        /// squares, because both map cell coordinates to world by a linear
+        /// transform.
+        /// </para>
+        /// <para>
+        /// So the fill runs <b>once per footprint and front</b> - two dozen times
+        /// for the whole battle rather than a quarter of a million times per
+        /// route - and every later question is a handful of array reads. This is
+        /// memory spent to buy clock, which is the trade this project has already
+        /// decided it wants.
+        /// </para>
+        /// </remarks>
+        public Coord[] Stencil(Footprint print, Facing front)
+        {
+            var key = (
+                (int)MathF.Round(print.Width * 10f),
+                (int)MathF.Round(print.Depth * 10f),
+                (int)MathF.Round(front.Degrees * 10f));
+
+            if (_stencils.TryGetValue(key, out Coord[] known)) return known;
+
+            var home = new Coord(0, 0);
+
+            List<Coord> cells = Occupancy.Under(Cells, new OrientedRect(CentreOf(home), front, print));
+
+            var offsets = new Coord[cells.Count];
+
+            for (int i = 0; i < cells.Count; i++)
+                offsets[i] = new Coord(cells[i].Q - home.Q, cells[i].R - home.R);
+
+            _stencils[key] = offsets;
+
+            return offsets;
+        }
+
+        /// <summary>The cells this regiment covers, as it stands.</summary>
+        /// <remarks>
+        /// Takes the stencil when the regiment is standing on a cell centre,
+        /// which on the board it is at the end of every turn, and falls back to
+        /// the fill when it is not - a regiment mid-march in the free game, or one
+        /// that has just been dropped somewhere by a test.
+        /// </remarks>
+        public List<Coord> CellsUnder(UnitInstance unit)
+        {
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            Coord home = Of(unit.Position);
+
+            if (Vec2.DistanceSquared(unit.Position, CentreOf(home)) > 0.01f)
+                return Occupancy.Under(Cells, unit);
+
+            Coord[] shape = Stencil(unit.Footprint, unit.Facing);
+
+            var cells = new List<Coord>(shape.Length);
+
+            for (int i = 0; i < shape.Length; i++)
+                cells.Add(new Coord(home.Q + shape[i].Q, home.R + shape[i].R));
+
+            return cells;
         }
 
         /// <summary>Which cell a world position falls in.</summary>
@@ -155,7 +327,21 @@ namespace BattleChess.Rules.Grid
         public float ShortSideInCells => MathF.Min(Bounds.Width, Bounds.Height) / CellWidth;
 
         /// <summary>The nearest facing a regiment may hold to a free bearing.</summary>
-        public Facing Snap(Facing free) => Cells.Snap(free);
+        /// <remarks>
+        /// <b>[M155]. The mode''' + "'" + '''s business, not the lattice''' + "'" + '''s.</b> How a
+        /// regiment may face followed from how a cell had neighbours only while
+        /// a regiment had to fit in one cell. It covers a set of cells now, so
+        /// the front is free to be as fine as the designer wants it - 15 degrees
+        /// - and <see cref="ILattice.Snap"/> is left to the lattice for the
+        /// questions that really are about cell directions, such as which way a
+        /// shoulder lies.
+        /// </remarks>
+        public Facing Snap(Facing free)
+        {
+            float step = 360f / Math.Max(1, GridMode.FacingCount);
+
+            return Facing.FromDegrees(MathF.Round(free.Degrees / step) * step);
+        }
 
         /// <summary>Whether a bearing is one of the ones a regiment may hold.</summary>
         public bool IsABoardFacing(Facing facing, float toleranceDegrees = 0.01f) =>
@@ -179,7 +365,28 @@ namespace BattleChess.Rules.Grid
         {
             if (!OnBoard(cell)) return 0f;
 
-            return battle.Movement.SpeedMultiplier(battle.Terrain.At(CentreOf(cell)), moving);
+            // [M156] Remembered per cell and movement type. The ground under a
+            // cell does not change during a battle, and the route search asks
+            // about the same cells thousands of times - once per body that might
+            // stand over them, times every front it might arrive on.
+            int slot = Slot(cell);
+
+            if (slot >= 0)
+            {
+                float[]? everywhere = GoingEverywhere(battle, moving);
+
+                if (everywhere != null) return everywhere[slot];
+            }
+
+            var key = ((int)moving, cell);
+
+            if (_going.TryGetValue(key, out float known)) return known;
+
+            float going = battle.Movement.SpeedMultiplier(battle.Terrain.At(CentreOf(cell)), moving);
+
+            _going[key] = going;
+
+            return going;
         }
 
         /// <summary>Who is standing on each cell, read off the units themselves.</summary>
@@ -212,7 +419,11 @@ namespace BattleChess.Rules.Grid
             {
                 if (mover != null && unit.Id != mover.Id && InTheSameWing(mover, unit)) continue;
 
-                standing[Of(unit.Position)] = unit.Id;
+                // [M155] Every cell the body lies over, not the one its centre
+                // happens to fall in. On a 25 m grid a regiment is four cells by
+                // two, and the three it is not centred on are just as solid.
+                foreach (Coord cell in CellsUnder(unit))
+                    standing[cell] = unit.Id;
             }
 
             return standing;
@@ -272,7 +483,8 @@ namespace BattleChess.Rules.Grid
             {
                 if (inTheWing.Contains(unit.Id)) continue;
 
-                taken[Of(unit.Position)] = unit.Id;
+                foreach (Coord cell in CellsUnder(unit))
+                    taken[cell] = unit.Id;
             }
 
             var places = new Vec2[wing.Count];
@@ -284,7 +496,13 @@ namespace BattleChess.Rules.Grid
                 if (!NearestFree(battle, wing[i], asked, taken, searchRings, out Coord given))
                     given = asked;
 
-                taken[given] = wing[i].Id;
+                // [M155] Book the whole body, so the next regiment of the wing
+                // is answered against ground this one really occupies. Booking
+                // one cell is how a line ended up standing through itself.
+                foreach (Coord cell in Occupancy.UnderIfItStood(
+                             Cells, wing[i], CentreOf(given), wing[i].Facing))
+                    taken[cell] = wing[i].Id;
+
                 places[i] = CentreOf(given);
             }
 
@@ -305,14 +523,38 @@ namespace BattleChess.Rules.Grid
         /// </remarks>
         public bool NearestFree(
             BattleState battle, UnitInstance unit, Coord wanted,
-            IReadOnlyDictionary<Coord, UnitId> taken, int searchRings, out Coord free)
+            IReadOnlyDictionary<Coord, UnitId> taken, int searchRings, out Coord free) =>
+            NearestFree(battle, unit, wanted, taken, searchRings, unit.Facing, out free);
+
+        /// <summary>
+        /// The nearest cell this regiment could stand centred on, facing that
+        /// way, with its <b>whole body</b> on free and passable ground.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M155], and it is where "they still compete for location" is
+        /// actually answered.</b> The old test asked whether one cell was free,
+        /// which for an 80 x 40 m regiment on a 25 m grid is one eighth of the
+        /// question. Two regiments could each hold a free centre cell and still
+        /// be standing through one another.
+        /// </para>
+        /// <para>
+        /// The front matters, so it is a parameter rather than read off the
+        /// regiment. Where a body will fit depends on which way it is turned -
+        /// a rectangle in a gap is the whole of M27 - and a regiment marching
+        /// somewhere is going to arrive facing the way it was sent, not the way
+        /// it is standing now.
+        /// </para>
+        /// </remarks>
+        public bool NearestFree(
+            BattleState battle, UnitInstance unit, Coord wanted,
+            IReadOnlyDictionary<Coord, UnitId> taken, int searchRings, Facing front, out Coord free)
         {
             for (int radius = 0; radius <= searchRings; radius++)
             {
                 foreach (Coord cell in Cells.Ring(wanted, radius))
                 {
-                    if (taken.TryGetValue(cell, out UnitId who) && who != unit.Id) continue;
-                    if (GoingOn(battle, cell, unit.Def.Movement) <= 0f) continue;
+                    if (!CouldStandAt(battle, unit, cell, front, taken)) continue;
 
                     free = cell;
                     return true;
@@ -321,6 +563,36 @@ namespace BattleChess.Rules.Grid
 
             free = wanted;
             return false;
+        }
+
+        /// <summary>
+        /// Whether this regiment could stand centred on that cell facing that
+        /// way: every cell of its body free of anybody else, and passable.
+        /// </summary>
+        public bool CouldStandAt(
+            BattleState battle, UnitInstance unit, Coord cell, Facing front,
+            IReadOnlyDictionary<Coord, UnitId> taken)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+            if (unit == null) throw new ArgumentNullException(nameof(unit));
+
+            // [M156] The stencil, not a fresh fill. See Board.Stencil - this is
+            // the inner loop of every board route, and it used to allocate.
+            Coord[] shape = Stencil(unit.Footprint, front);
+
+            for (int i = 0; i < shape.Length; i++)
+            {
+                var under = new Coord(cell.Q + shape[i].Q, cell.R + shape[i].R);
+
+                if (!OnBoard(under)) return false;
+
+                if (taken != null && taken.TryGetValue(under, out UnitId who) && who != unit.Id)
+                    return false;
+
+                if (GoingOn(battle, under, unit.Def.Movement) <= 0f) return false;
+            }
+
+            return true;
         }
 
         public override string ToString() =>

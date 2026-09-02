@@ -56,7 +56,7 @@ namespace BattleChess.Rules.Grid
         /// regiment is no longer going where it was sent, so the order is better
         /// refused than silently rewritten.
         /// </remarks>
-        public const int WillSettleWithinRings = 3;
+        public const int WillSettleWithinRings = 24;
 
         /// <summary>A ceiling on the search, so a hopeless order cannot hang a turn.</summary>
         /// <remarks>
@@ -65,7 +65,7 @@ namespace BattleChess.Rules.Grid
         /// is a guard against a bug, not a budget: exhausting the whole board is
         /// cheap, and it is the worst this can ever do.
         /// </remarks>
-        public const int MostHexesSearched = 20000;
+        public const int MostHexesSearched = 120_000;
 
         public string Name => "over the board";
 
@@ -135,6 +135,16 @@ namespace BattleChess.Rules.Grid
         }
 
         /// <summary>A* from hex to hex, over free ground only.</summary>
+        /// <summary>Which way a regiment faces while taking step <paramref name="which"/>.</summary>
+        /// <remarks>
+        /// A lattice's steps are evenly spaced round the circle - 45 degrees on
+        /// squares, 60 on hexes - so the step index is the bearing. Every one of
+        /// them is also a legal front under the 24-front rule [M155], because 24
+        /// is a multiple of both 8 and 6.
+        /// </remarks>
+        private static Facing FrontOfStep(Board board, int which) =>
+            Facing.FromDegrees(which * 360f / board.Cells.DirectionCount);
+
         private static bool Search(
             BattleState battle, Board board, UnitInstance unit, IReadOnlyDictionary<Coord, UnitId> taken,
             Coord from, Coord goal, MovementType moving,
@@ -156,7 +166,107 @@ namespace BattleChess.Rules.Grid
             // squares, six for hexes, and the loop below only reads the ones
             // the lattice actually wrote.
             Span<Coord> neighbours = stackalloc Coord[MostWaysOut];
+
+            // Whether a whole body fits, worked out for the WHOLE BOARD at once
+            // rather than cell by cell [M156].
+            //
+            // [M155] asked the question per cell and per front and remembered the
+            // answers. That is still 8 fronts x 35 body cells of work for every
+            // cell the search touches - 280 inner steps an expansion - and it
+            // measured 566 ms for one route on a 12,5 m board, which is not a
+            // game.
+            //
+            // The question is the wrong way round. Instead of asking of each of
+            // 27 000 cells "would a body here hit anything", take the few
+            // thousand cells that ARE something - bodies and impassable ground -
+            // and mark the places a body would have to stand to touch them. That
+            // is the stencil reflected through the centre, and it costs
+            // obstacles x footprint instead of board x footprint. The obstacles
+            // are a small fraction of the board, and the answer afterwards is a
+            // single array read.
+            int slots = board.SlotCount;
             int ways = board.Cells.DirectionCount;
+
+            float[]? goingEverywhere = board.GoingEverywhere(battle, moving);
+
+            bool[]? bad = null;
+
+            if (slots > 0 && goingEverywhere != null)
+            {
+                bad = new bool[slots];
+
+                // Ground nobody of this kind can cross, and the edge of the map.
+                for (int i = 0; i < slots; i++) bad[i] = goingEverywhere[i] <= 0f;
+
+                // And everybody standing on it, except the mover itself.
+                foreach (KeyValuePair<Coord, UnitId> held in taken)
+                {
+                    if (held.Value == unit.Id) continue;
+
+                    int slot = board.Slot(held.Key);
+
+                    if (slot >= 0) bad[slot] = true;
+                }
+            }
+
+            var standable = new bool[ways][];
+
+            bool[] StandableOn(int front)
+            {
+                bool[]? already = standable[front];
+
+                if (already != null) return already;
+
+                var room = new bool[slots];
+
+                for (int i = 0; i < slots; i++) room[i] = true;
+
+                Coord[] shape = board.Stencil(unit.Footprint, FrontOfStep(board, front));
+
+                for (int slot = 0; slot < slots; slot++)
+                {
+                    if (!bad![slot]) continue;
+
+                    // A body centred at (bad - offset) covers this bad cell, so
+                    // no such centre is standable. The stencil reflected.
+                    Coord at = board.CellOfSlot(slot);
+
+                    for (int i = 0; i < shape.Length; i++)
+                    {
+                        int centre = board.Slot(new Coord(at.Q - shape[i].Q, at.R - shape[i].R));
+
+                        if (centre >= 0) room[centre] = false;
+                    }
+                }
+
+                standable[front] = room;
+
+                return room;
+            }
+
+            // The slow path, kept for hexes, which cannot number their cells.
+            var asked = new Dictionary<(Coord At, int Front), bool>();
+
+            bool Fits(Coord cell, int front)
+            {
+                if (bad != null)
+                {
+                    int slot = board.Slot(cell);
+
+                    return slot >= 0 && StandableOn(front)[slot];
+                }
+
+                var key = (cell, front);
+
+                if (asked.TryGetValue(key, out bool remembered)) return remembered;
+
+                bool can = board.CouldStandAt(
+                    battle, unit, cell, FrontOfStep(board, front), taken);
+
+                asked[key] = can;
+
+                return can;
+            }
 
             while (open.TryPop(out Coord at))
             {
@@ -177,10 +287,17 @@ namespace BattleChess.Rules.Grid
                 {
                     Coord next = neighbours[i];
 
-                    // The goal is allowed even when somebody is on it only
-                    // because NearestFree already promised it is not; every
-                    // other held hex is absent from the graph entirely.
-                    if (taken.TryGetValue(next, out UnitId who) && who != unit.Id) continue;
+                    // [M155] The whole body has to fit, not the cell its centre
+                    // falls in. This is where "units go through each other" stops
+                    // being a thing the walker has to notice afterwards: a step
+                    // that would overlap somebody is not an edge of the graph, so
+                    // no route can contain one.
+                    //
+                    // Measured facing the way it is going, because that is how it
+                    // arrives. A regiment marching north-east is 80 m of front
+                    // across that diagonal, and testing it as though it still
+                    // faced east would let it clip what it turned into.
+                    if (!Fits(next, i)) continue;
 
                     float going = board.GoingOn(battle, next, moving);
 
