@@ -67,7 +67,16 @@ namespace BattleChess.Rules.Grid
         /// </remarks>
         public const int MostHexesSearched = 120_000;
 
-        public string Name => "over the board";
+        /// <summary>The planner that actually finds the way.</summary>
+        /// <remarks>
+        /// <b>[M159].</b> Settable so the board can be measured against any of
+        /// them, but never itself - that would recurse. It defaults to whatever
+        /// the continuous game settled on, so the board inherits every
+        /// improvement made to routing rather than forking it.
+        /// </remarks>
+        public IRoutePlanner Beneath { get; set; } = RoutePlanners.Default;
+
+        public string Name => $"over the board, {Beneath.Name} beneath";
 
         public Plan PlanTo(
             BattleState battle, UnitInstance unit, IPathfinder pathfinder, Vec2 destination,
@@ -99,6 +108,19 @@ namespace BattleChess.Rules.Grid
             Dictionary<Coord, UnitId> holdingGround =
                 HasAPlaceOfItsOwn(unit) ? blockingTheWay : board.WhoIsWhere(battle);
 
+            // [M159] And ground that somebody already marching has spoken for.
+            //
+            // Standing bodies are only half the claim on a field. A regiment
+            // under orders has also claimed where it is GOING, and two marches
+            // resolved against standing bodies alone will happily pick the same
+            // destination and then fight over it on arrival. Settling that here,
+            // when the order is drawn, is worth more than any amount of clash
+            // resolution afterwards - it is the difference between an order that
+            // is refused a place and an order that is given one twice.
+            foreach (KeyValuePair<Coord, UnitId> booked in board.SpokenFor(battle, unit))
+                if (!holdingGround.ContainsKey(booked.Key))
+                    holdingGround[booked.Key] = booked.Value;
+
             Coord from = board.Of(unit.Position);
             Coord wanted = board.Of(destination);
 
@@ -127,11 +149,22 @@ namespace BattleChess.Rules.Grid
                     hold: null,
                     pressedThrough: false);
 
-            if (!Search(battle, board, unit, blockingTheWay, from, goal, moving,
-                    out List<Coord> hexes, out float _, out int looked))
-                return NoRoute(PathFailure.NoRouteExists, $"no line of free hexes joins {from} to {goal}.", looked);
-
-            return Drawn(battle, board, unit, hexes, looked, arriveOn);
+            // [M159] The route itself is not this planner's business.
+            //
+            // It used to be: an A* from cell to cell over the whole board. That
+            // is the wrong algorithm and it was measured as such - 20 orders on
+            // the Great Field cost 351 ms over the board against 17 ms through
+            // the continuous planner, because the board search explored 68 880
+            // cells where the continuous one explored 915. A grid search asks
+            // every cell of the field about ground; the planner this project
+            // spent five milestones on asks the handful of bodies actually in
+            // the way. At 12,5 m it was 1,3 seconds against 18 ms.
+            //
+            // So the board keeps the one thing it was ever for - WHERE A
+            // REGIMENT MAY STAND, resolved above - and hands the question of how
+            // to get there back to the algorithm that already answers it well.
+            // The walk is squared onto cells afterwards by BoardTurn.
+            return Beneath.PlanTo(battle, unit, pathfinder, board.CentreOf(goal), log, wayRound, arriveOn);
         }
 
         /// <summary>A* from hex to hex, over free ground only.</summary>
@@ -141,321 +174,6 @@ namespace BattleChess.Rules.Grid
         /// squares, 60 on hexes - so the step index is the bearing. Every one of
         /// them is also a legal front under the 24-front rule [M155], because 24
         /// is a multiple of both 8 and 6.
-        /// </remarks>
-        private static Facing FrontOfStep(Board board, int which) =>
-            Facing.FromDegrees(which * 360f / board.Cells.DirectionCount);
-
-        private static bool Search(
-            BattleState battle, Board board, UnitInstance unit, IReadOnlyDictionary<Coord, UnitId> taken,
-            Coord from, Coord goal, MovementType moving,
-            out List<Coord> hexes, out float seconds, out int looked)
-        {
-            hexes = null!;
-            seconds = 0f;
-            looked = 0;
-
-            float pace = MathF.Max(0.1f, unit.Def.Speed);
-
-            var cameFrom = new Dictionary<Coord, Coord>();
-            var best = new Dictionary<Coord, float> { [from] = 0f };
-            var open = new CoordMinHeap();
-
-            open.Push(from, Guess(board, from, goal, pace));
-
-            // Room for the widest lattice this board could be. Eight for
-            // squares, six for hexes, and the loop below only reads the ones
-            // the lattice actually wrote.
-            Span<Coord> neighbours = stackalloc Coord[MostWaysOut];
-
-            // Whether a whole body fits, worked out for the WHOLE BOARD at once
-            // rather than cell by cell [M156].
-            //
-            // [M155] asked the question per cell and per front and remembered the
-            // answers. That is still 8 fronts x 35 body cells of work for every
-            // cell the search touches - 280 inner steps an expansion - and it
-            // measured 566 ms for one route on a 12,5 m board, which is not a
-            // game.
-            //
-            // The question is the wrong way round. Instead of asking of each of
-            // 27 000 cells "would a body here hit anything", take the few
-            // thousand cells that ARE something - bodies and impassable ground -
-            // and mark the places a body would have to stand to touch them. That
-            // is the stencil reflected through the centre, and it costs
-            // obstacles x footprint instead of board x footprint. The obstacles
-            // are a small fraction of the board, and the answer afterwards is a
-            // single array read.
-            int slots = board.SlotCount;
-            int ways = board.Cells.DirectionCount;
-
-            float[]? goingEverywhere = board.GoingEverywhere(battle, moving);
-
-            bool[]? bad = null;
-
-            if (slots > 0 && goingEverywhere != null)
-            {
-                bad = new bool[slots];
-
-                // Ground nobody of this kind can cross, and the edge of the map.
-                for (int i = 0; i < slots; i++) bad[i] = goingEverywhere[i] <= 0f;
-
-                // And everybody standing on it, except the mover itself.
-                foreach (KeyValuePair<Coord, UnitId> held in taken)
-                {
-                    if (held.Value == unit.Id) continue;
-
-                    int slot = board.Slot(held.Key);
-
-                    if (slot >= 0) bad[slot] = true;
-                }
-            }
-
-            var standable = new bool[ways][];
-
-            bool[] StandableOn(int front)
-            {
-                bool[]? already = standable[front];
-
-                if (already != null) return already;
-
-                var room = new bool[slots];
-
-                for (int i = 0; i < slots; i++) room[i] = true;
-
-                Coord[] shape = board.Stencil(unit.Footprint, FrontOfStep(board, front));
-
-                for (int slot = 0; slot < slots; slot++)
-                {
-                    if (!bad![slot]) continue;
-
-                    // A body centred at (bad - offset) covers this bad cell, so
-                    // no such centre is standable. The stencil reflected.
-                    Coord at = board.CellOfSlot(slot);
-
-                    for (int i = 0; i < shape.Length; i++)
-                    {
-                        int centre = board.Slot(new Coord(at.Q - shape[i].Q, at.R - shape[i].R));
-
-                        if (centre >= 0) room[centre] = false;
-                    }
-                }
-
-                standable[front] = room;
-
-                return room;
-            }
-
-            // The slow path, kept for hexes, which cannot number their cells.
-            var asked = new Dictionary<(Coord At, int Front), bool>();
-
-            bool Fits(Coord cell, int front)
-            {
-                if (bad != null)
-                {
-                    int slot = board.Slot(cell);
-
-                    return slot >= 0 && StandableOn(front)[slot];
-                }
-
-                var key = (cell, front);
-
-                if (asked.TryGetValue(key, out bool remembered)) return remembered;
-
-                bool can = board.CouldStandAt(
-                    battle, unit, cell, FrontOfStep(board, front), taken);
-
-                asked[key] = can;
-
-                return can;
-            }
-
-            while (open.TryPop(out Coord at))
-            {
-                if (++looked > MostHexesSearched) return false;
-
-                if (at == goal)
-                {
-                    hexes = Retrace(cameFrom, from, goal);
-                    seconds = best[goal];
-                    return true;
-                }
-
-                float here = best[at];
-
-                board.Cells.Neighbours(at, neighbours);
-
-                for (int i = 0; i < ways; i++)
-                {
-                    Coord next = neighbours[i];
-
-                    // [M155] The whole body has to fit, not the cell its centre
-                    // falls in. This is where "units go through each other" stops
-                    // being a thing the walker has to notice afterwards: a step
-                    // that would overlap somebody is not an edge of the graph, so
-                    // no route can contain one.
-                    //
-                    // Measured facing the way it is going, because that is how it
-                    // arrives. A regiment marching north-east is 80 m of front
-                    // across that diagonal, and testing it as though it still
-                    // faced east would let it clip what it turned into.
-                    if (!Fits(next, i)) continue;
-
-                    float going = board.GoingOn(battle, next, moving);
-
-                    if (going <= 0f) continue;
-
-                    float through = here + board.Cells.StepMetres(at, next) / (pace * going);
-
-                    if (best.TryGetValue(next, out float already) && already <= through) continue;
-
-                    best[next] = through;
-                    cameFrom[next] = at;
-
-                    open.Push(next, through + Guess(board, next, goal, pace));
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>Seconds the rest of the march cannot possibly take less than.</summary>
-        /// <remarks>
-        /// The distance comes from the lattice rather than from
-        /// <see cref="Coord"/>, which only knows the hex answer - on a square
-        /// board the shortest walk is the octile distance and not the straight
-        /// line, because a route may only move on the eight bearings.
-        /// </remarks>
-        private static float Guess(Board board, Coord at, Coord goal, float pace) =>
-            board.Cells.LeastMetresBetween(at, goal) / (pace * FastestGoingAllowedFor);
-
-        /// <summary>Room to ask any lattice for its neighbours.</summary>
-        private const int MostWaysOut = 8;
-
-        private static List<Coord> Retrace(IReadOnlyDictionary<Coord, Coord> cameFrom, Coord from, Coord goal)
-        {
-            var back = new List<Coord> { goal };
-
-            Coord at = goal;
-
-            while (at != from)
-            {
-                at = cameFrom[at];
-                back.Add(at);
-            }
-
-            back.Reverse();
-
-            return back;
-        }
-
-        /// <summary>
-        /// Turns a line of hexes into the line a regiment walks.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// <b>Not smoothed, deliberately</b>, where every other planner here
-        /// smooths hard. Smoothing exists to hide that a search grid is not the
-        /// battlefield; on the board the grid <i>is</i> the battlefield, so a
-        /// straightened line would cut corners through hexes the route was
-        /// careful to avoid - which is the one thing this planner is for.
-        /// </para>
-        /// <para>
-        /// The first waypoint is where the regiment actually stands rather than
-        /// its hex's centre, so a regiment caught between hexes still walks from
-        /// where it is and not from where it ought to have been.
-        /// </para>
-        /// <para>
-        /// <b>The whole route, to the destination, however many turns it takes -
-        /// and the first draft of this got it wrong.</b> [M147] truncated the
-        /// route to one turn's walking, on the reasoning that a regiment left
-        /// mid-leg holds neither of the two hexes it stands between. The
-        /// reasoning is sound and the result was unplayable: foot buys under two
-        /// hexes a turn, so every drawn line was a single 50 m stub and every
-        /// march had to be ordered again each turn. Reported from play as "the
-        /// drawn line is very short and the units move too little", which is one
-        /// fault wearing two hats.
-        /// </para>
-        /// <para>
-        /// It also broke a standing requirement outright: lines are drawn for
-        /// each move <i>until they reach their destination</i>. A route
-        /// truncated at the turn cannot draw that line, because it does not know
-        /// it.
-        /// </para>
-        /// <para>
-        /// <b>So the turn is enforced where it belongs - in the walking, not in
-        /// the drawing.</b> The route runs to the destination and the line shows
-        /// all of it; the clock stops the regiment wherever it has got to, and
-        /// it carries on next turn. What the board gives up is the promise that
-        /// every regiment stands on a hex at every instant. What it keeps is the
-        /// promise that matters: a regiment that has <i>stopped</i> stands on a
-        /// hex of its own, which is what <c>GridMode.SettleThoseWhoHaveStopped</c>
-        /// enforces at each turn boundary. A regiment in the middle of a march
-        /// is between hexes, which is what marching looks like.
-        /// </para>
-        /// </remarks>
-        private static Plan Drawn(
-            BattleState battle, Board board, UnitInstance unit, List<Coord> hexes, int looked, Facing? arriveOn)
-        {
-            float pace = MathF.Max(0.1f, unit.Def.Speed);
-
-            var waypoints = new List<Vec2>(hexes.Count) { unit.Position };
-
-            float seconds = 0f;
-
-            for (int i = 1; i < hexes.Count; i++)
-            {
-                float going = board.GoingOn(battle, hexes[i], unit.Def.Movement);
-
-                seconds += board.Cells.StepMetres(hexes[i - 1], hexes[i])
-                           / (pace * MathF.Max(0.01f, going));
-
-                waypoints.Add(board.CentreOf(hexes[i]));
-            }
-
-            float metres = 0f;
-
-            for (int i = 1; i < waypoints.Count; i++)
-                metres += Vec2.Distance(waypoints[i - 1], waypoints[i]);
-
-            // Effective distance is the route's cost expressed as open ground -
-            // the seconds it was priced at times the pace they were priced at.
-            // Kept in the same currency as every other planner, so a board route
-            // and a continuous one can be put side by side.
-            float effective = seconds * pace;
-
-            var hold = new Facing?[waypoints.Count];
-
-            // Only the arrival front is dictated. Each leg runs along one of the
-            // six bearings already, so the steering arrives on a hex direction
-            // without being told to; the last leg is the one where the player
-            // may have asked for something other than the way of travel.
-            hold[hold.Length - 1] = board.Snap(
-                arriveOn ?? Facing.Towards(waypoints[waypoints.Count - 2], waypoints[waypoints.Count - 1]));
-
-            return new Plan(
-                PathResult.Success(waypoints, hexes, metres, effective, looked),
-                hold,
-                pressedThrough: false);
-        }
-
-        /// <summary>
-        /// Whether this regiment has been given ground of its own to finish on,
-        /// rather than working an aim point out for itself.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// The test [M153] states, now that both halves of it exist. A regiment
-        /// marching has been handed a cell apiece by <c>Board.FormUpAt</c>; a
-        /// regiment attacking on station has been handed a place in its wing by
-        /// [M154]. Either way its destination is distinct from its wing-mates'
-        /// by construction, so counting them as holding ground can only shove it
-        /// off a place that was already its own.
-        /// </para>
-        /// <para>
-        /// A regiment attacking <i>without</i> a station has been handed
-        /// nothing - it works its aim point out from its own bearing to the
-        /// quarry, and so does every mate - so there the mates must count, or
-        /// they all resolve to the same cell.
-        /// </para>
         /// </remarks>
         private static bool HasAPlaceOfItsOwn(UnitInstance unit) =>
             unit.Order.Kind == OrderKind.Move || unit.Station.HasValue;

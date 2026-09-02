@@ -4190,3 +4190,103 @@ now the drawn body's own bounds.
 
 Unity compiles clean; no rules changed, so the suite is untouched at 729 passing
 and the same 12 failing.
+
+---
+
+## M159 - The board says where you may stand; the planner says how to get there
+
+Reported a third time - *"performance still sucks, it was way faster when we had
+our algorithm in place"* - with two suggestions, both of which were right.
+
+**Measured first, because I had guessed twice already.** Twenty orders on the
+Great Field, the same battle and the same destination, both planners:
+
+| | over the board | the continuous one |
+|---|---|---|
+| 25 m | **351 ms** (17,5 each), 68 880 cells explored, 17 routed | **17 ms** (0,86 each), 915 cells, 20 routed |
+| 12,5 m | **1 260 ms** (63 each), 268 933 cells, 20 routed | **18 ms** (0,93 each), 949 cells, 20 routed |
+
+Twenty to seventy times slower, and it explored seventy-five to two hundred and
+eighty times more ground to reach worse answers. That is not a tuning problem. **A
+grid A* asks every cell of the field about the going; the planner this project
+spent five milestones on asks the handful of bodies actually in the way.** [M147]
+put a search on the board because a board looked like a thing you search. It is
+not: it is a constraint on where a body may be.
+
+### So the board keeps the one thing it was ever for
+
+`BoardRoutePlanner` still resolves the destination - the cell where this
+regiment's whole body fits, nearest to what was asked - and then hands the route
+to `RoutePlanners.Default`. `BoardTurn` squares the resulting polyline onto cells
+afterwards: one whole cell a step, toward the next waypoint, taking whichever of
+the eight neighbours closes most and that the body fits in.
+
+The division of labour is the point. **The route does the global work** - it is
+already drawn round the terrain and round the bodies that were there when it was
+planned. **The step does the local work** - eight checks, so getting round a
+regiment that has since moved into the way costs eight comparisons rather than
+another search. Anything cleverer in the stepper would be a second, worse
+pathfinder disagreeing with the first.
+
+| | before | after | the planner alone |
+|---|---|---|---|
+| 20 orders, 25 m | 351 ms | **23,6 ms** | 16,9 ms |
+| 20 orders, 12,5 m | 1 260 ms | **32,4 ms** | 13,8 ms |
+
+Fifteen and thirty-nine times, and **20 of 20 routed at 25 m where the board
+search managed 17**. Twelve converging orders now close 6 703 m over six turns
+where they closed 4 734 m.
+
+### The three regiments that could not be routed were never a limit of the cell
+
+[M155] recorded, with arithmetic, that three of twelve orders failed at 25 m
+because a body 89 m across cannot be turned in the Great Field's 100 m deployment
+corridor once a 25 m grid rounds the clearance away. All twelve route now, at both
+sizes, with the cell size unchanged.
+
+**It was a limit of the search, and I wrote it down as a limit of the board.** Kept
+in the test as a caution: a limit measured through one algorithm is a fact about
+that algorithm until it has been measured through another.
+
+### What was given up, honestly
+
+The board used to promise that no drawn line ever pressed through one of its own -
+true by construction, because the search only crossed free cells. Measured now
+over the same 6 320 orders: **1 615 of them declare a press-through**, because the
+continuous planner will deliberately shoulder through one of its own when going
+round costs far more [M26].
+
+The promise has moved, and to a stronger place. **A route is an intention; the
+board rules on what happens.** `BoardTurn` tests every cell of a body before it
+takes a step, so a regiment following a pressed-through line is held at the
+shoulder and goes round it locally. Measured: zero shared ground across six turns
+of twelve converging orders at both cell sizes, and in the wall fixture a regiment
+walks past five of its own in seven turns and finishes exactly where it was sent.
+
+### Reserving a destination, which was the second suggestion
+
+An order is now resolved against ground that regiments already marching have
+**spoken for** - the cells each one's body will cover when it arrives, taken at
+the front its last leg comes in on.
+
+Standing bodies were only half the claim on a field. A regiment under orders has
+also claimed where it is going, and two marches resolved against standing bodies
+alone will happily pick the same destination and then fight over it on arrival.
+Settling it when the order is drawn is worth more than any amount of clash
+resolution afterwards: it is the difference between an order refused a place and
+an order given one twice.
+
+**Derived, never stored**, which is the rule the rest of `Board` keeps. A
+reservation is not booked, held and released - that is a lifecycle, and a
+lifecycle leaks. It is the far end of a route that already exists: give the order
+and the ground is spoken for, cancel it and it is not.
+
+### And the reach marker it makes possible
+
+`Board.ReachInOneTurn` is whole cells times the cell width, and the selected
+regiments are ringed with it. Not speed times the turn length: a regiment cannot
+stop between cells, so a marker drawn from raw speed would promise ground it
+cannot finish on. The ring is a statement about where a turn can **end**.
+
+Suite: 730 passing, 12 failing - the same 12 as the baseline - 87 skipped, 829
+total. Unity compiles clean.

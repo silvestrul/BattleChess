@@ -193,42 +193,66 @@ namespace BattleChess.Rules.Grid
 
                     anyLeft = true;
 
-                    Vec2 to = route.Target;
+                    // [M159] The route is a POLYLINE now, not a list of cells.
+                    //
+                    // The board no longer searches: a route comes from the
+                    // continuous planner, which is twenty to seventy times
+                    // cheaper because it reasons about the bodies in the way
+                    // rather than about every cell of the field. What is left
+                    // here is squaring that walk onto cells - one whole cell at
+                    // a time, toward the next waypoint, round whatever is
+                    // standing in the immediate way.
+                    //
+                    // The division of labour is the point. The route does the
+                    // GLOBAL work: it is already drawn round the terrain and the
+                    // bodies that were there when it was planned. This does the
+                    // LOCAL work: eight candidates, take the one that closes most
+                    // on the waypoint and that the body fits in. Getting round a
+                    // regiment that has since moved into the way costs eight
+                    // checks rather than another search.
+                    Vec2 aim = route.Target;
 
-                    Coord next = board.Of(to);
-                    Facing front = board.Snap(Facing.Towards(marcher.Unit.Position, to));
+                    Coord here = board.Of(marcher.Unit.Position);
 
-                    List<Coord> wants =
-                        Occupancy.UnderIfItStood(board.Cells, marcher.Unit, board.CentreOf(next), front);
+                    // Close enough to this waypoint: take the next one.
+                    if (Vec2.Distance(marcher.Unit.Position, aim) <= board.CellWidth * 0.5f)
+                    {
+                        route.Advance();
 
-                    UnitInstance? blocker = WhoIsInTheWay(claim, wants, marcher.Unit);
+                        if (route.IsComplete)
+                        {
+                            arrived++;
+                            marcher.Left = 0;
+                        }
 
-                    if (blocker != null)
+                        continue;
+                    }
+
+                    if (!BestStep(
+                            battle, board, marcher, claim, here, aim,
+                            out Coord next, out Facing front, out List<Coord> wants,
+                            out UnitInstance? blocker))
                     {
                         clashes++;
                         marcher.Left = 0;   // stopped this tick; it does not shove
 
                         // Its credit is kept, so it tries again next tick rather
                         // than losing the rest of the turn to one blocked step.
-
-                        string because =
-                            $"{blocker.Def.DisplayName} is standing on the ground it was stepping onto";
+                        string because = blocker != null
+                            ? $"{blocker.Def.DisplayName} is standing on the ground it was stepping onto"
+                            : "there is nowhere nearer it can put itself";
 
                         // Said once, when it starts being held, and not once a
                         // tick for as long as it stays held. A regiment blocked
                         // for a whole turn is thirty ticks, and forty regiments
                         // shuffling round each other wrote hundreds of identical
-                        // lines a turn - which is a recording nobody can read and
-                        // a cost the game pays for the privilege.
+                        // lines a turn - a recording nobody can read, and a cost
+                        // the game pays for the privilege.
                         if (route.HeldItsHandBecause != because)
                         {
                             route.HeldItsHandBecause = because;
 
-                            log.Decision(
-                                "board",
-                                $"held at {board.Of(marcher.Unit.Position)}: " +
-                                $"{blocker.Def.DisplayName} holds {next}",
-                                marcher.Unit.Id);
+                            log.Decision("board", $"held at {here}: {because}", marcher.Unit.Id);
                         }
 
                         continue;
@@ -245,13 +269,14 @@ namespace BattleChess.Rules.Grid
 
                     route.HeldItsHandBecause = null;
 
-                    route.Advance();
-
                     marcher.Left--;
                     marcher.Unit.BoardStepCredit -= 1f;
                     marcher.Stepped = true;
                     stepped?.Add(marcher.Unit.Id);
                     steps++;
+
+                    if (Vec2.Distance(marcher.Unit.Position, aim) <= board.CellWidth * 0.5f)
+                        route.Advance();
 
                     if (route.IsComplete)
                     {
@@ -266,6 +291,107 @@ namespace BattleChess.Rules.Grid
             foreach (Marcher marcher in marchers) if (marcher.Stepped) moved++;
 
             return new Summary(moved, steps, clashes, arrived);
+        }
+
+        /// <summary>
+        /// The one cell step that closes most on <paramref name="aim"/> and that
+        /// this regiment's whole body fits in.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Eight candidates on a square lattice, six on hexes. A step is taken
+        /// only if it gets the regiment nearer than it already is, so a body with
+        /// nothing but worse ground around it holds rather than mills. Sideways
+        /// steps count as nearer whenever they are, which is what lets a regiment
+        /// slide round the corner of something and pick its route up again.
+        /// </para>
+        /// <para>
+        /// <b>It does not search.</b> Getting round something big is the route's
+        /// job, and the route was drawn by a planner that is good at it. If this
+        /// tried to be clever it would be a second, worse pathfinder disagreeing
+        /// with the first - which is the fault [M159] exists to undo.
+        /// </para>
+        /// </remarks>
+        private static bool BestStep(
+            BattleState battle, Board board, Marcher marcher,
+            IReadOnlyDictionary<Coord, UnitInstance> claim, Coord here, Vec2 aim,
+            out Coord next, out Facing front, out List<Coord> wants, out UnitInstance? blocker)
+        {
+            next = here;
+            front = marcher.Unit.Facing;
+            wants = marcher.Cells;
+            blocker = null;
+
+            int ways = board.Cells.DirectionCount;
+
+            Span<Coord> around = stackalloc Coord[8];
+
+            board.Cells.Neighbours(here, around);
+
+            Vec2 standing = board.CentreOf(here);
+
+            float nearest = Vec2.Distance(standing, aim);
+
+            bool found = false;
+
+            for (int i = 0; i < ways; i++)
+            {
+                Coord candidate = around[i];
+
+                Vec2 centre = board.CentreOf(candidate);
+
+                float closes = Vec2.Distance(centre, aim);
+
+                if (closes >= nearest) continue;
+
+                Facing facing = board.Snap(Facing.Towards(standing, centre));
+
+                if (!Fits(battle, board, marcher, claim, candidate, facing,
+                        out List<Coord> under, out UnitInstance? who))
+                {
+                    if (blocker == null) blocker = who;
+                    continue;
+                }
+
+                nearest = closes;
+                next = candidate;
+                front = facing;
+                wants = under;
+                found = true;
+            }
+
+            return found;
+        }
+
+        /// <summary>Whether the whole body fits, standing there facing that way.</summary>
+        private static bool Fits(
+            BattleState battle, Board board, Marcher marcher,
+            IReadOnlyDictionary<Coord, UnitInstance> claim, Coord at, Facing front,
+            out List<Coord> under, out UnitInstance? blocker)
+        {
+            Coord[] shape = board.Stencil(marcher.Unit.Footprint, front);
+
+            under = new List<Coord>(shape.Length);
+            blocker = null;
+
+            for (int i = 0; i < shape.Length; i++)
+            {
+                var cell = new Coord(at.Q + shape[i].Q, at.R + shape[i].R);
+
+                if (!board.OnBoard(cell)) return false;
+
+                if (board.GoingOn(battle, cell, marcher.Unit.Def.Movement) <= 0f) return false;
+
+                if (claim.TryGetValue(cell, out UnitInstance who) && !ReferenceEquals(who, marcher.Unit))
+                {
+                    blocker = who;
+                    return false;
+                }
+
+                under.Add(cell);
+            }
+
+            return true;
         }
 
         /// <summary>

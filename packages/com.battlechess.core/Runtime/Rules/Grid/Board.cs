@@ -429,6 +429,86 @@ namespace BattleChess.Rules.Grid
             return standing;
         }
 
+        /// <summary>
+        /// Ground that regiments already on the move have spoken for: the cells
+        /// each one's body will cover when it arrives.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M159], and it is the designer's second suggestion.</b> Where a
+        /// regiment is standing now is not the only claim it has on the field. If
+        /// it is marching, it has also claimed where it is GOING, and an order
+        /// given to a second regiment ought to know that - otherwise two marches
+        /// resolve onto the same ground, both are routed there, and they fight
+        /// over it on arrival. That is the whole of "they still compete for
+        /// location", and no amount of clash resolution afterwards fixes an order
+        /// that should never have been drawn.
+        /// </para>
+        /// <para>
+        /// <b>Derived, never stored,</b> which is the same rule the rest of this
+        /// class keeps. A reservation is not a thing to be booked, held and
+        /// released - that is a lifecycle, and a lifecycle is a thing that leaks.
+        /// It is simply the far end of a route that already exists: give the
+        /// order and the ground is spoken for, cancel it and it is not, and there
+        /// is nothing to get out of step.
+        /// </para>
+        /// <para>
+        /// The arrival front is taken from the route's last leg, because which
+        /// cells a body covers depends on which way it is turned and a regiment
+        /// arrives facing the way it came in.
+        /// </para>
+        /// </remarks>
+        public Dictionary<Coord, UnitId> SpokenFor(BattleState battle, UnitInstance? mover = null)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+
+            var claimed = new Dictionary<Coord, UnitId>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (mover != null && unit.Id == mover.Id) continue;
+
+                MovementRoute? route = unit.Route;
+
+                if (route == null || route.IsComplete) continue;
+
+                Coord ends = Of(route.Destination);
+
+                foreach (Coord cell in Occupancy.UnderIfItStood(
+                             Cells, unit, CentreOf(ends), ArrivingOn(unit, route)))
+                    claimed[cell] = unit.Id;
+            }
+
+            return claimed;
+        }
+
+        /// <summary>Which way a regiment will be facing when it finishes this route.</summary>
+        private static Facing ArrivingOn(UnitInstance unit, MovementRoute route)
+        {
+            IReadOnlyList<Vec2> legs = route.Waypoints;
+
+            if (legs.Count < 2) return unit.Facing;
+
+            Vec2 last = legs[legs.Count - 1];
+            Vec2 before = legs[legs.Count - 2];
+
+            return Vec2.Distance(last, before) < 0.01f
+                ? unit.Facing
+                : Facing.Towards(before, last);
+        }
+
+        /// <summary>
+        /// How far this regiment can carry itself in one turn of the board game,
+        /// in metres.
+        /// </summary>
+        /// <remarks>
+        /// <b>[M159].</b> Whole cells, because whole cells are all it can take -
+        /// so this is what a reach marker drawn round a selected regiment should
+        /// use rather than speed times the turn, which would promise a distance
+        /// it cannot actually stop at.
+        /// </remarks>
+        public float ReachInOneTurn(UnitInstance unit) => GridMode.CellsPerTurn(unit) * CellWidth;
+
         /// <summary>Whether two regiments are being handled as one body.</summary>
         public static bool InTheSameWing(UnitInstance a, UnitInstance b) =>
             a.Bond != 0 && a.Bond == b.Bond;

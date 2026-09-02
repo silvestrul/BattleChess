@@ -89,7 +89,7 @@ namespace BattleChess.Tests.Battle
         /// recording, not a target - see the remarks on the assertion.
         /// </param>
         [Theory]
-        [InlineData(25f, 9)]
+        [InlineData(25f, 12)]
         [InlineData(12.5f, 12)]
         public void AnArmyMarchingOnTheBoardNeverStandsThroughItself(float cellMetres, int drawnAtLeast)
         {
@@ -176,20 +176,20 @@ namespace BattleChess.Tests.Battle
             _out.WriteLine(
                 $"  {steps} steps, {clashes} clashes, closed {wasAway - nowAway:0} m of {wasAway:0} m");
 
-            // A recording of a real limit rather than a target.
+            // A recording of what the game manages, not a target.
             //
-            // At 12,5 m all twelve are routed. At 25 m three are not, and they
-            // are exactly the three with a neighbour on both sides: the Great
-            // Field deploys its line at 100 m intervals, a regiment is 80 x 40 m
-            // and so 89 m across its diagonal, and turning one to a diagonal
-            // inside a 100 m corridor needs 85 m of width that a 25 m grid rounds
-            // up until it does not fit. The army is packed finer than the cell it
-            // is being played on.
+            // It was 9 of 12 at 25 m while the board searched cell by cell, and
+            // the three that failed were exactly the three with a neighbour on
+            // both sides - a body 89 m across the diagonal cannot be turned in
+            // the Great Field's 100 m deployment corridor once a 25 m grid rounds
+            // the clearance away. That was recorded as a real limit of the cell
+            // size. It was not: it was a limit of the SEARCH.
             //
-            // Which is the trade the designer asked to have measured: 25 m gives
-            // the pace they guessed at - foot 2 cells, cavalry 6 - and 12,5 m
-            // gives the whole deployment its room back, at about nine times the
-            // search. Both are kept working; neither is declared the winner here.
+            // [M159] hands the way-finding back to the continuous planner, which
+            // reasons about the bodies in the way rather than about every cell of
+            // the field, and all twelve are routed at both sizes. Worth keeping
+            // as a caution: a limit measured through one algorithm is a fact
+            // about that algorithm until it has been measured through another.
             Assert.True(
                 drawn >= drawnAtLeast,
                 $"only {drawn} of {marching.Count} regiments drew a route on {cellMetres} m cells, " +

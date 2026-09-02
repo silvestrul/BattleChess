@@ -1729,6 +1729,94 @@ namespace BattleChess.Unity
             if (budget <= 0) _tickAccumulator = 0f;
         }
 
+        /// <summary>
+        /// Rings the selected regiments with how far they can actually carry
+        /// themselves this turn.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M159], asked for by the designer alongside reserving
+        /// destinations.</b> It is drawn from <c>Board.ReachInOneTurn</c>, which
+        /// is whole cells times the cell width - not speed times the turn length.
+        /// The difference matters: a regiment cannot stop between cells, so a
+        /// marker drawn from raw speed would promise ground it cannot finish on.
+        /// The ring is a statement about where a turn can END.
+        /// </para>
+        /// <para>
+        /// Drawn round what is selected and nothing else. A ring on every
+        /// regiment on the field is forty rings, which is a haze rather than
+        /// information.
+        /// </para>
+        /// </remarks>
+        private void DrawReachOfSelection()
+        {
+            if (!_options.GridMode || _selection.Count == 0) return;
+
+            Camera eye = Camera.main;
+
+            if (eye == null) return;
+
+            GridGame.Board board = GridGame.Board.For(_battle);
+
+            Color was = GUI.color;
+
+            GUI.color = new Color(0.6f, 0.9f, 1f, 0.5f);
+
+            foreach (UnitInstance unit in _selection)
+            {
+                Vec2 shown = Where(unit);
+
+                Vector3 centre = eye.WorldToScreenPoint(new Vector3(shown.X, shown.Y, 0f));
+
+                if (centre.z < 0f) continue;
+
+                float reach = board.ReachInOneTurn(unit) / (2f * eye.orthographicSize) * Screen.height;
+
+                // A ring of short chords rather than a texture: this is one
+                // regiment or a handful, and a circle nobody has to author is
+                // worth more here than a sprite somebody has to keep.
+                const int Sides = 48;
+
+                float x = centre.x + reach;
+                float y = Screen.height - centre.y;
+
+                for (int i = 1; i <= Sides; i++)
+                {
+                    float turn = i * 2f * Mathf.PI / Sides;
+
+                    float nextX = centre.x + Mathf.Cos(turn) * reach;
+                    float nextY = Screen.height - centre.y + Mathf.Sin(turn) * reach;
+
+                    DrawLine(x, y, nextX, nextY, 1.5f);
+
+                    x = nextX;
+                    y = nextY;
+                }
+            }
+
+            GUI.color = was;
+        }
+
+        /// <summary>A straight line between two screen points, as one stretched texture.</summary>
+        private static void DrawLine(float fromX, float fromY, float toX, float toY, float thickness)
+        {
+            float dx = toX - fromX;
+            float dy = toY - fromY;
+
+            float length = Mathf.Sqrt(dx * dx + dy * dy);
+
+            if (length < 0.01f) return;
+
+            Matrix4x4 was = GUI.matrix;
+
+            GUIUtility.RotateAroundPivot(Mathf.Atan2(dy, dx) * Mathf.Rad2Deg, new Vector2(fromX, fromY));
+
+            GUI.DrawTexture(
+                new Rect(fromX, fromY - thickness * 0.5f, length, thickness), Texture2D.whiteTexture);
+
+            GUI.matrix = was;
+        }
+
         /// <summary>Draws the board only while its cells are big enough to count.</summary>
         private void ShowTheBoardIfItCanBeCounted()
         {
@@ -3732,6 +3820,7 @@ namespace BattleChess.Unity
             DrawBondButton();
 
             DrawSelectionBox();
+            DrawReachOfSelection();
             DrawUnitLabels();
             DrawGhosts();
 

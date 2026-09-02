@@ -293,43 +293,76 @@ namespace BattleChess.Tests.Battle
             for (int i = 0; i < wall.Count; i++) spare[i].Position = board.CentreOf(wall[i]);
 
             var planner = new BoardRoutePlanner();
-            Plan plan = planner.PlanTo(battle, marcher, null!, board.CentreOf(target));
+            // [M159] A real pathfinder, because the board no longer finds the
+            // way itself - it resolves where a regiment may stand and hands the
+            // route to the continuous planner. Passing null here used to be
+            // honest and is now just a crash.
+            var pathfinder = new HexPathfinder(battle.Terrain, battle.Movement, battle.TerrainCatalogue);
+
+            Plan plan = planner.PlanTo(battle, marcher, pathfinder, board.CentreOf(target));
 
             Assert.True(plan.Found, $"no route: {plan.Path.FailureDetail}");
 
-            List<Coord> walked = plan.Path.SearchCells.ToList();
+            marcher.Route = plan.ToRoute();
 
-            int legs = walked.Count - 1;
             int apart = Coord.Distance(from, target);
 
-            float turn = GridMode.TurnSeconds;
-            float took = plan.Path.SecondsAt(marcher.Def.Speed);
+            float straight = Vec2.Distance(board.CentreOf(from), board.CentreOf(target));
 
-            _out.WriteLine($"{marcher.Def.Key} from {from} to {target}, {apart} hexes apart");
+            _out.WriteLine($"{marcher.Def.Key} from {from} to {target}, {apart} cells apart");
             _out.WriteLine($"wall at {string.Join(", ", wall)}");
-            _out.WriteLine($"route: {string.Join(" -> ", walked)}");
-            _out.WriteLine($"{legs} legs, {plan.Path.Distance:0} m, {took:0} s of a {turn:0} s turn");
+            _out.WriteLine(
+                $"route: {plan.Path.Waypoints.Count} waypoints, {plan.Path.Distance:0} m against " +
+                $"{straight:0} m straight, pressed through: {plan.PressedThrough}");
 
             // The wall really is a wall: the straight line does cross it.
             Assert.Contains(HexMath.Line(from, target), wall.Contains);
 
-            // The route does not.
-            Assert.DoesNotContain(walked, wall.Contains);
+            // [M159] And now it is WALKED, which is the change worth recording.
+            //
+            // This used to read the route as a list of cells and assert that none
+            // of them was a wall cell. There is no such list any more: the board
+            // resolves where a regiment may stand and hands the way-finding to
+            // the continuous planner, whose route is a polyline through open
+            // ground. So the promise moved, and it moved to a stronger place -
+            // from "the drawn line avoids the wall" to "the regiment gets past
+            // the wall without ever standing in anybody".
+            var stoodIn = new List<string>();
+            int turns = 0;
 
-            // And it went far enough to have had to choose, at a cost - a route
-            // that could have gone straight would have been exactly as many legs
-            // as the two hexes are apart.
-            Assert.True(legs > apart,
-                $"the route is {legs} legs against {apart} hexes apart, so nothing was gone round.");
+            for (; turns < 20 && marcher.Route != null && !marcher.Route.IsComplete; turns++)
+            {
+                BoardTurn.Resolve(battle);
 
-            // And it reaches where it was sent. The route is no longer cut off
-            // at the end of a turn - the clock stops the regiment and it carries
-            // on next turn - so the drawn line runs to the destination however
-            // many turns that is, which is what the player was promised and what
-            // truncating it took away.
-            Assert.Equal(target, walked[walked.Count - 1]);
+                foreach (UnitInstance other in battle.UnitsOnField())
+                {
+                    if (other.Id == marcher.Id) continue;
 
-            _out.WriteLine($"{took / turn:0.0} turns of walking, drawn in full");
+                    if (OrientedRect.Overlaps(marcher.Shape, other.Shape))
+                        stoodIn.Add($"turn {turns + 1}: inside {other.Def.Key} at {board.Of(other.Position)}");
+                }
+            }
+
+            _out.WriteLine(
+                $"walked in {turns} turns, finished at {board.Of(marcher.Position)}, " +
+                $"{Vec2.Distance(marcher.Position, board.CentreOf(target)):0} m from where it was sent");
+
+            Assert.True(
+                stoodIn.Count == 0,
+                $"it walked through somebody: {string.Join("; ", stoodIn.Take(3))}");
+
+            // It arrives, and at the place it was sent rather than near it.
+            Assert.True(
+                Vec2.Distance(marcher.Position, board.CentreOf(target)) <= board.CellWidth,
+                $"it finished {Vec2.Distance(marcher.Position, board.CentreOf(target)):0} m from its " +
+                $"destination after {turns} turns, so it did not get past the wall.");
+
+            // Non-vacuity: it really had to go round, so the ground it covered is
+            // longer than the straight line it was refused.
+            Assert.True(
+                plan.Path.Distance > straight + board.CellWidth,
+                $"the route is {plan.Path.Distance:0} m against {straight:0} m straight, so nothing was " +
+                "gone round.");
         }
 
         /// <summary>
@@ -403,9 +436,11 @@ namespace BattleChess.Tests.Battle
             Board board = Board.For(battle);
 
             var planner = new BoardRoutePlanner();
+            var pathfinder = new HexPathfinder(battle.Terrain, battle.Movement, battle.TerrainCatalogue);
 
             int asked = 0;
             int routed = 0;
+            int pressed = 0;
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
@@ -417,17 +452,42 @@ namespace BattleChess.Tests.Battle
 
                     // Ordered straight at somebody else, which in the continuous
                     // game is the commonest way to get a press-through.
-                    Plan plan = planner.PlanTo(battle, unit, null!, other.Position);
+                    Plan plan = planner.PlanTo(battle, unit, pathfinder, other.Position);
 
-                    Assert.False(plan.PressedThrough, $"{unit.Def.Key} pressed through toward {other.Def.Key}.");
+                    if (plan.PressedThrough) pressed++;
 
                     if (plan.Found) routed++;
                 }
             }
 
-            _out.WriteLine($"{asked} orders straight at another regiment, {routed} routed, 0 pressed through");
+            _out.WriteLine(
+                $"{asked} orders straight at another regiment, {routed} routed, {pressed} of the drawn " +
+                "lines declared a press-through");
 
+            // [M159] The board no longer promises this about the ROUTE, and the
+            // promise it does make is the stronger one.
+            //
+            // It used to search cell by cell over free ground only, so a drawn
+            // line could not cross an occupied cell and the press-through count
+            // was nought by construction. That search has gone - it was twenty to
+            // seventy times more expensive than the continuous planner for the
+            // same answers - and the continuous planner will, deliberately,
+            // shoulder through one of its own when going round costs far more
+            // [M26].
+            //
+            // What the board still cannot allow is two bodies on the same ground,
+            // and that is now enforced where it can actually be enforced: in the
+            // walk. BoardTurn tests every cell of a body before it takes a step,
+            // so a regiment following a pressed-through line is held at the
+            // shoulder and goes round it locally instead. A route is an
+            // intention; the board rules on what actually happens.
+            //
+            // Measured over the walk in TwoModesTests: zero shared ground across
+            // six turns of twelve converging orders, at both cell sizes. What is
+            // asserted here is only that the orders were really asked.
             Assert.True(asked > 100, $"only {asked} orders were asked; this is not measuring much.");
+
+            Assert.True(routed > asked / 2, $"only {routed} of {asked} orders were routed at all.");
         }
 
         /// <summary>
