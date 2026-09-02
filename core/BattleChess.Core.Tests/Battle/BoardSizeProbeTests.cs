@@ -262,5 +262,148 @@ namespace BattleChess.Tests.Battle
             // and a frontage wider than the hex could not be a line at all.
             Assert.True(first.Footprint.Width <= board.CellWidth, "the regiment is wider than its cell.");
         }
+
+        /// <summary>
+        /// A settled regiment is not still trying to turn: the front it holds
+        /// and the front it was ordered to hold are the same.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M152], reported from play as cavalry that "kept rotating a bit
+        /// for no reason".</b> It was a loop, and a permanent one. An order's
+        /// front is the bearing from where a regiment stood to where it was sent
+        /// - a free angle. On the board a regiment may hold only one of the
+        /// lattice's facings. So <c>WheelOnTheSpot</c> turned the halted
+        /// regiment toward the free bearing, the end of the turn snapped it back
+        /// to a board facing, and the next turn turned it again: a few degrees
+        /// back and forth for ever, worst on cavalry because cavalry turns
+        /// fastest.
+        /// </para>
+        /// <para>
+        /// <b>Non-vacuity, and it is exact.</b> The order below is given with a
+        /// destination deliberately off any board bearing, so before the fix
+        /// <c>OrderFacing</c> and <c>Facing</c> differ by up to half a step and
+        /// the assertion fails with that gap in the message. Snapping only the
+        /// facing - which is what the code did - does not satisfy it, because
+        /// the thing being turned <i>toward</i> is the ordered front.
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void ASettledRegimentIsNotStillTryingToTurn()
+        {
+            BattleState battle = Load("greatfield");
+
+            GridMode.Muster(battle);
+
+            Board board = Board.For(battle);
+
+            UnitInstance unit = battle.UnitsOnField().First(u => u.Def.Key == "cavalry");
+
+            // A bearing that is on no board facing, whatever the lattice: 22,5
+            // degrees is half a step on squares and off every step on hexes.
+            Vec2 awkward = unit.Position + Facing.FromDegrees(22.5f).ToVector() * 400f;
+
+            unit.GiveOrder(UnitOrder.MoveTo(awkward), unit.Position);
+
+            _out.WriteLine($"ordered on {unit.OrderFacing}, holding {unit.Facing}");
+
+            // It arrives and the turn ends.
+            unit.Position = awkward;
+            unit.Route = null;
+
+            GridMode.SettleThoseWhoHaveStopped(battle);
+
+            float apart = Facing.AbsoluteDelta(unit.Facing, unit.OrderFacing) * 180f / MathF.PI;
+
+            _out.WriteLine($"settled on {unit.Facing}, ordered front now {unit.OrderFacing}, {apart:0.###} deg apart");
+
+            Assert.True(
+                board.IsABoardFacing(unit.Facing),
+                $"a settled regiment holds {unit.Facing}, which is not a facing this board allows.");
+
+            Assert.True(
+                apart < 0.01f,
+                $"a settled regiment holds {unit.Facing} but was ordered onto {unit.OrderFacing}, " +
+                $"{apart:0.##} degrees apart - so it will turn toward the order, be snapped back at the " +
+                "end of the turn, and turn again for ever.");
+        }
+
+        /// <summary>
+        /// A wing ordered together is given a cell apiece, and no two the same.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M152], reported from play as regiments conflicting over where
+        /// they were going.</b> A wing is ordered by translating the shape it
+        /// stands in, which on a board is exact - until a wanted cell is water
+        /// or held by somebody outside the wing, and that regiment is shoved
+        /// aside. The wing is planned in parallel against one snapshot, so the
+        /// next regiment knows nothing of the shove and can be sent to the same
+        /// ground.
+        /// </para>
+        /// <para>
+        /// Non-vacuity: the wing here is marched onto ground <b>already held by
+        /// regiments outside it</b>, so shoving is forced rather than
+        /// hypothetical - the count of members that had to give way is printed,
+        /// and the test would be measuring nothing if it were nought.
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void AWingOrderedTogetherGetsACellApiece()
+        {
+            BattleState battle = Load("greatfield");
+
+            GridMode.Muster(battle);
+
+            Board board = Board.For(battle);
+
+            List<UnitInstance> everybody = battle.UnitsOnField().ToList();
+
+            List<UnitInstance> wing = everybody.Take(6).ToList();
+            List<UnitInstance> others = everybody.Skip(6).Take(6).ToList();
+
+            foreach (UnitInstance unit in wing) unit.Bond = -1;
+
+            // Marched right on top of six regiments outside the wing, so several
+            // of them must give way.
+            Vec2 origin = Vec2.Zero;
+            foreach (UnitInstance unit in wing) origin += unit.Position;
+            origin /= wing.Count;
+
+            Vec2 onto = others[0].Position;
+
+            var wanted = new Vec2[wing.Count];
+            for (int i = 0; i < wing.Count; i++) wanted[i] = onto + (wing[i].Position - origin);
+
+            Vec2[] formed = board.FormUpAt(battle, wing, wanted, GridMode.ShufflesWithinRings);
+
+            var cells = new List<Coord>();
+            int gaveWay = 0;
+
+            for (int i = 0; i < formed.Length; i++)
+            {
+                Coord asked = board.Of(wanted[i]);
+                Coord given = board.Of(formed[i]);
+
+                if (asked != given) gaveWay++;
+
+                cells.Add(given);
+            }
+
+            _out.WriteLine($"{wing.Count} regiments formed up, {gaveWay} had to give way");
+            _out.WriteLine($"cells: {string.Join(", ", cells)}");
+
+            // Every one of them has ground of its own.
+            Assert.Equal(cells.Count, cells.Distinct().Count());
+
+            // And none of them was put on top of somebody outside the wing.
+            var outsiders = new HashSet<Coord>(
+                everybody.Where(u => u.Bond != -1).Select(u => board.Of(u.Position)));
+
+            foreach (Coord cell in cells)
+                Assert.DoesNotContain(cell, outsiders);
+
+            Assert.True(gaveWay > 0, "nothing had to give way, so this arrangement is not testing the shove.");
+        }
     }
 }

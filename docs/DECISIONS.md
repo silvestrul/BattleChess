@@ -3693,3 +3693,63 @@ overlap gates in `BoardSizeProbeTests` are shape-agnostic and will report on the
 square board the first time they are run, and `RegimentsInAdjacentHexesStandInALine`
 should now hold with the *straight* march as well, which is the claim this pass is
 actually making and the one still unmeasured.
+
+### M152 - a wing is not an obstacle to itself, and a settled regiment stops turning
+
+**Two faults reported from the same play-test of the square board: regiments
+"conflicting for destination" when ordered together, and "some cavalry kept
+rotating a bit for no reason".** Different causes, both in the board mode.
+
+**The rotation was a loop, and a permanent one.** An order's front comes from
+`FrontFor`, the bearing from where a regiment stood to where it was sent - a
+**free angle**. On the board a regiment may hold only one of the lattice's
+facings. So `WheelOnTheSpot` turned the halted regiment toward the free bearing,
+the end of the turn snapped it back to a board facing, and the next turn turned
+it again. **A few degrees back and forth for ever**, on every regiment whose
+order did not happen to point along a board bearing - worst on cavalry, because
+cavalry has the highest turn rate and so covers most of the gap before being
+snapped back. Measured red-first at **22,5 degrees apart**, which is exactly half
+a step on a square lattice.
+
+Snapping the facing harder could never have fixed it, because the thing being
+turned *toward* is `OrderFacing`. Both have to agree, which is what
+`UnitInstance.SettleFrontOn` is for: **the regiment has stopped, and this is its
+front now.** Deliberately not `GiveOrder`, per [M145] - a regiment that has
+finished walking has not been given anything.
+
+**The conflict was a wing planned in parallel against one snapshot.** A wing is
+ordered by translating the shape it already stands in, and on a board that is
+*exact*: every regiment sits on a cell centre, so shifting them all by one vector
+shifts them all by the same whole number of cells and they land distinct. It
+holds until a wanted cell is water or held by somebody outside the wing. That
+regiment is shoved to the nearest free cell - and the next regiment, planned on
+another thread against the same snapshot, knows nothing about the shove and can
+be sent to the same ground.
+
+**Two changes, and they answer different halves of "move together as one".**
+
+*Where they are going* is settled once, for the whole wing, before a single route
+is asked for: `Board.FormUpAt` walks the wing in order, resolving each against
+non-wing occupancy **and against the answers already given**, and hands back a
+cell apiece with no two the same. Measured on the Great Field with a wing marched
+straight onto six regiments outside it: six formed up, **two had to give way**,
+six distinct cells, none on top of an outsider.
+
+*How they get there* is the other half: **a wing is not an obstacle to itself.**
+`Board.WhoIsWhere` now takes the mover and leaves its bond-mates out. A bond
+marches as one body - they all set off at once - so the cell a wing-mate stands
+on is one it is about to leave, and counting it as held is what made the second
+regiment of a line find the first one's ground taken, get shoved sideways, and
+the line come apart over a few turns. A selection is already bonded: `SetSelection`
+calls `HoldTogether`, which gives it the transient bond, so this applies to a
+plain box-select and not only to a wing tied by hand.
+
+**Honesty about the two reproductions.** The rotation one is red-first and exact:
+reverting `SettleFrontOn` to snap only the facing fails it with the 22,5 degrees
+in the message. The wing one is **not** a reproduction of the old failure - the
+old path had no single place to call - and it earns its keep instead through a
+non-vacuity assertion that something actually had to give way, which would
+otherwise leave it measuring an arrangement where nothing was ever in doubt.
+
+Suite: 718 passing, 12 failing - the same 12 - 87 skipped, 817 total. Unity
+compiles clean.

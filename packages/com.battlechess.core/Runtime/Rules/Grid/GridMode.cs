@@ -181,7 +181,7 @@ namespace BattleChess.Rules.Grid
                 taken[hex] = unit.Id;
 
                 unit.Position = board.CentreOf(hex);
-                unit.Facing = board.Snap(unit.Facing);
+                unit.SettleFrontOn(board.Snap(unit.Facing));
             }
 
             return crowded;
@@ -212,8 +212,16 @@ namespace BattleChess.Rules.Grid
         /// and so finishes a leg within a metre or two of a centre rather than
         /// on it; without this the error accumulates over a dozen turns until
         /// regiments stand visibly off the board they are playing on. Snapping
-        /// the front at the same moment is what makes the six bearings hold: the
-        /// steering turns freely on the way, and arriving is when it settles.
+        /// the front at the same moment is what makes the lattice's facings
+        /// hold: the steering turns freely on the way, and arriving is when it
+        /// settles.
+        /// </para>
+        /// <para>
+        /// <b>The front settled is the ordered front too [M152]</b>, through
+        /// <c>UnitInstance.SettleFrontOn</c>. Setting only the facing left the
+        /// regiment turning back toward the free bearing its order carried, and
+        /// being snapped again at the end of the next turn - a few degrees back
+        /// and forth for ever, worst on cavalry because cavalry turns fastest.
         /// </para>
         /// </remarks>
         public static void SettleThoseWhoHaveStopped(BattleState battle)
@@ -243,7 +251,7 @@ namespace BattleChess.Rules.Grid
                 taken[hex] = unit.Id;
 
                 unit.Position = board.CentreOf(hex);
-                unit.Facing = board.Snap(unit.Facing);
+                unit.SettleFrontOn(board.Snap(unit.Facing));
             }
         }
 
@@ -269,7 +277,7 @@ namespace BattleChess.Rules.Grid
             Board board = Board.For(battle);
 
             unit.Position = board.CentreOf(board.Of(unit.Position));
-            unit.Facing = board.Snap(unit.Facing);
+            unit.SettleFrontOn(board.Snap(unit.Facing));
         }
     }
 }

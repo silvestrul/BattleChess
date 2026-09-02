@@ -636,6 +636,42 @@ namespace BattleChess.Rules
             return was;
         }
 
+        /// <summary>
+        /// Settles a halted regiment onto a front, as the front it is holding
+        /// <i>and</i> the front it was ordered to hold.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M152], and it fixes a regiment that turned a few degrees back and
+        /// forth for ever.</b> An order's front comes from
+        /// <see cref="FrontFor"/>, which is the bearing from where the regiment
+        /// stood to where it was sent - a free angle. On the board a regiment
+        /// may only hold one of the lattice's facings, so the two disagree by
+        /// up to half a step, and the disagreement is a loop:
+        /// <c>WheelOnTheSpot</c> turns the halted regiment toward the ordered
+        /// front, the end of the turn snaps it back to a board facing, and the
+        /// next turn turns it again. Cavalry shows it worst because it has the
+        /// highest turn rate.
+        /// </para>
+        /// <para>
+        /// Setting only <see cref="Facing"/> cannot fix it, because the thing
+        /// being turned toward is <see cref="OrderFacing"/>. Both have to say
+        /// the same thing, which is what this is for: <b>the regiment has
+        /// stopped, and this is its front now.</b>
+        /// </para>
+        /// <para>
+        /// Deliberately not <c>GiveOrder</c>, for the reason [M145] gives:
+        /// giving an order clears the route and six counters, and a regiment
+        /// that has merely finished walking has not been given anything.
+        /// </para>
+        /// </remarks>
+        public void SettleFrontOn(Facing front)
+        {
+            Facing = front;
+            OrderFacing = front;
+            DressingBearing = null;
+        }
+
         /// <summary>Puts back what <see cref="BorrowForPlanning"/> took.</summary>
         public void ReturnAfterPlanning((UnitOrder Order, Vec2 Anchor, Facing Front) was)
         {

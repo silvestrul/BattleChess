@@ -183,16 +183,112 @@ namespace BattleChess.Rules.Grid
         }
 
         /// <summary>Who is standing on each cell, read off the units themselves.</summary>
-        public Dictionary<Coord, UnitId> WhoIsWhere(BattleState battle)
+        /// <param name="mover">
+        /// The regiment the answer is for, if there is one. Its own wing is left
+        /// out - see the remarks.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// <b>A wing is not an obstacle to itself [M152].</b> Regiments picked up
+        /// together are bonded, and a bond marches as one body: they all set off
+        /// at once, so the cell a wing-mate is standing on now is a cell it is
+        /// about to leave. Counting it as held is what made a wing fight itself
+        /// for ground - the second regiment of a line ordered forward would find
+        /// the first one''' + "'" + '''s ground taken, get shoved a cell sideways, and the
+        /// line would come apart over a few turns.
+        /// </para>
+        /// <para>
+        /// Only bond-mates, and only when a mover is named. Everybody else on
+        /// the field holds their cell, including friends outside the wing.
+        /// </para>
+        /// </remarks>
+        public Dictionary<Coord, UnitId> WhoIsWhere(BattleState battle, UnitInstance? mover = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
             var standing = new Dictionary<Coord, UnitId>();
 
             foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (mover != null && unit.Id != mover.Id && InTheSameWing(mover, unit)) continue;
+
                 standing[Of(unit.Position)] = unit.Id;
+            }
 
             return standing;
+        }
+
+        /// <summary>Whether two regiments are being handled as one body.</summary>
+        public static bool InTheSameWing(UnitInstance a, UnitInstance b) =>
+            a.Bond != 0 && a.Bond == b.Bond;
+
+        /// <summary>
+        /// Gives every regiment of a wing a cell of its own to march to, decided
+        /// once for the whole wing rather than one regiment at a time.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M152].</b> A wing is ordered by translating the shape it already
+        /// stands in, which on a board is exact: every regiment sits on a cell
+        /// centre, so shifting them all by one vector shifts them all by the same
+        /// whole number of cells and they land distinct. That holds right up
+        /// until one of the wanted cells is water, or held by somebody outside
+        /// the wing - and then that regiment is shoved to the nearest free cell,
+        /// which the <i>next</i> regiment knows nothing about, because the wing
+        /// is planned in parallel against one snapshot.
+        /// </para>
+        /// <para>
+        /// So the shoving is done here, once, in order, with each regiment''' + "'" + '''s
+        /// answer added to what the next one must avoid. What comes back is a
+        /// cell centre apiece and no two the same - which is the whole of "they
+        /// should not conflict over where they are going".
+        /// </para>
+        /// <para>
+        /// It decides destinations and nothing else. Whether a regiment can
+        /// actually walk to the cell it has been given is the planner''' + "'" + '''s
+        /// question, asked separately and allowed to fail.
+        /// </para>
+        /// </remarks>
+        public Vec2[] FormUpAt(
+            BattleState battle, IReadOnlyList<UnitInstance> wing, IReadOnlyList<Vec2> wanted, int searchRings)
+        {
+            if (battle == null) throw new ArgumentNullException(nameof(battle));
+            if (wing == null) throw new ArgumentNullException(nameof(wing));
+            if (wanted == null) throw new ArgumentNullException(nameof(wanted));
+
+            if (wanted.Count != wing.Count)
+                throw new ArgumentException("One wanted place per regiment.", nameof(wanted));
+
+            var inTheWing = new HashSet<UnitId>();
+
+            foreach (UnitInstance unit in wing) inTheWing.Add(unit.Id);
+
+            // Everybody outside the wing holds their ground. The wing itself is
+            // left out: they are all setting off together, so where they stand
+            // now is not where they will be.
+            var taken = new Dictionary<Coord, UnitId>();
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+            {
+                if (inTheWing.Contains(unit.Id)) continue;
+
+                taken[Of(unit.Position)] = unit.Id;
+            }
+
+            var places = new Vec2[wing.Count];
+
+            for (int i = 0; i < wing.Count; i++)
+            {
+                Coord asked = Of(wanted[i]);
+
+                if (!NearestFree(battle, wing[i], asked, taken, searchRings, out Coord given))
+                    given = asked;
+
+                taken[given] = wing[i].Id;
+                places[i] = CentreOf(given);
+            }
+
+            return places;
         }
 
         /// <summary>

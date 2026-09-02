@@ -79,7 +79,9 @@ namespace BattleChess.Rules.Grid
             Board board = Board.For(battle);
             MovementType moving = unit.Def.Movement;
 
-            Dictionary<Coord, UnitId> taken = board.WhoIsWhere(battle);
+            // The mover's own wing is not in the way of it [M152]: a bond
+            // marches as one body, so a wing-mate's cell is one it is leaving.
+            Dictionary<Coord, UnitId> taken = board.WhoIsWhere(battle, unit);
 
             Coord from = board.Of(unit.Position);
             Coord wanted = board.Of(destination);

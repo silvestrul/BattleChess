@@ -1110,6 +1110,25 @@ namespace BattleChess.Unity
             for (int i = 0; i < wing.Count; i++)
                 wanted[i] = destination + (wing[i].Position - origin);
 
+            // [M152]. On the board the translation above is exact - every
+            // regiment stands on a cell centre, so shifting them all by one
+            // vector shifts them all by the same whole number of cells - right
+            // up until a wanted cell is water or held by somebody outside the
+            // wing. Then that regiment is shoved aside, and because the wing is
+            // planned in parallel against one snapshot the next regiment knows
+            // nothing about it and can be shoved onto the same ground.
+            //
+            // So the shoving is settled here, once, in order, before a single
+            // route is asked for. What comes back is a cell apiece and no two
+            // the same.
+            if (_options.GridMode)
+            {
+                Vec2[] formed = GridGame.Board.For(_battle).FormUpAt(
+                    _battle, wing, wanted, GridGame.GridMode.ShufflesWithinRings);
+
+                for (int i = 0; i < wanted.Length; i++) wanted[i] = formed[i];
+            }
+
             // Handed to a worker and applied when it lands. The clock is held
             // meanwhile, so the field the wing is planned against is the field
             // the player clicked on and not one a tick has moved underneath it.
