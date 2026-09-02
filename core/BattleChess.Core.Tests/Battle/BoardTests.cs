@@ -125,7 +125,13 @@ namespace BattleChess.Tests.Battle
                 worstDrift = MathF.Max(
                     worstDrift, Vec2.Distance(unit.Position, board.CentreOf(board.Of(unit.Position))));
 
-                float off = MathF.Abs(unit.Facing.Degrees / 60f - MathF.Round(unit.Facing.Degrees / 60f)) * 60f;
+                // Against Snap itself rather than against a multiple of sixty.
+                // The literal 60 was the old rule written into the test, and it
+                // failed the moment [M150] moved the six facings thirty degrees
+                // round so that lines could form - correctly, but it was
+                // measuring the constant and not the promise. The promise is
+                // that a mustered regiment is already on a board facing.
+                float off = Facing.AbsoluteDelta(unit.Facing, Board.Snap(unit.Facing)) * 180f / MathF.PI;
 
                 worstTurn = MathF.Max(worstTurn, off);
             }
@@ -134,7 +140,7 @@ namespace BattleChess.Tests.Battle
             _out.WriteLine($"worst bearing off a six:  {worstTurn:0.###} degrees");
 
             Assert.True(worstDrift < 0.01f, $"a regiment is {worstDrift:0.###} m off its hex centre.");
-            Assert.True(worstTurn < 0.01f, $"a regiment is {worstTurn:0.###} degrees off a hex bearing.");
+            Assert.True(worstTurn < 0.01f, $"a regiment is {worstTurn:0.###} degrees off a board facing.");
         }
 
         /// <summary>

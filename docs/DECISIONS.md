@@ -3578,3 +3578,69 @@ battle files could, and nothing asked them.
 
 Suite: 714 passing, 12 failing - the same 12 - 87 skipped, 813 total. Unity
 compiles clean.
+
+### M150 - a regiment faces the corner, so that a line can be a line
+
+**The designer, questioning the whole mode: "the hex map might be a slightly bad
+idea because it disallows for line formation where units are lined up."** Right,
+and provably so rather than as a matter of taste.
+
+**The proof, and it is three lines.** A rectangle's frontage runs perpendicular
+to its facing. The six hex bearings are multiples of sixty. Ninety plus a
+multiple of sixty is never a multiple of sixty. Therefore **a facing on a hex
+axis puts frontage off every hex axis, and the reverse**, so a hex board can
+align *marching* with the grid or *lines* with it and never both. [M147] picked
+marching without noticing there was a choice to make.
+
+**Measured before changing anything**, four 80 m regiments on the Great Field
+meant to stand shoulder to shoulder:
+
+| facing snapped to | apart along the line | stagger |
+|---|---|---|
+| a hex bearing (as shipped) | 77,9 m | **45,0 m, every regiment** |
+| thirty degrees round | **90,0 m** | **0,0 m** |
+| what a line wants | 80 m | 0 m |
+
+Forty-five metres of stagger is half a hex. That is a staircase, and it is
+exactly what the designer was looking at.
+
+**So the six facings move thirty degrees: a regiment faces a hex corner rather
+than a hex edge.** Frontage then lies along a hex axis, and regiments in adjacent
+hexes stand in a true line - 90 m apart, no stagger, ten metres of air between
+80 m bodies, nought overlap. On the Crucible's 45 m board the same test reads
+45,0 m apart and no stagger.
+
+**What it costs, said plainly.** Straight ahead is no longer a hex step, so a
+march to the front weaves between the two bearings either side of the facing.
+That is cosmetic rather than structural: a regiment already turns onto each leg
+as it walks it, so nothing crabs - it only settles back onto its ordered front on
+arrival.
+
+**One constant, `Board.FacingOffsetDegrees`,** because the whole choice is that
+one number and it should be readable as such.
+
+**The test that should have existed on day one.**
+`RegimentsInAdjacentHexesStandInALine` draws four regiments up along their
+shoulder axis and measures the spacing and the stagger. Its non-vacuity is
+unusually strong, because the failing arrangement is not hypothetical: setting
+the offset back to nought was built and run, and it fails on both fields with
+**45,0 m and 22,5 m of stagger** in the message. `Board.ShoulderDirectionOf`
+exists so the axis a line is drawn up on is available rather than merely true.
+
+**And one test of mine had the old rule written into it.**
+`MusteringSnapsBothWhereAndWhichWay` checked that a facing was a multiple of
+sixty, which is the constant rather than the promise, so it failed the moment the
+six moved - correctly, and for the wrong reason. It now checks against `Snap`
+itself: the promise is that a mustered regiment is already on a board facing,
+whichever six those are.
+
+**Where this leaves the mode.** The square grid is still the structurally correct
+home for rectangular formations - the perpendicular of a square axis *is* a
+square axis, so squares align lines and marching at once, which is why nearly
+every game with line formations uses them. This is the cheap experiment first, on
+the designer's call: if the weave on a march reads badly, `Board`, `GridMode`,
+the muster, the planner and the turn logic all carry over to squares and only the
+coordinate type and neighbour set change.
+
+Suite: 716 passing, 12 failing - the same 12 - 87 skipped, 815 total. Unity
+compiles clean.

@@ -202,25 +202,73 @@ namespace BattleChess.Rules.Grid
             return false;
         }
 
-        /// <summary>The nearest of the six hex bearings to a free facing.</summary>
+        /// <summary>
+        /// Where the six board facings sit, in degrees: the offset from a hex
+        /// bearing, and the step between them.
+        /// </summary>
         /// <remarks>
-        /// On the board a regiment faces one of six ways, which is what keeps a
-        /// flank a flank: "degrees off the front" becomes a whole number of
-        /// sixty-degree steps, and a player can see at a glance which side of a
-        /// regiment they stand on. Rounded rather than truncated, so a bearing
-        /// is never moved by more than thirty degrees.
+        /// <para>
+        /// <b>Thirty, and [M150] is the whole argument.</b> A regiment on the
+        /// board faces one of six ways - that is what keeps a flank a flank -
+        /// but <i>which</i> six is not free. A rectangle's frontage runs
+        /// perpendicular to its facing, and the perpendicular of a hex bearing
+        /// is never a hex bearing, because the six are multiples of sixty and
+        /// ninety plus a multiple of sixty is not one of them.
+        /// </para>
+        /// <para>
+        /// So a hex board can align <b>marching</b> with the grid or <b>lines</b>
+        /// with it, never both, and the first draft picked marching without
+        /// noticing there was a choice. Measured on the Great Field, four 80 m
+        /// regiments meant to stand shoulder to shoulder came out 77,9 m apart
+        /// with <b>45 m of stagger between each and the next</b> - a staircase,
+        /// not a line. Facing the corner instead of the edge puts frontage on a
+        /// hex axis and the same four measure <b>90,0 m apart with no stagger at
+        /// all</b>: a true line with ten metres of air in it.
+        /// </para>
+        /// <para>
+        /// <b>What it costs.</b> Straight ahead is no longer a hex step, so a
+        /// march to the front weaves between the two bearings either side of the
+        /// facing. That is cosmetic rather than structural: a regiment already
+        /// turns onto each leg as it walks it, so nothing crabs - it only
+        /// settles back onto its ordered front on arrival.
+        /// </para>
+        /// </remarks>
+        public const float FacingOffsetDegrees = 30f;
+
+        /// <inheritdoc cref=FacingOffsetDegrees/>
+        public const float DegreesBetweenFacings = 360f / HexMath.DirectionCount;
+
+        /// <summary>The nearest of the six board facings to a free bearing.</summary>
+        /// <remarks>
+        /// Rounded rather than truncated, so a bearing is never moved by more
+        /// than half a step.
         /// </remarks>
         public static Facing Snap(Facing free)
         {
-            int step = (int)MathF.Round(free.Degrees / 60f);
+            float step = MathF.Round(
+                (free.Degrees - FacingOffsetDegrees) / DegreesBetweenFacings);
 
-            return Facing.FromDegrees(step * 60f);
+            return Facing.FromDegrees(FacingOffsetDegrees + step * DegreesBetweenFacings);
         }
 
-        /// <summary>Which of the six a snapped facing is.</summary>
-        public static HexDirection DirectionOf(Facing snapped)
+        /// <summary>Whether a bearing is one of the six a regiment may hold.</summary>
+        public static bool IsABoardFacing(Facing facing, float toleranceDegrees = 0.01f) =>
+            Facing.AbsoluteDelta(facing, Snap(facing)) * 180f / MathF.PI <= toleranceDegrees;
+
+        /// <summary>
+        /// The hex axis a regiment's frontage lies along, which is the axis a
+        /// line of regiments is drawn up on.
+        /// </summary>
+        /// <remarks>
+        /// The point of <see cref=FacingOffsetDegrees/>, made available rather
+        /// than merely true: given a regiment, this is the direction to step to
+        /// put the next one at its shoulder.
+        /// </remarks>
+        public static HexDirection ShoulderDirectionOf(Facing snapped)
         {
-            int step = (int)MathF.Round(snapped.Degrees / 60f) % HexMath.DirectionCount;
+            float alongTheLine = snapped.Degrees + 90f;
+
+            int step = (int)MathF.Round(alongTheLine / DegreesBetweenFacings) % HexMath.DirectionCount;
 
             if (step < 0) step += HexMath.DirectionCount;
 
