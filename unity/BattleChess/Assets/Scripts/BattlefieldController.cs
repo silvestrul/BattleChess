@@ -272,7 +272,7 @@ namespace BattleChess.Unity
 
             TerrainView.Build(_map, _terrainCatalogue, transform);
 
-            if (_options.GridMode) BoardView.Build(GridGame.Board.For(_battle), transform);
+            if (_options.GridMode) _boardView = BoardView.Build(GridGame.Board.For(_battle), transform);
 
             foreach (UnitInstance unit in _battle.UnitsOnField())
                 _views.Add(UnitView.Create(unit, ColourFor(unit.Owner), transform));
@@ -423,6 +423,8 @@ namespace BattleChess.Unity
         private void Update()
         {
             if (_battle == null) return;
+
+            ShowTheBoardIfItCanBeCounted();
 
             // What the last frame cost, reported at the top of this one, because
             // a frame cannot time itself: the drawing that makes it slow happens
@@ -676,6 +678,24 @@ namespace BattleChess.Unity
         private Vector3 _boxFromScreen;
 
         private bool _ordering;
+        private GameObject _boardView;
+
+        /// <summary>Screen pixels a cell must be worth before the board is drawn.</summary>
+        /// <remarks>
+        /// <b>[M157].</b> The board is one mesh, but it is a mesh of lines in a
+        /// transparent material covering the whole map - about fourteen thousand
+        /// segments at 25 m and fifty-five thousand at 12,5 m, every one of them
+        /// blended. Zoomed out they are sub-pixel: they cost the whole overdraw
+        /// and show nothing but grey haze.
+        ///
+        /// Six pixels, because the board exists so a player can count cells to a
+        /// target, and a grid finer than that on screen cannot be counted. So
+        /// this is a picture rule as much as a speed one.
+        /// </remarks>
+        private const float CellPixelsToDrawTheBoard = 6f;
+
+        private int _boardClashes;
+
         private Vec2 _orderAt;
         private Vector3 _orderAtScreen;
 
@@ -1656,21 +1676,22 @@ namespace BattleChess.Unity
                     // which is what marching looks like. Without this the drift
                     // off a centre accumulates over a dozen turns until
                     // regiments stand visibly off the board they play on.
+                    // [M157] Movement was spent through the turn's ticks, so
+                    // there is nothing to apply here. What is left is tidying:
+                    // a regiment that has FINISHED is put back exactly on its
+                    // cell centre and its front settled onto one the board
+                    // allows, which stops a drift accumulating over a dozen
+                    // turns until regiments stand visibly off their own board.
                     if (_options.GridMode)
                     {
-                        // [M155] The turn's movement, all of it, resolved at
-                        // once. Everybody advances their whole allowance of cells
-                        // and clashes over ground are settled as they happen -
-                        // which is the designer's choice of simultaneous
-                        // movement, and the reason MovementSystem does not walk
-                        // anybody while the board is on.
-                        GridGame.BoardTurn.Summary moved =
-                            GridGame.BoardTurn.Resolve(_battle, _console);
-
-                        if (moved.Steps > 0 || moved.Clashes > 0)
-                            _console.Info("Board", $"Turn resolved: {moved}.");
-
                         GridGame.GridMode.SettleThoseWhoHaveStopped(_battle);
+
+                        if (_boardClashes > 0)
+                            _console.Info("Board",
+                                $"{_boardClashes} time{(_boardClashes == 1 ? "" : "s")} this turn a " +
+                                "regiment was stopped by ground somebody else was holding.");
+
+                        _boardClashes = 0;
                     }
 
                     break;
@@ -1678,6 +1699,23 @@ namespace BattleChess.Unity
             }
 
             if (budget <= 0) _tickAccumulator = 0f;
+        }
+
+        /// <summary>Draws the board only while its cells are big enough to count.</summary>
+        private void ShowTheBoardIfItCanBeCounted()
+        {
+            if (_boardView == null) return;
+
+            Camera eye = Camera.main;
+
+            if (eye == null || !eye.orthographic) return;
+
+            float pixelsPerCell =
+                GridGame.Board.For(_battle).CellWidth * Screen.height / (2f * eye.orthographicSize);
+
+            bool show = pixelsPerCell >= CellPixelsToDrawTheBoard;
+
+            if (_boardView.activeSelf != show) _boardView.SetActive(show);
         }
 
         private void StepOnce()
@@ -1692,6 +1730,17 @@ namespace BattleChess.Unity
             List<int> before = _options.NoCasualties ? StrengthSnapshot() : EmptyStrengths;
 
             _clock.Advance(_battle, _quietened);
+
+            // [M157] The board's own movement, one tick's worth. MovementSystem
+            // stands aside while the board is on, so this is the only thing
+            // moving anybody - and it runs BEFORE the snapshot below, which is
+            // the whole reason the picture and the battle agree now.
+            if (_options.GridMode)
+            {
+                GridGame.BoardTurn.Summary played = GridGame.BoardTurn.Tick(_battle, _console);
+
+                if (played.Clashes > 0) _boardClashes += played.Clashes;
+            }
 
             ApplyCheats(before);
 

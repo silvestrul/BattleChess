@@ -449,6 +449,18 @@ namespace BattleChess.Rules
         /// </remarks>
         public Vec2? Station { get; set; }
 
+        /// <summary>
+        /// Fractions of a board cell this regiment has earned but not yet spent.
+        /// </summary>
+        /// <remarks>
+        /// <b>[M157].</b> A board turn buys a whole number of cells, but it is
+        /// spent over the turn's ticks rather than applied at the end of it -
+        /// see <see cref="Grid.BoardTurn.Tick"/>. This is what carries the
+        /// remainder between ticks, so cavalry steps every fifth one and foot
+        /// every fifteenth instead of both jumping at the bell.
+        /// </remarks>
+        public float BoardStepCredit { get; set; }
+
         // ---- Whether a march is getting anywhere -------------------------------
 
         /// <summary>The closest this regiment has come to its goal on this order.</summary>

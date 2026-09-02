@@ -73,8 +73,56 @@ namespace BattleChess.Rules.Grid
             public bool Stepped;
         }
 
-        /// <summary>Plays one turn: everybody advances, clashes are settled.</summary>
+        /// <summary>Plays a whole turn, tick by tick.</summary>
+        /// <remarks>
+        /// A loop over <see cref="Tick"/> rather than a second way of moving, so
+        /// that what a test measures is what the game does.
+        /// </remarks>
         public static Summary Resolve(BattleState battle, IBattleLog? log = null)
+        {
+            int moved = 0, steps = 0, clashes = 0, arrived = 0;
+
+            var stepped = new HashSet<UnitId>();
+
+            for (int i = 0; i < GridMode.TicksPerTurn; i++)
+            {
+                Summary one = Tick(battle, log, stepped);
+
+                steps += one.Steps;
+                clashes += one.Clashes;
+                arrived += one.Arrived;
+            }
+
+            moved = stepped.Count;
+
+            return new Summary(moved, steps, clashes, arrived);
+        }
+
+        /// <summary>
+        /// One tick of the board game: every regiment that has earned a step
+        /// takes one, and clashes over ground are settled.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M157], and the first draft did this all at once at the end of the
+        /// turn.</b> That was correct and looked broken: a regiment jumped its
+        /// whole allowance in the instant the turn ended, after the last tick the
+        /// view had snapshotted, so the picture stayed a turn behind the battle
+        /// while clicking and the nameplate read the battle. Reported as units
+        /// not being where their names were.
+        /// </para>
+        /// <para>
+        /// So a turn is spent rather than applied. A regiment earns
+        /// <see cref="GridMode.CellsPerTurn"/> over
+        /// <see cref="GridMode.TicksPerTurn"/> ticks and takes a whole cell
+        /// whenever it has earned one - cavalry every fifth tick, foot every
+        /// fifteenth. It still ends every turn on a cell centre, because a step
+        /// is still the only thing it can take, and it is now visibly marching
+        /// between them.
+        /// </para>
+        /// </remarks>
+        public static Summary Tick(
+            BattleState battle, IBattleLog? log = null, HashSet<UnitId>? stepped = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
@@ -85,11 +133,19 @@ namespace BattleChess.Rules.Grid
 
             foreach (UnitInstance unit in battle.UnitsOnField())
             {
+                bool marching = unit.Route != null && !unit.Route.IsComplete;
+
+                if (marching)
+                    unit.BoardStepCredit +=
+                        GridMode.CellsPerTurn(unit) / (float)Math.Max(1, GridMode.TicksPerTurn);
+                else
+                    unit.BoardStepCredit = 0f;
+
                 var marcher = new Marcher
                 {
                     Unit = unit,
-                    Left = unit.Route == null || unit.Route.IsComplete ? 0 : GridMode.CellsPerTurn(unit),
-                    Cells = Occupancy.Under(board.Cells, unit)
+                    Left = marching ? (int)unit.BoardStepCredit : 0,
+                    Cells = board.CellsUnder(unit)
                 };
 
                 marchers.Add(marcher);
@@ -150,16 +206,30 @@ namespace BattleChess.Rules.Grid
                     if (blocker != null)
                     {
                         clashes++;
-                        marcher.Left = 0;   // it has been stopped; it does not shove
+                        marcher.Left = 0;   // stopped this tick; it does not shove
 
-                        route.HeldItsHandBecause =
+                        // Its credit is kept, so it tries again next tick rather
+                        // than losing the rest of the turn to one blocked step.
+
+                        string because =
                             $"{blocker.Def.DisplayName} is standing on the ground it was stepping onto";
 
-                        log.Decision(
-                            "board",
-                            $"held at {board.Of(marcher.Unit.Position)}: {blocker.Def.DisplayName} " +
-                            $"holds {next}",
-                            marcher.Unit.Id);
+                        // Said once, when it starts being held, and not once a
+                        // tick for as long as it stays held. A regiment blocked
+                        // for a whole turn is thirty ticks, and forty regiments
+                        // shuffling round each other wrote hundreds of identical
+                        // lines a turn - which is a recording nobody can read and
+                        // a cost the game pays for the privilege.
+                        if (route.HeldItsHandBecause != because)
+                        {
+                            route.HeldItsHandBecause = because;
+
+                            log.Decision(
+                                "board",
+                                $"held at {board.Of(marcher.Unit.Position)}: " +
+                                $"{blocker.Def.DisplayName} holds {next}",
+                                marcher.Unit.Id);
+                        }
 
                         continue;
                     }
@@ -173,10 +243,14 @@ namespace BattleChess.Rules.Grid
 
                     foreach (Coord cell in wants) claim[cell] = marcher.Unit;
 
+                    route.HeldItsHandBecause = null;
+
                     route.Advance();
 
                     marcher.Left--;
+                    marcher.Unit.BoardStepCredit -= 1f;
                     marcher.Stepped = true;
+                    stepped?.Add(marcher.Unit.Id);
                     steps++;
 
                     if (route.IsComplete)

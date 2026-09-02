@@ -4083,3 +4083,64 @@ dishonest fix:
 
 Suite: **729 passing, 12 failing - the same 12 as the baseline, name for name,
 twice running** - 87 skipped, 828 total. Unity compiles clean.
+
+---
+
+## M157 - A turn is spent, not applied
+
+Reported from play, and the two halves turned out to be one fault: *"the units
+are not at their own position i click on the unit but the name is somewhere
+else"*, and *"performance still sucks"*.
+
+### The picture was a whole turn behind the battle
+
+[M155] resolved a board turn **at the bell** - all of a regiment's cells at once,
+in `EndTheTurn`, after the last tick of the resolve phase. A `UnitView`
+interpolates between the last two ticks it snapshotted, so the movement was never
+snapshotted at all: for the whole time the player was giving orders, **every
+regiment was drawn where it had stood at the start of the previous turn**, while
+`unit.Position` was up to a hundred and fifty metres away. Clicking reads the
+real position and so does the nameplate, which is exactly the report - the name
+sits away from the body, and an order aimed at the body lands on nothing.
+
+**The first fix was to snap the views, and it was the wrong fix.** It made the
+picture agree, at the price of every regiment teleporting its whole allowance in
+one frame. Correct and unplayable is not correct.
+
+So a turn is **spent** rather than applied. A regiment earns
+`CellsPerTurn / TicksPerTurn` of a cell each tick and takes a whole cell whenever
+it has earned one - cavalry every fifth tick, foot every fifteenth, carried
+between ticks by `UnitInstance.BoardStepCredit`. It still ends every turn on a
+cell centre, because a step is still the only thing it can take; it is now
+visibly marching between them, and it steps **before** the tick's snapshot, so
+the picture and the battle cannot disagree.
+
+`BoardTurn.Resolve` is kept as a loop over `BoardTurn.Tick`, so what a test
+measures is what the game does rather than a second way of moving.
+
+**It also moves further.** A regiment stopped by somebody's ground used to lose
+the rest of its turn; now it keeps its credit and tries again next tick. Twelve
+converging orders over six turns closed 6 567 m where they closed 5 738 m, on the
+same arrangement.
+
+### Two costs the play-test was paying
+
+- **The board was drawn even when it could not be seen.** It is one mesh, but a
+  mesh of lines in a transparent material covering the whole map - about fourteen
+  thousand segments at 25 m and fifty-five thousand at 12,5 m, every one blended
+  and, zoomed out, sub-pixel. It is now hidden below six pixels to a cell. That
+  is a picture rule as much as a speed one: the board exists so a player can
+  count cells to a target, and a grid finer than six pixels cannot be counted.
+- **The log was written once a tick per held regiment.** Moving to per-tick
+  stepping turned 13 clashes a turn into 240 - the same event, counted thirty
+  times - and each one wrote a line. A regiment now says it is held **once, when
+  it starts being held**, and the turn reports a single count.
+
+Suite: 729 passing, 12 failing - the same 12 as the baseline - 87 skipped, 828
+total. Unity compiles clean.
+
+**Still unmeasured, and it is the one that matters:** whether this is now fast
+enough to play. The frame harness already records sim, view, tracking and GUI
+milliseconds separately on every frame and writes a line for slow ones; the next
+report should be one of those lines rather than a description, because it says
+which of the four is the problem and I have twice guessed wrong about that.
