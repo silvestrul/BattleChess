@@ -3796,3 +3796,59 @@ does not go through the game's own path proves nothing about the game.
 
 Suite: 719 passing, 12 failing - the same 12 - 87 skipped, 818 total. Unity
 compiles clean.
+
+### M154 - a wing attacks as a line, because the line is where it is going
+
+**Reported from play with a picture: five regiments in line, told to attack the
+line opposite, folded inward into a diagonal knot as they advanced.** The
+designer's rule: *"I want it to keep its shape. It should evade individually if
+an obstacle appears or the terrain isn't favorable, but the end position should
+be close to starting distance, like they are still linked."*
+
+**The cause is in the chase, and it is not the board's.** `ChaseToward` aims a
+regiment at a stand-off from the quarry **along its own bearing to that quarry**.
+For one regiment that is right. For a line of five it is a funnel: five slightly
+different bearings all end just in front of the same enemy, so the line folds as
+it advances. It happens on open ground with no grid at all, which is where the
+reproduction runs so that nothing else can be blamed for it.
+
+**Measured, five spearmen a hundred metres apart advancing 290 m on one enemy:**
+
+| | spacing after |
+|---|---|
+| every regiment for itself | 55, 49, 49, 55 m - **worst change 51 m of 100** |
+| as a wing, keeping station | 100, 100, 100, 100 m - **worst change 0 m** |
+
+**A station is a place in the wing's own frame** - forward of the wing's centre
+along the line of advance, and across it - measured **once**, when the wing is
+ordered, and held. The aim point becomes the wing's contact point plus that
+offset, so the regiments keep the spacing they set off with. The end position is
+close to the starting distance because it *is* the starting distance.
+
+**Held rather than re-derived, and that is the whole of the designer's second
+sentence.** Working the slots out afresh from where everybody currently stands
+would look identical and drift: a regiment shoved aside by broken ground moves
+the wing's centre, which moves everybody else's slot, which is a line that
+wanders. Held offsets let a regiment leave its station to get round something and
+**come back to it, because its place has not moved**. Nothing here forces it to
+stay in line; the station is only where it is going.
+
+**One approach bearing for the whole wing**, recomputed each time while the
+stations are not, so the line wheels as a body when the quarry moves.
+
+**Only during the advance.** Inside dressing range the existing branch takes over
+and each regiment squares up on what is in front of it, which is what contact
+should look like - a line that held station to the last metre would refuse to
+engage anything not directly ahead. The reproduction had to be moved back from
+six turns to three for exactly this reason: at six the wing was in contact, where
+five regiments crowding one enemy is correct behaviour, and it masked the fault
+the picture showed. **The first draft measured the melee and called it a
+collapse.**
+
+**And it settles [M153]'s test properly.** That entry said a wing-mate holds
+ground only when it has "a destination of its own", and used the order kind as
+the stand-in because an attacking regiment had none. Now it may: `HasAPlaceOfItsOwn`
+is a move order **or a station**, which is the thing the rule was always about.
+
+Suite: 721 passing, 12 failing - the same 12 - 87 skipped, 820 total. Unity
+compiles clean.

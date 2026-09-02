@@ -410,6 +410,45 @@ namespace BattleChess.Rules
         /// </remarks>
         public Facing? DressingBearing { get; set; }
 
+        /// <summary>
+        /// Where this regiment stands in its wing, in the wing's own frame:
+        /// <c>X</c> forward of the wing centre along the line of advance,
+        /// <c>Y</c> across it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M154], and it is what stops a line collapsing into a knot when it
+        /// is told to attack.</b> A chase aims at a stand-off from the quarry
+        /// along <i>its own</i> bearing to that quarry. Five regiments in a line
+        /// have five slightly different bearings to the same enemy, and all five
+        /// aim points sit just in front of it - so the line folds inward as it
+        /// advances, which is exactly what a play-test showed.
+        /// </para>
+        /// <para>
+        /// A station is measured once, when the wing is ordered, and held. The
+        /// aim point becomes the wing's contact point plus this offset, so the
+        /// regiments keep the spacing they set off with: <b>the end position is
+        /// close to the starting distance, because it is the starting distance.</b>
+        /// </para>
+        /// <para>
+        /// <b>Measured, not re-derived.</b> Working the slots out afresh from
+        /// where everybody currently stands would look identical and drift: a
+        /// regiment shoved aside by broken ground moves the centre, which moves
+        /// everybody else's slot, which is a line that wanders. Held offsets
+        /// let a regiment leave its station to get round something and come back
+        /// to it, which is what was asked for.
+        /// </para>
+        /// <para>
+        /// <b>Nothing clears it and nothing needs to.</b> It is read only while
+        /// the regiment is in a wing and under an attack order, and a fresh wing
+        /// order overwrites it. That is deliberate: an order given through
+        /// [M143]'s book is drawn long before <c>GiveOrder</c> is called on it,
+        /// so a station cleared by giving orders would be cleared after it was
+        /// set.
+        /// </para>
+        /// </remarks>
+        public Vec2? Station { get; set; }
+
         // ---- Whether a march is getting anywhere -------------------------------
 
         /// <summary>The closest this regiment has come to its goal on this order.</summary>

@@ -1553,6 +1553,123 @@ namespace BattleChess.Rules
         private const int LeastTicksBetweenAsking = RepathIntervalTicks;
 
         /// <summary>Plans a march that stops just short of a target.</summary>
+        /// <summary>
+        /// Where a regiment of a wing should be heading, so that the wing keeps
+        /// the shape it set off in.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M154].</b> The ordinary chase aims each regiment at a stand-off
+        /// from the quarry along <i>its own</i> bearing to it. For one regiment
+        /// that is right. For a line of five it is a funnel: five slightly
+        /// different bearings all end just in front of the same enemy, so the
+        /// line folds inward as it advances and arrives as a knot.
+        /// </para>
+        /// <para>
+        /// <b>The wing advances instead.</b> One approach bearing for the whole
+        /// wing, taken from where the wing's centre stands to where the quarry
+        /// stands, and each regiment aims at the wing's contact point offset by
+        /// the station it set off with. The line therefore arrives with the
+        /// spacing it started with, and it wheels as a body when the quarry
+        /// moves, because the approach is recomputed while the stations are not.
+        /// </para>
+        /// <para>
+        /// <b>Only during the advance.</b> Once a regiment is inside dressing
+        /// range the branch above this one takes over and it squares up on the
+        /// enemy in front of it, which is what contact should look like - a line
+        /// that held station to the last metre would refuse to engage anything
+        /// not directly ahead of it.
+        /// </para>
+        /// <para>
+        /// <b>Nothing here forces a regiment to stay on station.</b> The station
+        /// is where it is going; how it gets there is the planner's business,
+        /// and a regiment that has to go round broken ground or a body in the way
+        /// leaves the line and comes back to its place, because its place has not
+        /// moved.
+        /// </para>
+        /// </remarks>
+        private static bool WingStation(
+            BattleState battle, UnitInstance unit, UnitInstance quarry, out Vec2 want)
+        {
+            want = default;
+
+            if (unit.Bond == 0 || !unit.Station.HasValue) return false;
+
+            Vec2 centre = Vec2.Zero;
+            int inTheWing = 0;
+
+            foreach (UnitInstance mate in battle.UnitsOnField())
+            {
+                if (mate.Bond != unit.Bond) continue;
+
+                centre += mate.Position;
+                inTheWing++;
+            }
+
+            // A wing of one is just a regiment, and the ordinary stand-off says
+            // it better than a line of one place does.
+            if (inTheWing < 2) return false;
+
+            centre /= inTheWing;
+
+            Vec2 approach = (centre - quarry.Position).Normalised();
+
+            if (approach.IsNearZero) return false;
+
+            // The frame the station was measured in: X along the approach, Y
+            // across it. Written the same way in both places on purpose - a
+            // right vector that disagreed would mirror the line.
+            Vec2 across = new Vec2(approach.Y, -approach.X);
+
+            float standOff = quarry.Shape.ProjectedRadius(approach)
+                           + unit.Shape.ProjectedRadius(approach)
+                           - ContactMetres * 0.5f;
+
+            Vec2 station = unit.Station.Value;
+
+            want = quarry.Position + approach * (standOff + station.X) + across * station.Y;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Measures every regiment of a wing against the wing's own frame, so
+        /// that an attack keeps the shape the wing is standing in.
+        /// </summary>
+        /// <remarks>
+        /// Called once, when the wing is ordered. See
+        /// <see cref="UnitInstance.Station"/> for why these are held rather than
+        /// worked out afresh each time.
+        /// </remarks>
+        public static void TakeStations(
+            IReadOnlyList<UnitInstance> wing, Vec2 towards)
+        {
+            if (wing == null) throw new ArgumentNullException(nameof(wing));
+
+            if (wing.Count < 2)
+            {
+                if (wing.Count == 1) wing[0].Station = null;
+                return;
+            }
+
+            Vec2 centre = Vec2.Zero;
+            foreach (UnitInstance unit in wing) centre += unit.Position;
+            centre /= wing.Count;
+
+            Vec2 approach = (centre - towards).Normalised();
+
+            if (approach.IsNearZero) approach = new Vec2(1f, 0f);
+
+            Vec2 across = new Vec2(approach.Y, -approach.X);
+
+            foreach (UnitInstance unit in wing)
+            {
+                Vec2 off = unit.Position - centre;
+
+                unit.Station = new Vec2(Vec2.Dot(off, approach), Vec2.Dot(off, across));
+            }
+        }
+
         private bool ChaseToward(BattleState battle, UnitInstance unit, UnitInstance quarry, int tick, IBattleLog log, string verb)
         {
             unit.ClosingWith = quarry.Id;
@@ -1574,6 +1691,11 @@ namespace BattleChess.Rules
             {
                 want = DressingSlot(battle, unit, quarry, out Facing square);
                 unit.DressingBearing = square;
+            }
+            else if (WingStation(battle, unit, quarry, out want))
+            {
+                // [M154]. Keeping station in a wing, worked out above.
+                unit.DressingBearing = null;
             }
             else
             {
@@ -1678,6 +1800,9 @@ namespace BattleChess.Rules
         /// </para>
         /// </remarks>
         private const float DressingRangeMetres = 100f;
+
+        /// <summary>The same, for a test that must stay outside it to mean anything.</summary>
+        public const float DressingRangeForTests = DressingRangeMetres;
 
         /// <summary>
         /// Where a regiment must stand to meet its target squarely, and the

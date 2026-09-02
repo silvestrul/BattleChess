@@ -97,7 +97,7 @@ namespace BattleChess.Rules.Grid
             // the mates out there and they all resolve to the same cell in front
             // of the target and fight each other for it.
             Dictionary<Coord, UnitId> holdingGround =
-                unit.Order.Kind == OrderKind.Move ? blockingTheWay : board.WhoIsWhere(battle);
+                HasAPlaceOfItsOwn(unit) ? blockingTheWay : board.WhoIsWhere(battle);
 
             Coord from = board.Of(unit.Position);
             Coord wanted = board.Of(destination);
@@ -319,6 +319,29 @@ namespace BattleChess.Rules.Grid
                 hold,
                 pressedThrough: false);
         }
+
+        /// <summary>
+        /// Whether this regiment has been given ground of its own to finish on,
+        /// rather than working an aim point out for itself.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The test [M153] states, now that both halves of it exist. A regiment
+        /// marching has been handed a cell apiece by <c>Board.FormUpAt</c>; a
+        /// regiment attacking on station has been handed a place in its wing by
+        /// [M154]. Either way its destination is distinct from its wing-mates'
+        /// by construction, so counting them as holding ground can only shove it
+        /// off a place that was already its own.
+        /// </para>
+        /// <para>
+        /// A regiment attacking <i>without</i> a station has been handed
+        /// nothing - it works its aim point out from its own bearing to the
+        /// quarry, and so does every mate - so there the mates must count, or
+        /// they all resolve to the same cell.
+        /// </para>
+        /// </remarks>
+        private static bool HasAPlaceOfItsOwn(UnitInstance unit) =>
+            unit.Order.Kind == OrderKind.Move || unit.Station.HasValue;
 
         private static Plan NoRoute(PathFailure why, string detail, int looked = 0) =>
             new Plan(PathResult.Failed(why, detail, looked), hold: null, pressedThrough: false);

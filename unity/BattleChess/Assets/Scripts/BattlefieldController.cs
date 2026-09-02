@@ -1043,6 +1043,19 @@ namespace BattleChess.Unity
         /// </summary>
         private void AttackWithSelection(UnitInstance target)
         {
+            // [M154]. A wing keeps the shape it is standing in. Without this
+            // every regiment aims at a stand-off from the target along its own
+            // bearing to it, and five slightly different bearings all end just
+            // in front of the same enemy - so a line folds into a knot as it
+            // advances. Measured once, here, and held: the regiments arrive with
+            // the spacing they set off with.
+            var wing = new List<UnitInstance>();
+
+            foreach (UnitInstance unit in _selection)
+                if (unit.Owner != target.Owner) wing.Add(unit);
+
+            OrderSystem.TakeStations(wing, target.Position);
+
             foreach (UnitInstance unit in _selection)
             {
                 if (unit.Owner == target.Owner) continue;
