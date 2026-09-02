@@ -3508,3 +3508,73 @@ longer needed.
 
 Suite: 689 passing, 12 failing - the same 12 - 87 skipped, 788 total. Unity
 compiles clean.
+
+### M149 - the hex was sized from a strength no battle fields, and the preview drew the other game
+
+**Reported from play with a screenshot: "weird stuff happening".** Two faults,
+both mine, both from [M147], and both invisible to the tests that were supposed
+to catch them.
+
+**The cell size was derived from a number nobody plays.**
+`BoardTests.EveryRegimentInContentFitsOneHex` measured
+`def.FootprintAt(def.DefaultStrength)`, got **40 x 20 m** for all seven unit
+types, and the 50 m cell followed from it. But frontage follows *strength*, and
+battle files raise strength to two thousand worth. A regiment on the Great Field
+is **80 x 40 m, 89,4 m across the diagonal** - which the file's own header states
+in so many words. **Every regiment in the played build was nearly two hexes
+wide.** They overlapped freely while the muster reported that all forty had a hex
+of their own, and both statements were true at once: a body twice the width of
+its hex spills into six neighbours, so distinct hexes stops implying distinct
+bodies.
+
+Six of fourteen battle files field regiments too big for a 50 m hex. Measured:
+greatfield, thecrowdedwing, cruciblebig, sidewaysmile at 89,4 m; charge and
+volley at 71,6 m.
+
+**So the cell is measured off the battle it is built for**, rounded up to the
+next five metres, floored at 45. Each field now sizes its own board: greatfield
+**90 m hexes, 20 across the short side**; charge and volley 75 m; crucible,
+longmarch, ford and the rest 45 m. `Board.CellWidthMetres` is gone; there is a
+`CellWidth` per board and a `CellFor` that says how it was arrived at.
+
+**The turn length needed no change, which is worth stating because it looks like
+it should have.** Seconds times pace is metres whatever a hex is worth, so 90 s
+buys foot the same 143 m on a 90 m board as on a 50 m one - 1,6 hexes rather than
+2,9. The derived ceiling still holds: scouts cross 5,5 of 20 hexes, and a third
+of the short side is 6,7.
+
+**The tests that missed it, and the one that now cannot.** The old check read the
+catalogue; it is deleted, not weakened. `BoardSizeProbeTests` runs over **every
+battle file at the strengths those files ask for** and asks the two things a
+board must be true about: `board.Holds` every regiment standing on it, and - the
+one the screenshot showed failing - **no two bodies overlap once mustered**,
+measured with the same `OrientedRect.OverlapFraction` the collision rules use.
+Worst overlap is now **0,000 on all fourteen fields**. The first draft asked only
+whether regiments sat on distinct hexes, which was true throughout and told
+nobody anything.
+
+**The second fault: the preview drew the wrong game.** The screenshot's orange
+line had a **vertical leg**, and vertical is not one of the six bearings a
+pointy-top hex has - which is what said the line could not have come from the
+board planner. `DrawEveryPlanner` asks `RoutePlanners.Default` by name, and its
+own comment says why: *"the only one a real order will use - a preview that
+leaves it out is a preview of something the game does not do, which is what this
+used to be: it drew TheSearch while orders went through TheTangents."* The
+reasoning was right and the constant had gone stale under it. `Default` says what
+the continuous game settled on; `InUse` says which game is being played, and
+[M147] made them differ. **The same fault the comment was written about,
+reintroduced by adding a second seam beside it and not looking here.**
+
+Fixed to ask `InUse`, which also had to stop being an index into
+`RoutePlanners.All` - the board planner is made per battle by `GridMode` and is
+nobody's static.
+
+**What this says about the sweep.** Five non-discriminating tests now, and this
+is the first that was load-bearing: everything else in [M147] was derived
+correctly from a measurement that was itself wrong. A derivation is only as
+honest as the number it starts from, and *the number came from the same place the
+answer did* - the catalogue - so nothing in the chain could disagree with it. The
+battle files could, and nothing asked them.
+
+Suite: 714 passing, 12 failing - the same 12 - 87 skipped, 813 total. Unity
+compiles clean.

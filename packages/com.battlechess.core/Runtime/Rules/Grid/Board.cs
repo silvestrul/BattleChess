@@ -20,20 +20,21 @@ namespace BattleChess.Rules.Grid
     /// is nowhere for the overlap to happen.
     /// </para>
     /// <para>
-    /// <b>The cell size is derived and not chosen.</b> Every regiment collides
-    /// as the same rectangle - 40 m of frontage by 20 m of depth, the equal
-    /// ground rule - whose bounding circle is 44,7 m across. A pointy-top hex
-    /// contains a circle of that diameter once its flat-to-flat width is as
-    /// wide, and <see cref="CellWidthMetres"/> is 50, which clears it with five
-    /// metres to spare. Nothing about the board is a taste.
+    /// <b>The cell size is measured off the battle, and [M149] is why it has
+    /// to be.</b> It was a constant at first - 50 m, derived from a regiment of
+    /// 40 by 20 m, which is what <c>UnitDef.FootprintAt(DefaultStrength)</c>
+    /// reports. No battle file fields a regiment at that strength. The Great
+    /// Field fields them at two thousand worth, which is <b>80 by 40 m and 89,4
+    /// m across the diagonal</b> - so every regiment on the board was nearly two
+    /// hexes wide, they overlapped freely, and the muster cheerfully reported
+    /// that everybody had a hex of their own. A cell size derived from a number
+    /// nobody plays is not derived from anything.
     /// </para>
     /// <para>
-    /// <b>What falls out of it.</b> The Great Field is 1800 by 2400 m, so the
-    /// board is about 36 by 42 hexes. A turn is sixty battle seconds, so a
-    /// regiment's allowance is its pace times sixty over fifty: artillery 1,6
-    /// hexes, foot 1,9, horse archers 5,0, cavalry 5,7, scouts 6,6. A three-fold
-    /// spread and twenty-odd turns to walk the length of the map - playable
-    /// numbers arrived at by dividing rather than by tuning.
+    /// So the cell is the widest body that actually stands on <i>this</i> field,
+    /// rounded up. A hex contains a body of any orientation when its inscribed
+    /// circle - which for a pointy-top hex is its flat-to-flat width - is at
+    /// least the body's bounding diameter.
     /// </para>
     /// <para>
     /// <b>A board is derived, never stored.</b> Occupancy is read off the units
@@ -45,21 +46,21 @@ namespace BattleChess.Rules.Grid
     /// </remarks>
     public sealed class Board
     {
-        /// <summary>Flat-to-flat width of one hex, in metres. See the remarks.</summary>
-        public const float CellWidthMetres = 50f;
-
-        /// <summary>
-        /// The widest body the cell size is sized to hold, as a diameter.
-        /// </summary>
+        /// <summary>The smallest hex the board will use, in metres.</summary>
         /// <remarks>
-        /// Stated so the derivation can be checked rather than believed. A
-        /// regiment 40 by 20 has a half-diagonal of root(20 squared + 10
-        /// squared) = 22,36 m, so its bounding circle is 44,72 across, and the
-        /// hex's inscribed circle is <see cref="CellWidthMetres"/> across. If
-        /// the equal ground rectangle ever grows past this, <see cref="Holds"/>
-        /// says no rather than the board quietly permitting an overlap.
+        /// A floor rather than a size. It matters only for a battle with nothing
+        /// on the field, or one whose regiments are so small that a hex sized to
+        /// them would make the board finer than the terrain is authored at.
         /// </remarks>
-        public const float HoldsBodiesUpToMetres = CellWidthMetres;
+        public const float SmallestCellMetres = 45f;
+
+        /// <summary>Metres the cell size is rounded up to.</summary>
+        /// <remarks>
+        /// Five. Enough to keep the number readable in a log and to leave a
+        /// little air between a body and the hex holding it, and small enough
+        /// that rounding never costs a meaningful share of the board.
+        /// </remarks>
+        public const float CellSizeStepMetres = 5f;
 
         private static readonly ConditionalWeakTable<BattleState, Board> Boards =
             new ConditionalWeakTable<BattleState, Board>();
@@ -67,22 +68,55 @@ namespace BattleChess.Rules.Grid
         public readonly HexLayout Layout;
         public readonly MapBounds Bounds;
 
-        private Board(MapBounds bounds)
+        /// <summary>Flat-to-flat width of one hex on this board, in metres.</summary>
+        public readonly float CellWidth;
+
+        /// <summary>The widest body the cell was sized to hold, as a diameter.</summary>
+        /// <remarks>
+        /// Kept so a log can state the derivation rather than the result: "90 m
+        /// hexes, because the widest regiment here is 89,4 m across" is a
+        /// sentence somebody can check.
+        /// </remarks>
+        public readonly float WidestBody;
+
+        private Board(MapBounds bounds, float cellWidth, float widestBody)
         {
             Bounds = bounds;
-            Layout = HexLayout.FromNeighbourDistance(CellWidthMetres, bounds.Min);
+            CellWidth = cellWidth;
+            WidestBody = widestBody;
+            Layout = HexLayout.FromNeighbourDistance(cellWidth, bounds.Min);
         }
 
         /// <summary>The board a battle is played on.</summary>
         /// <remarks>
-        /// Cached against the battle, since the layout depends only on the map
-        /// and a battle's map does not move.
+        /// Cached against the battle. The cell size is fixed at the moment the
+        /// board is first asked for and does not follow the battle afterwards -
+        /// a regiment loses men and narrows as it does, and a board that
+        /// re-sized itself mid-battle would move every regiment on it.
         /// </remarks>
         public static Board For(BattleState battle)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
 
-            return Boards.GetValue(battle, b => new Board(b.Terrain.Bounds));
+            return Boards.GetValue(battle, Build);
+        }
+
+        private static Board Build(BattleState battle)
+        {
+            float widest = 0f;
+
+            foreach (UnitInstance unit in battle.UnitsOnField())
+                widest = MathF.Max(widest, 2f * unit.Footprint.BoundingRadius);
+
+            return new Board(battle.Terrain.Bounds, CellFor(widest), widest);
+        }
+
+        /// <summary>The smallest hex on the size ladder that holds a body this wide.</summary>
+        public static float CellFor(float widestBodyMetres)
+        {
+            float wanted = MathF.Max(SmallestCellMetres, widestBodyMetres);
+
+            return MathF.Ceiling(wanted / CellSizeStepMetres) * CellSizeStepMetres;
         }
 
         /// <summary>Which hex a world position falls in.</summary>
@@ -95,8 +129,15 @@ namespace BattleChess.Rules.Grid
         public bool OnBoard(Coord hex) => Bounds.Contains(CentreOf(hex));
 
         /// <summary>Whether a body of this size fits one hex however it is turned.</summary>
-        public static bool Holds(Footprint footprint) =>
-            2f * footprint.BoundingRadius <= HoldsBodiesUpToMetres + 1e-3f;
+        public bool Holds(Footprint footprint) =>
+            2f * footprint.BoundingRadius <= CellWidth + 1e-3f;
+
+        /// <summary>How many hexes across the shorter side of the field is.</summary>
+        /// <remarks>
+        /// The number that decides whether there is any manoeuvre in the game: a
+        /// regiment that crosses this in a few turns cannot be gone round.
+        /// </remarks>
+        public float ShortSideInHexes => MathF.Min(Bounds.Width, Bounds.Height) / CellWidth;
 
         /// <summary>
         /// How fast the going is on a hex, as a multiple of open ground, or
@@ -187,6 +228,7 @@ namespace BattleChess.Rules.Grid
         }
 
         public override string ToString() =>
-            $"Board({CellWidthMetres:0} m hexes over {Bounds})";
+            $"Board({CellWidth:0} m hexes, sized to a {WidestBody:0.0} m regiment, " +
+            $"about {Bounds.Width / CellWidth:0} x {Bounds.Height / (Layout.CellHeight * 0.75f):0} over {Bounds})";
     }
 }

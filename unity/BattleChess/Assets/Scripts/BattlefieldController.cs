@@ -235,8 +235,8 @@ namespace BattleChess.Unity
 
             _console.Info("Board",
                 $"The board game. {board}, and a turn of {GridGame.GridMode.TurnSeconds:0} s buys " +
-                $"foot {1.59f * GridGame.GridMode.TurnSeconds / GridGame.Board.CellWidthMetres:0.0} hexes " +
-                $"and cavalry {4.76f * GridGame.GridMode.TurnSeconds / GridGame.Board.CellWidthMetres:0.0}.");
+                $"foot {1.59f * GridGame.GridMode.TurnSeconds / board.CellWidth:0.0} hexes " +
+                $"and cavalry {4.76f * GridGame.GridMode.TurnSeconds / board.CellWidth:0.0}.");
 
             if (crowded > 0)
                 _console.Warning("Board",
@@ -2310,39 +2310,51 @@ namespace BattleChess.Unity
             UnitInstance unit, Vec2 destination, IPathfinder pathfinder, Facing arriveOn, bool report,
             Plan? already = null)
         {
-            // Which planners to ask. The default is always asked and always
-            // drawn, because it is the only one a real order will use — a
-            // preview that leaves it out is a preview of something the game
-            // does not do, which is what this used to be: it drew TheSearch
-            // while orders went through TheTangents.
-            var asking = new List<int>();
-
-            for (int i = 0; i < RoutePlanners.All.Count; i++)
+            // Which planners to ask. The one actually in use is always asked
+            // and always drawn, because it is the only one a real order will
+            // use - a preview that leaves it out is a preview of something the
+            // game does not do, which is what this used to be: it drew
+            // TheSearch while orders went through TheTangents.
+            //
+            // [M149]. It used to name RoutePlanners.Default, and that was right
+            // until the board arrived beside it. Default says what the
+            // continuous game settled on; InUse says which game is being
+            // played. On the board the two differ, so the preview drew a
+            // continuous route - with legs on bearings no hex has - over a
+            // regiment that was going to walk a hex route. Exactly the fault
+            // the comment above was written about, reintroduced by adding a
+            // second seam and not looking here.
+            //
+            // Pairs rather than indices into All, because the planner in use
+            // need not be in All at all: the board planner is made per battle
+            // by GridMode and is nobody's static.
+            var asking = new List<(int Colour, IRoutePlanner Planner)>
             {
-                IRoutePlanner planner = RoutePlanners.All[i];
+                (0, RoutePlanners.InUse)
+            };
 
-                if (ReferenceEquals(planner, RoutePlanners.Default))
+            if (_options.PreviewEveryPlanner)
+            {
+                for (int i = 0; i < RoutePlanners.All.Count; i++)
                 {
-                    asking.Add(i);
-                    continue;
+                    IRoutePlanner planner = RoutePlanners.All[i];
+
+                    if (ReferenceEquals(planner, RoutePlanners.InUse)) continue;
+
+                    // The hybrid is a second and more for a single order, and a
+                    // preview pays that inside one frame. Asked only by name.
+                    if (ReferenceEquals(planner, RoutePlanners.TheHybridAStar) && !_options.PreviewTheHybrid)
+                        continue;
+
+                    asking.Add((i + 1, planner));
                 }
-
-                if (!_options.PreviewEveryPlanner) continue;
-
-                // The hybrid is a second and more for a single order, and a
-                // preview pays that inside one frame. Asked only by name.
-                if (ReferenceEquals(planner, RoutePlanners.TheHybridAStar) && !_options.PreviewTheHybrid)
-                    continue;
-
-                asking.Add(i);
             }
 
             var key = new System.Text.StringBuilder();
 
-            foreach (int i in asking)
+            foreach ((int i, IRoutePlanner planner) in asking)
             {
-                IRoutePlanner planner = RoutePlanners.All[i];
-                bool isDefault = ReferenceEquals(planner, RoutePlanners.Default);
+                bool isDefault = ReferenceEquals(planner, RoutePlanners.InUse);
 
                 bool reused = isDefault && already.HasValue;
 
@@ -3074,7 +3086,7 @@ namespace BattleChess.Unity
             // so it was measured by hand four times over in one afternoon
             // before it was simply written down.
             _console.Info("Cost",
-                $"{unit.Def.DisplayName} planned by {RoutePlanners.Default.Name} " +
+                $"{unit.Def.DisplayName} planned by {RoutePlanners.InUse.Name} " +
                 $"in {worked.Milliseconds:0.0} ms: {plan.Effort}.", unit.Id);
 
             // What the same order would have cost on an empty field. A route

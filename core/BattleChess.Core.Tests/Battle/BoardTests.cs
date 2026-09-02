@@ -15,11 +15,17 @@ namespace BattleChess.Tests.Battle
     /// from the arithmetic that produced it.
     /// </summary>
     /// <remarks>
-    /// The cell size was derived on paper - a 40 by 20 regiment has a 44,7 m
-    /// bounding circle, a 50 m hex holds it - and every number that follows from
-    /// it was divided rather than tuned. This file is where those divisions meet
-    /// the actual battles, because the last five sessions all went the same way:
-    /// the reasoning was right and the field disagreed.
+    /// <para>
+    /// Everything the board does follows from one measured number - the widest
+    /// regiment that actually stands on the field - and this file is where those
+    /// consequences meet the actual battles.
+    /// </para>
+    /// <para>
+    /// The cell size itself is guarded next door in <c>BoardSizeProbeTests</c>,
+    /// which reads every battle file. It lives there rather than here because
+    /// the version of that check which lived here read the unit catalogue
+    /// instead, passed for a day, and was wrong by a factor of two - see [M149].
+    /// </para>
     /// </remarks>
     public sealed class BoardTests : IDisposable
     {
@@ -53,48 +59,6 @@ namespace BattleChess.Tests.Battle
 
             return setup.Build(map, terrain, TestContent.Units, TestContent.Formations,
                 new TerrainMovementModel(terrain));
-        }
-
-        /// <summary>
-        /// The cell size holds a regiment however it is turned - which is the
-        /// one thing the board is not allowed to be wrong about.
-        /// </summary>
-        /// <remarks>
-        /// Non-vacuity: this would fail if the equal ground rectangle grew past
-        /// 50 m across its diagonal, or if the cell size were reduced below it.
-        /// It is checked against every unit type in content and not against a
-        /// written-down number, so it also fails the day a unit is authored that
-        /// does not obey the equal ground rule.
-        /// </remarks>
-        [Fact]
-        public void EveryRegimentInContentFitsOneHex()
-        {
-            IUnitCatalogue catalogue = TestContent.Units;
-
-            var widest = 0f;
-            string widestOne = "none";
-
-            foreach (UnitDef def in catalogue.All)
-            {
-                Footprint footprint = def.FootprintAt(def.DefaultStrength);
-                float across = 2f * footprint.BoundingRadius;
-
-                _out.WriteLine(
-                    $"{def.Key,-12} {footprint.Width:0.0} x {footprint.Depth:0.0} m, " +
-                    $"{across:0.0} m across the diagonal");
-
-                if (across <= widest) continue;
-
-                widest = across;
-                widestOne = def.Key;
-            }
-
-            _out.WriteLine($"");
-            _out.WriteLine($"widest is {widestOne} at {widest:0.0} m; a hex holds {Board.CellWidthMetres:0} m");
-
-            Assert.True(
-                widest <= Board.CellWidthMetres,
-                $"{widestOne} is {widest:0.0} m across and will not fit a {Board.CellWidthMetres:0} m hex.");
         }
 
         /// <summary>
@@ -188,7 +152,9 @@ namespace BattleChess.Tests.Battle
         {
             float turn = GridMode.TurnSeconds;
 
-            _out.WriteLine($"a turn is {turn:0} battle seconds, a hex is {Board.CellWidthMetres:0} m");
+            Board board = Board.For(Load("greatfield"));
+
+            _out.WriteLine($"a turn is {turn:0} battle seconds, a hex is {board.CellWidth:0} m");
             _out.WriteLine("");
 
             float slowest = float.MaxValue;
@@ -196,7 +162,7 @@ namespace BattleChess.Tests.Battle
 
             foreach (UnitDef def in TestContent.Units.All.OrderBy(d => d.Speed))
             {
-                float hexes = def.Speed * turn / Board.CellWidthMetres;
+                float hexes = def.Speed * turn / board.CellWidth;
 
                 _out.WriteLine($"{def.Key,-12} {def.Speed:0.00} m/s -> {hexes:0.0} hexes a turn");
 
@@ -207,8 +173,7 @@ namespace BattleChess.Tests.Battle
             // The board itself, so the ceiling is a property of the field rather
             // than a number I picked. The Great Field is the largest in content
             // and its shorter side is what a flanking march has to cross.
-            Board board = Board.For(Load("greatfield"));
-            float shortSide = MathF.Min(board.Bounds.Width, board.Bounds.Height) / Board.CellWidthMetres;
+            float shortSide = board.ShortSideInHexes;
 
             _out.WriteLine("");
             _out.WriteLine($"spread {fastest / slowest:0.0}x, from {slowest:0.0} to {fastest:0.0} hexes");
@@ -373,11 +338,13 @@ namespace BattleChess.Tests.Battle
         {
             float turn = GridMode.TurnSeconds;
 
+            Board board = Board.For(Load("greatfield"));
+
             var byKey = new Dictionary<string, int>();
 
             foreach (UnitDef def in TestContent.Units.All.OrderBy(d => d.Speed))
             {
-                float exact = def.Speed * turn / Board.CellWidthMetres;
+                float exact = def.Speed * turn / board.CellWidth;
                 int whole = Math.Max(1, (int)exact);
 
                 byKey[def.Key] = whole;

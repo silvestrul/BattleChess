@@ -51,8 +51,8 @@ namespace BattleChess.Rules.Grid
 
         /// <summary>How far from a taken destination a regiment will settle for.</summary>
         /// <remarks>
-        /// Three rings is thirty-six hexes, which on a fifty-metre board is
-        /// everywhere within 150 m of where the player pointed. Further than
+        /// Three rings is thirty-six hexes - three regiment-widths of ground in
+        /// every direction, since a hex is sized to a regiment. Further than
         /// that and the regiment is no longer going where it was sent, so the
         /// order is better refused than silently rewritten.
         /// </remarks>
@@ -60,10 +60,10 @@ namespace BattleChess.Rules.Grid
 
         /// <summary>A ceiling on the search, so a hopeless order cannot hang a turn.</summary>
         /// <remarks>
-        /// The Great Field is about 1 500 hexes, so this exhausts any board
-        /// this game has and then some. It is a guard against a bug, not a
-        /// budget: unlike the lattice, exhausting the whole board is cheap and
-        /// is the worst this can ever do.
+        /// The Great Field is a few hundred hexes at the cell size its
+        /// regiments ask for, so this exhausts any board this game has and then
+        /// some. It is a guard against a bug, not a budget: unlike the lattice,
+        /// exhausting the whole board is cheap and is the worst this can do.
         /// </remarks>
         public const int MostHexesSearched = 20000;
 
@@ -123,7 +123,7 @@ namespace BattleChess.Rules.Grid
             looked = 0;
 
             float pace = MathF.Max(0.1f, unit.Def.Speed);
-            float step = Board.CellWidthMetres;
+            float step = board.CellWidth;
 
             var cameFrom = new Dictionary<Coord, Coord>();
             var best = new Dictionary<Coord, float> { [from] = 0f };
@@ -245,7 +245,7 @@ namespace BattleChess.Rules.Grid
             BattleState battle, Board board, UnitInstance unit, List<Coord> hexes, int looked, Facing? arriveOn)
         {
             float pace = MathF.Max(0.1f, unit.Def.Speed);
-            float step = Board.CellWidthMetres;
+            float step = board.CellWidth;
 
             var waypoints = new List<Vec2>(hexes.Count) { unit.Position };
 
