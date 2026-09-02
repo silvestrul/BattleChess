@@ -4144,3 +4144,49 @@ enough to play. The frame harness already records sim, view, tracking and GUI
 milliseconds separately on every frame and writes a line for slow ones; the next
 report should be one of those lines rather than a description, because it says
 which of the four is the problem and I have twice guessed wrong about that.
+
+---
+
+## M158 - What the player points at is what the player sees
+
+Reported with a screenshot: selection markers standing beside the regiments they
+belonged to rather than around them, and markers far larger than the bodies in
+them.
+
+Two faults in the picture, both of them the same mistake in different clothes -
+**the game was pointing at the simulation instead of at its own drawing.**
+
+### The drawn position is not the simulation position
+
+A `UnitView` interpolates between the last two ticks it snapshotted. That is
+right, and it means the drawn position lags the simulation by up to one tick. On
+the board that lag is a **whole 25 m cell**, because [M157] made a step something
+a regiment takes inside a single tick rather than something it walks.
+
+Everything the player aims at was reading `UnitInstance.Position`: the nameplate,
+the drag-select marker, the click test and the box test. So the name sat away
+from the body, the marker boxed empty grass, and a click on the regiment you can
+see landed on nothing.
+
+There is now one place that answers *where is this regiment, as far as the player
+is concerned* - `Where(unit)` and `WhichWay(unit)`, which read the view's
+`DrawnPosition` and `DrawnFacing` and fall back to the simulation only when there
+is no view. Clicking, box-selecting and the nameplate all go through it, so the
+game cannot disagree with its own picture whichever mode it is in.
+
+**Note what is not fixed: the lag itself.** The body is still drawn a fraction of
+a tick behind, and that is correct - it is what makes movement smooth. What was
+wrong was having two answers to the same question.
+
+### The marker was the rotation circle
+
+It drew a square of side `2 x BoundingRadius` - **89 m for an 80 x 40 m
+regiment**, standing two dozen metres clear of the body front and back. That is
+why the boxes looked both too big and offset.
+
+The bounding circle was the right measure for exactly one rule: a cell must
+contain a regiment however it is turned. [M155] removed that rule. The marker is
+now the drawn body's own bounds.
+
+Unity compiles clean; no rules changed, so the suite is untouched at 729 passing
+and the same 12 failing.

@@ -118,6 +118,22 @@ namespace BattleChess.Unity
         /// <summary>Draw hidden regiments faintly instead of not at all.</summary>
         public bool GhostWhenHidden { get; set; }
 
+        /// <summary>Where this regiment is actually drawn, this frame.</summary>
+        /// <remarks>
+        /// <b>[M158].</b> A view is drawn between the last two ticks, so the
+        /// drawn position is not the simulation position - by up to a whole cell
+        /// on the board, where a step is 25 m taken in one tick. Everything the
+        /// player POINTS AT has to read this rather than
+        /// <see cref="UnitInstance.Position"/>, or the game disagrees with its
+        /// own picture: the nameplate sits away from the body, the selection
+        /// marker boxes empty grass, and a click on the regiment you can see
+        /// lands on nothing.
+        /// </remarks>
+        public Vec2 DrawnPosition { get; private set; }
+
+        /// <summary>Which way this regiment is actually drawn facing, this frame.</summary>
+        public Facing DrawnFacing { get; private set; }
+
         public void Render(float alpha)
         {
             if (Unit == null) return;
@@ -136,6 +152,9 @@ namespace BattleChess.Unity
             // past due west does not spin the wrong way for half a turn.
             float turn = Facing.SignedDelta(_fromFacing, _toFacing);
             Facing facing = _fromFacing.RotatedBy(turn * alpha);
+
+            DrawnPosition = position;
+            DrawnFacing = facing;
 
             transform.position = new Vector3(position.X, position.Y, 0f);
 

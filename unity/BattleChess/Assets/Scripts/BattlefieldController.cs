@@ -166,6 +166,8 @@ namespace BattleChess.Unity
 
         private readonly List<UnitView> _views = new List<UnitView>();
 
+        private readonly Dictionary<UnitId, UnitView> _viewOf = new Dictionary<UnitId, UnitView>();
+
         /// <summary>
         /// Every regiment currently under command, in the order they were
         /// picked up.
@@ -275,7 +277,12 @@ namespace BattleChess.Unity
             if (_options.GridMode) _boardView = BoardView.Build(GridGame.Board.For(_battle), transform);
 
             foreach (UnitInstance unit in _battle.UnitsOnField())
-                _views.Add(UnitView.Create(unit, ColourFor(unit.Owner), transform));
+            {
+                UnitView view = UnitView.Create(unit, ColourFor(unit.Owner), transform);
+
+                _views.Add(view);
+                _viewOf[unit.Id] = view;
+            }
 
             _camera = Camera.main != null ? Camera.main.GetComponent<CameraRig>() : null;
             if (_camera != null)
@@ -1049,7 +1056,7 @@ namespace BattleChess.Unity
         /// a regiment is a hundred metres wide, so requiring the whole rectangle
         /// would mean most drags caught nothing at all.
         /// </remarks>
-        private static bool Touches(Vec2 from, Vec2 to, UnitInstance unit)
+        private bool Touches(Vec2 from, Vec2 to, UnitInstance unit)
         {
             float minX = Mathf.Min(from.X, to.X), maxX = Mathf.Max(from.X, to.X);
             float minY = Mathf.Min(from.Y, to.Y), maxY = Mathf.Max(from.Y, to.Y);
@@ -1226,7 +1233,9 @@ namespace BattleChess.Unity
                     !_battle.Vision.CanSee(_battle, new PlayerId(_options.ViewingArmy), unit))
                     continue;
 
-                Vector3 screen = Camera.main.WorldToScreenPoint(new Vector3(unit.Position.X, unit.Position.Y, 0f));
+                Vec2 shown = Where(unit);
+
+                Vector3 screen = Camera.main.WorldToScreenPoint(new Vector3(shown.X, shown.Y, 0f));
                 if (screen.z < 0f) continue;
 
                 // Morale is the number that decides fights, so it is the one that
@@ -1312,12 +1321,31 @@ namespace BattleChess.Unity
             {
                 if (!Touches(_boxFrom, here, unit)) continue;
 
-                Vector3 centre = Camera.main.WorldToScreenPoint(new Vector3(unit.Position.X, unit.Position.Y, 0f));
+                Vec2 shown = Where(unit);
+
+                Vector3 centre = Camera.main.WorldToScreenPoint(new Vector3(shown.X, shown.Y, 0f));
                 if (centre.z < 0f) continue;
 
-                float radius = unit.Footprint.BoundingRadius / Camera.main.orthographicSize * Screen.height * 0.5f;
+                // [M158] The body's own bounds, not its rotation circle.
+                //
+                // This drew a square of side 2 x BoundingRadius - 89 m for an
+                // 80 x 40 m regiment, so the marker stood two dozen metres clear
+                // of the body front and back and read as though it were boxing
+                // the wrong thing. The rotation circle was the right measure only
+                // while a cell had to contain a regiment at any facing, which is
+                // the rule [M155] removed.
+                float metresPerPixel = 2f * Camera.main.orthographicSize / Screen.height;
 
-                DrawEdges(new Rect(centre.x - radius, Screen.height - centre.y - radius, radius * 2f, radius * 2f), 2f);
+                OrientedRect shape = Clickable(unit);
+
+                float halfWide = shape.ProjectedRadius(new Vec2(1f, 0f)) / metresPerPixel;
+                float halfTall = shape.ProjectedRadius(new Vec2(0f, 1f)) / metresPerPixel;
+
+                DrawEdges(
+                    new Rect(
+                        centre.x - halfWide, Screen.height - centre.y - halfTall,
+                        halfWide * 2f, halfTall * 2f),
+                    2f);
             }
 
             GUI.color = original;
@@ -2185,11 +2213,29 @@ namespace BattleChess.Unity
         /// picks up the regiment you were pointing at rather than one whose
         /// frontage reaches further than it looks.
         /// </remarks>
-        private static OrientedRect Clickable(UnitInstance unit)
+        /// <summary>
+        /// Where a regiment is as far as the player is concerned: where it is
+        /// drawn, not where the simulation has it.
+        /// </summary>
+        /// <remarks>
+        /// <b>[M158], reported from play with a picture</b> - selection markers
+        /// boxing grass beside the regiment they belonged to. A view interpolates
+        /// between the last two ticks, so on the board, where a step is a whole
+        /// 25 m cell taken inside one tick, the drawn position can be a cell
+        /// away from the simulation's. Everything the player aims at goes
+        /// through here, so the game cannot disagree with its own picture.
+        /// </remarks>
+        private Vec2 Where(UnitInstance unit) =>
+            _viewOf.TryGetValue(unit.Id, out UnitView view) ? view.DrawnPosition : unit.Position;
+
+        private Facing WhichWay(UnitInstance unit) =>
+            _viewOf.TryGetValue(unit.Id, out UnitView view) ? view.DrawnFacing : unit.Facing;
+
+        private OrientedRect Clickable(UnitInstance unit)
         {
             Footprint real = unit.Footprint;
 
-            return new OrientedRect(unit.Position, unit.Facing,
+            return new OrientedRect(Where(unit), WhichWay(unit),
                 new Footprint(real.Width, DrawnDepthOf(real)));
         }
 
