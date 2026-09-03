@@ -252,7 +252,7 @@ namespace BattleChess.Rules.Grid
                         {
                             route.HeldItsHandBecause = because;
 
-                            log.Decision("board", $"held at {here}: {because}", marcher.Unit.Id);
+                            log?.Decision("board", $"held at {here}: {because}", marcher.Unit.Id);
                         }
 
                         continue;
@@ -374,6 +374,13 @@ namespace BattleChess.Rules.Grid
             under = new List<Coord>(shape.Length);
             blocker = null;
 
+            // [M161] The same separation the placement test now makes: cells say
+            // where a regiment may stand, bodies say whether it is inside
+            // somebody. The walker has to make it too, or it holds a regiment at
+            // a shoulder the planner has already measured as clear - which is
+            // the disagreement the recorded deadlock is made of.
+            HashSet<UnitInstance>? near = null;
+
             for (int i = 0; i < shape.Length; i++)
             {
                 var cell = new Coord(at.Q + shape[i].Q, at.R + shape[i].R);
@@ -384,11 +391,31 @@ namespace BattleChess.Rules.Grid
 
                 if (claim.TryGetValue(cell, out UnitInstance who) && !ReferenceEquals(who, marcher.Unit))
                 {
-                    blocker = who;
-                    return false;
+                    if (!Board.BodiesDecideAClash)
+                    {
+                        blocker = who;
+                        return false;
+                    }
+
+                    (near ??= new HashSet<UnitInstance>()).Add(who);
                 }
 
                 under.Add(cell);
+            }
+
+            if (near != null)
+            {
+                var standing = new OrientedRect(
+                    board.CentreOf(at), front, marcher.Unit.Footprint);
+
+                foreach (UnitInstance other in near)
+                {
+                    if (!OrientedRect.Overlaps(standing, other.Shape)) continue;
+
+                    blocker = other;
+                    under.Clear();
+                    return false;
+                }
             }
 
             return true;

@@ -649,6 +649,12 @@ namespace BattleChess.Rules.Grid
         /// Whether this regiment could stand centred on that cell facing that
         /// way: every cell of its body free of anybody else, and passable.
         /// </summary>
+        /// <summary>
+        /// Whether two regiments sharing a cell are judged by their bodies
+        /// rather than by the cell. [M161]
+        /// </summary>
+        public static bool BodiesDecideAClash = true;
+
         public bool CouldStandAt(
             BattleState battle, UnitInstance unit, Coord cell, Facing front,
             IReadOnlyDictionary<Coord, UnitId> taken)
@@ -660,23 +666,77 @@ namespace BattleChess.Rules.Grid
             // the inner loop of every board route, and it used to allocate.
             Coord[] shape = Stencil(unit.Footprint, front);
 
+            // Cells decide where a regiment may STAND. They must not decide
+            // whether two regiments are in each other. [M161]
+            //
+            // The designer, over a screenshot: "it has space here but doesnt
+            // fit". Measured on the arrangement the recording kept - an 80 m
+            // frontage between two of its own - the board demands a gap of
+            // 152,5 m at 25 m cells and 102,5 m at 12,5 m, which is 36,3 m and
+            // 11,3 m of visibly clear ground thrown away at each end.
+            //
+            // The cause is that a body claims every cell it touches at all, so
+            // a body ending at 1227 and one beginning at 1247 both claim the
+            // cell running 1225 to 1250 and are declared to be on the same
+            // ground. Twenty metres apart is indistinguishable from standing
+            // inside one another, and no amount of margin tuning fixes a
+            // quantisation error - halving the cell only halves it.
+            //
+            // So the two questions are separated, and each is asked of the
+            // thing that can answer it. WHERE a regiment may stand stays a
+            // board question, and is why the stencil is still walked: on the
+            // board, on ground it can cross, snapped to a cell and a front.
+            // WHETHER it is inside somebody is a question about two rectangles,
+            // and is answered by the two rectangles - the same test the
+            // continuous planner uses and the same one the player is making
+            // with their own eyes.
+            //
+            // The cells are still doing the work that suits them: they are the
+            // broad phase. Only bodies holding one of the stencil's cells are
+            // tested exactly, so this costs a handful of rectangle tests rather
+            // than a sweep of the field.
+            HashSet<UnitId>? near = null;
+
             for (int i = 0; i < shape.Length; i++)
             {
                 var under = new Coord(cell.Q + shape[i].Q, cell.R + shape[i].R);
 
                 if (!OnBoard(under)) return false;
 
-                if (taken != null && taken.TryGetValue(under, out UnitId who) && who != unit.Id)
-                    return false;
-
                 if (GoingOn(battle, under, unit.Def.Movement) <= 0f) return false;
+
+                if (taken == null) continue;
+
+                if (!taken.TryGetValue(under, out UnitId who) || who == unit.Id) continue;
+
+                if (!BodiesDecideAClash) return false;
+
+                (near ??= new HashSet<UnitId>()).Add(who);
+            }
+
+            if (near == null) return true;
+
+            var standing = new OrientedRect(CentreOf(cell), front, unit.Footprint);
+
+            foreach (UnitId id in near)
+            {
+                UnitInstance other = battle.Get(id);
+
+                if (other == null || !other.IsOnField || other.Id == unit.Id) continue;
+
+                if (OrientedRect.Overlaps(standing, other.Shape)) return false;
             }
 
             return true;
         }
 
         public override string ToString() =>
-            $"Board({CellWidth:0} m {Cells.Name}, sized to a {WidestBody:0.0} m regiment, " +
+            // [M155] The cell is a SETTING now, not a size derived from the
+            // widest body. This line still said "sized to a 89,4 m regiment" in
+            // every recording, which is a description of the model that was
+            // removed - and the widest body is worth saying, because it is what
+            // tells you how many cells a regiment covers.
+            $"Board({CellWidth:0} m {Cells.Name}, widest regiment {WidestBody:0.0} m, " +
             $"about {Bounds.Width / CellWidth:0} x {Bounds.Height / CellWidth:0} over {Bounds})";
     }
 }

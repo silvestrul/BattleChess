@@ -461,6 +461,20 @@ namespace BattleChess.Rules
         /// </remarks>
         public float BoardStepCredit { get; set; }
 
+        /// <summary>
+        /// Ticks this regiment has stood still rather than step into one of its
+        /// own. [M160]
+        /// </summary>
+        /// <remarks>
+        /// The escape from M30's deadlock. Refusing outright to walk into your
+        /// own men is the rule the game wants and the one that jams; refusing
+        /// it <i>for a while</i> is the rule that works, because the thing in
+        /// the way is nearly always walking too and will be gone. What this
+        /// counts is how long the waiting has gone on, so a regiment that would
+        /// wait for ever presses through instead and says it has.
+        /// </remarks>
+        public int HeldForFriends { get; set; }
+
         // ---- Whether a march is getting anywhere -------------------------------
 
         /// <summary>The closest this regiment has come to its goal on this order.</summary>

@@ -79,6 +79,64 @@ namespace BattleChess.Rules
         /// </remarks>
         public const float PaceWhileInsideItsOwn = 0.6f;
 
+        /// <summary>Whether a step into one of your own is refused outright. [M160]</summary>
+        /// <remarks>
+        /// <b>Built, measured, and off - the number is the point of keeping
+        /// it.</b> M30 wrote this rule, found it deadlocked, and softened it;
+        /// this is the same rule with the escape M30 lacked - an eight-way fan
+        /// and a patience clock. It does not deadlock: the patience never once
+        /// ran out at 15, 45 or 120 ticks, the three settings giving identical
+        /// numbers.
+        ///
+        /// It also does not help. Measured beside
+        /// <see cref="OrderSystem.MarcherIsAWallWithin"/> at 120 m: Broken
+        /// Country goes from 5 426 silent pair-ticks to 13 713 and the march
+        /// stops finishing. The reason is in the onset counts - <b>225 of 226
+        /// overlaps on the Crucible begin at or under the 5% grazing
+        /// tolerance</b>, so there is almost no step into a body for this rule
+        /// to refuse. What it does instead is stop regiments that were sliding
+        /// past each other, and a held regiment is one more body for the next
+        /// one to get round.
+        /// </remarks>
+        internal static bool RefuseToWalkIntoYourOwn;
+
+        /// <summary>
+        /// How long a regiment waits for its own to clear before it shoulders
+        /// through and says so. [M160]
+        /// </summary>
+        internal static int PatienceTicks = 15;
+
+        /// <summary>
+        /// Whether only the regiment that must give way is held by the refusal.
+        /// [M160]
+        /// </summary>
+        internal static bool OnlyTheYielderWaits;
+
+        /// <summary>
+        /// Whether a regiment already lapping one of its own may step further
+        /// in. [M160]
+        /// </summary>
+        /// <b>Also off.</b> The mechanism is real - an overlap starts as a
+        /// legal graze and deepens tick by tick under the leaving excuse - but
+        /// swept at 0,02, 0,005, 0,001 and 0 the deepest overlap reached stays
+        /// at 0,99 to 1,00 whatever the setting, because the pairs that reach
+        /// it are declared press-throughs, which bypass this by design and are
+        /// allowed to [M26].
+        internal static bool NoDeeperIntoYourOwn;
+
+        /// <summary>
+        /// How much deeper a step may go before it is refused, as a fraction of
+        /// the body. [M160]
+        /// </summary>
+        /// <remarks>
+        /// Not nought. Two rectangles sliding past each other change their
+        /// overlap by a hair every tick in both directions, and a rule with no
+        /// tolerance would refuse half of a manoeuvre that is working. This is
+        /// small enough that a hundred ticks of it cannot add up to the
+        /// wholesale burial the bench recorded.
+        /// </remarks>
+        internal static float DeepeningTolerance = 0.02f;
+
         /// <summary>
         /// Whether this regiment is currently sharing ground with one of its own.
         /// </summary>
@@ -122,12 +180,40 @@ namespace BattleChess.Rules
                 if (!other.IsFighting) continue;
                 if (other.State == UnitState.Routing) continue;
 
-                if (OrientedRect.OverlapFraction(stepped, other.Shape) <= OrderSystem.GrazingTolerance)
-                    continue;
+                float after = OrientedRect.OverlapFraction(stepped, other.Shape);
+
+                if (after <= OrderSystem.GrazingTolerance) continue;
+
+                float before = OrientedRect.OverlapFraction(here, other.Shape);
 
                 // Already inside this one: leaving is the whole point.
-                if (OrientedRect.OverlapFraction(here, other.Shape) > OrderSystem.GrazingTolerance)
-                    continue;
+                if (before > OrderSystem.GrazingTolerance)
+                {
+                    // [M160] But leaving is the point, and going further in is
+                    // not - which is the hole every recorded overlap went
+                    // through.
+                    //
+                    // Measured on the walk bench with the refusal in place:
+                    // 225 of 226 overlaps on the Crucible, and every one of 168
+                    // and 269 on the other two fields, BEGIN at or under the 5%
+                    // grazing tolerance. Not one of them was a step into a body
+                    // the rule could see. They start legal and then deepen,
+                    // because this excuse is unconditional: the first touch is
+                    // free, and from the second tick onward the regiment is
+                    // "already inside" and may walk as far in as it likes. That
+                    // is how a pair reaches an overlap of 1,00 with nothing
+                    // ever declared - one regiment standing wholly inside
+                    // another by a sequence of individually legal steps.
+                    //
+                    // The remedy is the rule the pose lattice has always used
+                    // on its sweeps and which is quoted in OrderSystem's
+                    // hand-over: separation may hold or widen, never narrow. A
+                    // regiment may keep every metre of overlap it has and give
+                    // any of it back; it may not take more.
+                    if (!NoDeeperIntoYourOwn) continue;
+
+                    if (after <= before + DeepeningTolerance) continue;
+                }
 
                 return true;
             }
@@ -415,6 +501,72 @@ namespace BattleChess.Rules
         /// player's problem, which is the whole point of the rule.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// Of every way round, the one that is clear and closes most on where
+        /// the regiment is going. [M160]
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The same shape of question <c>BoardTurn.BestStep</c> asks, in
+        /// continuous space: turn the intended step by a fan of bearings, keep
+        /// the ones the body fits in and that lap nobody new, and take
+        /// whichever ends nearest the waypoint.
+        /// </para>
+        /// <para>
+        /// <b>It is not a pathfinder and must not become one.</b> Eight
+        /// candidates and no recursion: getting round the field is the route's
+        /// work, and anything cleverer here would be a second, worse planner
+        /// disagreeing with the first [M159]. What this is for is the body that
+        /// walked into the way after the route was drawn.
+        /// </para>
+        /// <para>
+        /// Ordered by what it closes rather than by how little it turns, so a
+        /// regiment never takes a clear step that leaves it further off than it
+        /// began - which is the shuffle that used to look like indecision.
+        /// </para>
+        /// </remarks>
+        private static readonly float[] FanDegrees = { 30f, -30f, 55f, -55f, 80f, -80f, 110f, -110f };
+
+        private static bool TryAFanRound(
+            BattleState battle, UnitInstance unit, Vec2 next, Vec2 aim, out Vec2 room)
+        {
+            room = unit.Position;
+
+            Vec2 intended = next - unit.Position;
+
+            float reach = intended.Length;
+
+            if (reach <= Vec2.Epsilon) return false;
+
+            float nearest = Vec2.Distance(unit.Position, aim);
+
+            bool found = false;
+
+            for (int i = 0; i < FanDegrees.Length; i++)
+            {
+                Vec2 turned = intended.Rotated(FanDegrees[i] * MathF.PI / 180f);
+
+                Vec2 candidate = KeepOnTheField(battle, unit, unit.Position + turned);
+
+                float closes = Vec2.Distance(candidate, aim);
+
+                // Only a step that gets it nearer than it already is. A body
+                // with nothing but worse ground around it holds, which is what
+                // the patience clock is then for.
+                if (closes >= nearest) continue;
+
+                if (WouldLapOneOfItsOwn(battle, unit, candidate, unit.Facing)) continue;
+
+                if (!battle.FormationFits(unit, candidate, unit.Facing)) continue;
+
+                nearest = closes;
+                room = candidate;
+                found = true;
+            }
+
+            return found;
+        }
+
         private static Vec2 MakeRoomForFriends(
             BattleState battle, UnitInstance unit, Vec2 next, int tick, IBattleLog log)
         {
@@ -1036,7 +1188,95 @@ namespace BattleChess.Rules
                 Facing wants = route.HoldThisLeg
                                ?? Marching.AlongTheLine(unit.Position, route.Target, unit.Facing);
 
-                if (!route.PressingThrough &&
+                // [M160] The plain rule, with the escape M30 lacked.
+                //
+                // M30 wrote "never step into one of your own unless you said
+                // you would", measured it, and threw it away because it
+                // deadlocks - and the softened rule that replaced it waits only
+                // while a regiment is still coming round. Measured on the walk
+                // bench, that leaves 9 628 to 17 223 pair-ticks of SILENT
+                // overlap over one army's march, with the deepest pair at 1,00
+                // - one regiment standing wholly inside another, nothing
+                // declaring it and nothing charged for it. That is the
+                // designer's "units go through each other", and it is not a
+                // grazing tolerance being generous.
+                //
+                // What M30 was missing is that the rule is right and the
+                // deadlock is a separate fault wanting a separate remedy. So
+                // the refusal is kept and given a clock: go round if there is a
+                // way round, hold if there is not, and once holding has plainly
+                // stopped working, press through and SAY so. A press that is
+                // declared is priced by PaceWhileInsideItsOwn and visible on
+                // the route [M26]; what was wrong was never the pressing, it
+                // was the silence.
+                if (RefuseToWalkIntoYourOwn && !route.PressingThrough)
+                {
+                    // Whether the refusal binds everybody or only the regiment
+                    // that has to give way. Both readings are defensible and
+                    // they behave very differently in a crowd, so it is a lever
+                    // rather than a choice made at the keyboard: if both halves
+                    // of a meeting refuse, both wait, both run out of patience
+                    // and both shoulder through at once - the yielding rule
+                    // undone by the very rule meant to enforce it.
+                    UnitInstance? meets = FriendInTheWay(battle, unit, next);
+
+                    bool mine = !OnlyTheYielderWaits || (meets != null && MustGiveWayTo(unit, meets));
+
+                    if (!mine || !WouldLapOneOfItsOwn(battle, unit, next, unit.Facing))
+                    {
+                        unit.Position = mine
+                            ? next
+                            : MakeRoomForFriends(battle, unit, next, tick, log);
+
+                        unit.HeldForFriends = 0;
+                    }
+                    else
+                    {
+                        // Round rather than through. MakeRoomForFriends hands
+                        // back the step unchanged when this regiment is the one
+                        // with right of way, so the yielding rule still decides
+                        // who moves - what changes is that the one with right
+                        // of way now waits instead of walking in.
+                        Vec2 room = MakeRoomForFriends(battle, unit, next, tick, log);
+
+                        // The two-flank escape is what M30 had, and it is too
+                        // narrow to carry a refusal. A regiment in a crowd
+                        // needs the question the board's stepper asks - of
+                        // every way out, which one is clear and still closes on
+                        // where I am going - so the fan is asked when the
+                        // commitment machinery comes back empty.
+                        if (WouldLapOneOfItsOwn(battle, unit, room, unit.Facing) &&
+                            TryAFanRound(battle, unit, next, route.Target, out Vec2 fanned))
+                        {
+                            room = fanned;
+                        }
+
+                        if (!WouldLapOneOfItsOwn(battle, unit, room, unit.Facing))
+                        {
+                            unit.Position = room;
+                            unit.HeldForFriends = 0;
+                        }
+                        else if (unit.HeldForFriends < PatienceTicks)
+                        {
+                            unit.HeldForFriends++;
+                        }
+                        else
+                        {
+                            // Waiting has stopped working. Go through, and let
+                            // it be counted.
+                            unit.Position = next;
+
+                            log.Info("Move",
+                                $"{unit.Def.DisplayName} has waited " +
+                                $"{unit.HeldForFriends * BattleClock.SecondsPerTick:0} s for its own to " +
+                                "clear the way and is shouldering through.",
+                                unit.Id);
+
+                            unit.HeldForFriends = 0;
+                        }
+                    }
+                }
+                else if (!route.PressingThrough &&
                     NotYetOnTheFront(unit, wants) &&
                     WouldLapOneOfItsOwn(battle, unit, next, unit.Facing))
                 {

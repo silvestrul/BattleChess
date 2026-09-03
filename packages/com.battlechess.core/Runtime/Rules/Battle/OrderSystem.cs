@@ -586,6 +586,55 @@ namespace BattleChess.Rules
         /// True if the route was replaced or the order ended, so the caller must
         /// not go on to judge a route it no longer has.
         /// </returns>
+        /// <summary>
+        /// How near a marching regiment has to be before it is worth re-drawing
+        /// a route around, in metres. [M160]
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>120 m, and it is a knee rather than a preference.</b> Swept on the
+        /// walk bench at 0, 60, 90, 120, 180, 250, 500 and unbounded, over one
+        /// army of forty ordered across three fields and walked to arrival.
+        /// Ninety and a hundred and eighty are both worse on every field, and
+        /// a hundred and eighty is much worse on Broken Country - 13 887 silent
+        /// pair-ticks against 5 426, and the march does not finish.
+        /// </para>
+        /// <para>
+        /// Against treating every marcher as a wall, which is what this was:
+        /// silent overlap on the Crucible <b>16 364 to 5 461</b>, the march
+        /// finishing in <b>1 789 ticks against 3 000</b>, and <b>14,5 s of CPU
+        /// against 24,4</b> - better on every axis on all three fields, which
+        /// is why it is a default and not a lever.
+        /// </para>
+        /// <para>
+        /// Zero - no marcher is ever a wall - is cheaper still at 6,9 s, and
+        /// costs 9 628 to 17 223 silent pair-ticks. The re-planning is doing
+        /// real avoidance work as well as churning, and this is where the two
+        /// separate.
+        /// </para>
+        /// </remarks>
+        internal static float MarcherIsAWallWithin = 120f;
+
+        /// <summary>Whether a mid-march re-plan mends the next legs or redraws the march. [M160]</summary>
+        /// <remarks>
+        /// <b>Built, measured, and off.</b> It does what it says - the Crucible
+        /// goes from 14,3 s of walking to 11,8 and from 1 334 re-plans to
+        /// 1 037 - and it costs the thing that matters most: regiments that
+        /// abandon their orders go from 1 / 0 / 2 across the three fields to
+        /// 4 / 2 / 3. A spliced tail was drawn from a position the regiment is
+        /// no longer at, and when the mend cannot reach the splice the whole
+        /// march is given up rather than re-drawn.
+        ///
+        /// Swept at one, two and four legs; none of the three is better than
+        /// redrawing on all three fields, and two of them are worse on two
+        /// fields. Kept because the idea is right and the cost is real: what it
+        /// wants is a mend that falls back to a redraw rather than to failure.
+        /// </remarks>
+        internal static bool MendRatherThanRedraw;
+
+        /// <summary>How many legs ahead a mend reaches before it splices back on. [M160]</summary>
+        internal static int LegsToMend = 2;
+
         private bool ReconsiderTheMarch(
             BattleState battle, UnitInstance unit, int tick, IBattleLog log)
         {
@@ -651,6 +700,46 @@ namespace BattleChess.Rules
             // So the route remembers what it is <i>for</i> instead, and a route
             // drawn to get past a body is not redrawn because of that same
             // body.
+            // [M160] A body that is itself marching is not a reason to redraw.
+            //
+            // Measured on the walk bench: forty orders on the Crucible cost
+            // 1 502 re-plans, 800 of them this one cause - "somebody is on the
+            // leg who was not there when the route was drawn" - and fifteen of
+            // the forty arrived. Every redraw restarts a walk at waypoint
+            // nought, and the redrawn line crosses somebody else, who redraws
+            // in turn. Forty regiments re-planning against each other's
+            // present positions is a feedback loop, not navigation.
+            //
+            // The physical reading is the same one: a regiment under orders
+            // will not be where it now stands by the time this one gets there,
+            // so planning round where it is now is planning round a ghost. A
+            // regiment STANDING is a wall and still redraws the route.
+            //
+            // What catches the near miss instead is the steering, which is
+            // already built for it: the mover crabs, presses or waits on the
+            // step that would have hit [M29/M30]. That is a decision made at
+            // the moment of contact with the facts of the moment, which is
+            // exactly what a five-second re-plan cannot be.
+            // [M160] And the rule is about DISTANCE, not about marching alone.
+            //
+            // Dropping every marcher took the Crucible from 3 837 re-plans and
+            // 24,8 s to 680 and 6,3 - and put silent overlap up on two fields
+            // out of three, because the re-planning was doing real avoidance
+            // work as well as churning. Both halves of that are true, and they
+            // separate on how far away the body is.
+            //
+            // A regiment forty metres down the leg will still be there when
+            // this one arrives; one four hundred metres down it will not, and
+            // drawing a way round where it stands now is drawing a way round a
+            // ghost - then drawing another one five seconds later when the
+            // ghost has moved. Near bodies are the avoidance; far ones are the
+            // churn.
+            if (meets != null && meets.IsMarching && meets.Owner == unit.Owner &&
+                Vec2.Distance(unit.Position, meets.Position) > MarcherIsAWallWithin)
+            {
+                meets = null;
+            }
+
             UnitId now = meets?.Id ?? UnitId.None;
 
             bool alreadyGoingRoundHim = now.IsValid && now == route.DrawnAround;
@@ -884,7 +973,58 @@ namespace BattleChess.Rules
 
             MovementRoute had = unit.Route!;
 
-            Plan plan = Marching.PlanTo(battle, unit, _pathfinder, goal, log);
+            // [M160] Mend the next legs rather than re-solve the whole march.
+            //
+            // A re-plan mid-march costs what the first plan cost - seven to ten
+            // milliseconds - and answers a question a great deal smaller than
+            // the one it is asked. What changed is that one body walked onto
+            // the leg underfoot; the far half of the route, hundreds of metres
+            // away, is exactly as good as it was when it was drawn and is
+            // thrown away and found again every time.
+            //
+            // So the re-plan is asked to reach a waypoint a few legs ahead, and
+            // what it finds is spliced onto the tail that was already there. It
+            // is the same division of labour [M159] keeps everywhere else: the
+            // route did the global work once, and what wants doing now is
+            // local.
+            int splice = -1;
+            Vec2 aim = goal;
+
+            if (MendRatherThanRedraw && had.Waypoints.Count - had.NextWaypoint > LegsToMend)
+            {
+                splice = had.NextWaypoint + LegsToMend;
+                aim = had.Waypoints[splice];
+            }
+
+            Plan plan = Marching.PlanTo(battle, unit, _pathfinder, aim, log);
+
+            if (splice >= 0 && plan.Path.Found && plan.Path.Waypoints.Count >= 2)
+            {
+                var whole = new List<Vec2>(plan.Path.Waypoints);
+
+                for (int i = splice + 1; i < had.Waypoints.Count; i++)
+                    whole.Add(had.Waypoints[i]);
+
+                float far = 0f;
+
+                for (int i = 1; i < whole.Count; i++)
+                    far += Vec2.Distance(whole[i - 1], whole[i]);
+
+                // The mend's own held fronts, and nothing for the tail: the
+                // legs that were spliced back on were drawn as ordinary legs
+                // and their fronts, if they had any, belong to a route that is
+                // no longer the one being walked.
+                Facing?[] hold = new Facing?[whole.Count];
+
+                if (plan.Hold != null)
+                    for (int i = 0; i < plan.Hold.Length && i < hold.Length; i++)
+                        hold[i] = plan.Hold[i];
+
+                plan = new Plan(
+                    PathResult.Success(
+                        whole, plan.Path.SearchCells, far, far, plan.Path.CellsExplored),
+                    hold, plan.PressedThrough, plan.Effort);
+            }
 
             if (plan.Path.Found && plan.Path.Waypoints.Count >= 2)
             {

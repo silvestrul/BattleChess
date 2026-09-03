@@ -4290,3 +4290,227 @@ cannot finish on. The ring is a statement about where a turn can **end**.
 
 Suite: 730 passing, 12 failing - the same 12 as the baseline - 87 skipped, 829
 total. Unity compiles clean.
+
+---
+
+## M160 - A regiment under orders is not a wall, and nobody was measuring the walk
+
+The designer, after three reports of the same thing: *"try everything and come
+back to me once you have better routes at high performance."*
+
+### The measurement this project did not have
+
+Every bench in the tree prices `Marching.PlanTo` at tick zero from the
+deployment and stops there. `LeverBenchTests` reports **80 of 80 routed, 0
+unwalkable, 0 pressed** on all three fields, and the game the designer plays
+deadlocks a regiment for eighty-three ticks. Both are true, and the gap between
+them is the whole finding.
+
+A plan is a claim about a line at the moment it is drawn. The field it was drawn
+on is gone by the second tick, because the other thirty-nine regiments are
+moving too. **No bench asked the only question the player asks: did they get
+there?**
+
+`WalkBenchTests` asks it. One army of forty ordered across the field at once,
+then the clock run until everybody arrives - counting who arrived, who gave up,
+who walked through whom, and what the whole march cost in CPU including every
+re-plan. First reading, and it is not a subtle result:
+
+| field | routed | arrived | CPU, planning | CPU, walking | re-plans |
+|---|---|---|---|---|---|
+| Crucible | 40 of 40 | 38 | 415 ms | **24 205 ms** | **3 837** |
+| Long March | 40 of 40 | 39 | 141 ms | 21 954 ms | 2 869 |
+| Broken Country | 40 of 40 | 40 | 200 ms | 24 471 ms | 2 023 |
+
+**Planning is 2% of the cost of an order.** The other 98% is re-planning during
+the walk - 1 500 to 3 800 re-draws for forty orders, fifty to ninety-five per
+regiment. Every previous performance pass in this project has been measuring the
+2%.
+
+### What the re-plans were for
+
+Tallied from the recording, Crucible: **800 of 1 502 re-plans** are one line -
+*"X has Y on the leg it is walking, which was not there when the route was
+drawn, and is going again."* Forty regiments each re-drawing twenty times
+because their neighbours moved, and every re-draw crossing somebody else, who
+then re-draws in turn. **That is a feedback loop, not navigation.**
+
+### The rule, and it is about distance
+
+A regiment forty metres down the leg will still be there when this one arrives.
+One four hundred metres down will not, and drawing a way round where it stands
+now is drawing a way round a ghost - then drawing another one five seconds later
+when the ghost has moved. **Near bodies are the avoidance; far ones are the
+churn**, and `OrderSystem.MarcherIsAWallWithin` is where the two separate.
+
+Swept at 0, 60, 90, 120, 180, 250, 500 and unbounded. **120 m is a knee, not a
+preference:** ninety and a hundred and eighty are both worse on every field, and
+a hundred and eighty is much worse on Broken Country - 13 887 silent pair-ticks
+against 5 426, and the march stops finishing.
+
+| | silent overlap | ticks to arrive | CPU |
+|---|---|---|---|
+| Crucible | 16 364 -> **5 461** (-67%) | 3 000 -> **1 789** (-40%) | 24,2 s -> **14,3 s** |
+| Long March | 7 164 -> **6 180** (-14%) | 2 398 -> 2 318 | 22,0 s -> **15,3 s** |
+| Broken Country | 6 535 -> **5 426** (-17%) | 2 162 -> 2 069 | 24,5 s -> **15,4 s** |
+
+Re-plans fall 3 837 -> 1 334, 2 869 -> 2 307, 2 023 -> 1 409. **Better on every
+axis on all three fields**, which is why it is a default and not a lever.
+
+**Honestly, one regression:** Broken Country arrives 38 of 40 against 40, with
+two regiments giving up where none did. Everywhere else arrivals hold or improve
+(38->39, 39->40). Worth watching rather than worth refusing the rest for.
+
+Zero - no marcher is ever a wall - is cheaper still at **6,9 s**, and costs 9 628
+to 17 223 silent pair-ticks. The re-planning is doing real avoidance work as
+well as churning, and 120 m is where it stops paying for itself.
+
+### Where an overlap actually begins, which was not where I looked
+
+The walk bench also counts what nothing counted: **9 628 to 17 223 pair-ticks of
+overlap that nothing declared**, with the deepest pair at **1,00** - one regiment
+standing wholly inside another. Zero at deployment, so the field starts clean.
+
+Classified at the tick each one starts: **225 of 226 onsets on the Crucible, and
+every one of 168 and 269 on the other two fields, begin at or under the 5%
+grazing tolerance.** Not one is a step into a body any rule could refuse. They
+start legal and deepen, because the leaving excuse in `WouldLapOneOfItsOwn` -
+*"already inside this one: leaving is the whole point"* - is unconditional. The
+first touch is free and every touch after it is excused by the first.
+
+### Three things built, measured, and turned off
+
+Kept in the tree with their numbers, because *"we tried it and it was worse"* is
+worth nothing without one.
+
+**The plain refusal** (`MovementSystem.RefuseToWalkIntoYourOwn`). M30 wrote
+"never step into one of your own unless you said you would", found it
+deadlocked, and softened it. This is the same rule with the escape M30 lacked:
+an eight-way fan, the shape of question `BoardTurn.BestStep` asks, plus a
+patience clock that presses through and says so. **It does not deadlock** - the
+patience never once ran out at 15, 45 or 120 ticks, all three giving identical
+numbers. It also does not help: beside the 120 m rule, Broken Country goes from
+5 426 silent pair-ticks to 13 713 and stops finishing. With almost no illegal
+step to refuse, what it refuses instead is regiments sliding past each other -
+and a held regiment is one more body for the next one to get round.
+
+**No step may deepen an overlap** (`NoDeeperIntoYourOwn`), the lattice's own
+sweep rule brought down to the walk: separation may hold or widen, never narrow.
+The mechanism is real and the fix does not reach it. Swept at 0,02 / 0,005 /
+0,001 / 0, the deepest overlap stays at 0,99-1,00 whatever the setting, because
+the pairs that reach it are declared press-throughs, which bypass this by design
+and are allowed to [M26]. My first setting, 2% of a body per tick, was also 100%
+over fifty ticks - the rule was right and the number made it a no-op.
+
+**Mending instead of redrawing** (`MendRatherThanRedraw`). A mid-march re-plan
+costs what the first plan cost and answers a much smaller question: one body
+walked onto the leg underfoot, while the far half of the route is exactly as good
+as when it was drawn and is thrown away and found again every time. So plan to a
+waypoint a few legs ahead and splice the tail back on. It works - Crucible 14,3 s
+to 11,8 and 1 334 re-plans to 1 037 - and costs the thing that matters most:
+regiments abandoning their orders go from 1 / 0 / 2 to **4 / 2 / 3**. Swept at
+one, two and four legs; none is better on all three fields. What it wants is a
+mend that falls back to a redraw rather than to failure, and that is the next
+thing to try rather than something to ship untried.
+
+### Still open, and one thing tried and taken back out
+
+A **patience clock for the board's stepper** was built: `BoardTurn.BestStep`
+takes only cells that get the regiment nearer, and the change let a regiment
+held past its patience take any cell that fits at all. It is very likely the
+right rule and it is **not in the tree**, because the fixture written to prove
+it could not be made to reproduce the recorded deadlock. Every arrangement that
+held all three closing cells also left the marcher's 80 x 40 m body unable to
+stand anywhere at all - entombed rather than deadlocked, which no stepping rule
+can fix and which proves nothing about one. The red-first check earned its keep
+twice on the way: it caught a fixture that boxed against the destination when
+the stepper aims at the next waypoint, and a way-out count asked of cells when
+a body covers a dozen of them. A movement rule that cannot be shown working is
+worse than no rule, so it came out.
+
+The board-mode deadlock from `logs/battle-20260902-214733.log` is therefore
+still diagnosed and not fixed: `BoardRoutePlanner` clears a route with metres of margin while the
+board rounds every body up to whole cells, so a line the planner calls clear is
+a wall to the walker, and the two will not yield to each other. It wants one
+clearance model used by both. Nothing here touches it.
+
+---
+
+## M161 - Cells say where a regiment may stand; bodies say whether it is inside somebody
+
+The designer, over a screenshot of a regiment refused a place with visible room
+on both sides: *"it has space here but doesnt fit"*.
+
+### The arrangement, from the recording rather than the pixels
+
+`logs/battle-20260903-113843.log` kept it. Spearmen at **(312, 1287)** and
+**(312, 1087)**, both 80 x 40 m facing 0 degrees, so their frontages run
+north-south and the clear ground between them is y 1127 to 1247 - **120 m of
+open field for an 80 m body, 20 m to spare at each end.** The board refused it.
+
+### What it costs, measured
+
+`BoardClearanceTests` walks the gap open 2,5 m at a time and asks the board at
+each width:
+
+| cell | narrowest gap the board accepted | clear ground refused, each end |
+|---|---|---|
+| 25 m | **152,5 m** for an 80 m body | **36,3 m** |
+| 12,5 m | 102,5 m | 11,3 m |
+
+The bodies are plainly clear at every one of those widths, and the test says so
+in its own column.
+
+### Why, and why no amount of tuning fixes it
+
+A body claims **every cell it so much as touches**. A body ending at 1227 and one
+beginning at 1247 both claim the cell running 1225 to 1250, so the board cannot
+tell twenty metres apart from standing in one another. This is a quantisation
+error, not a margin that is set too wide: halving the cell only halves it, which
+is exactly what the 12,5 m row shows.
+
+### The separation
+
+Two different questions had been answered by one mechanism.
+
+**Where a regiment may stand** is a board question and stays one: on the board,
+on ground it can cross, snapped to a cell centre and one of twenty-four fronts.
+
+**Whether it is inside somebody** is a question about two rectangles, and is now
+answered by the two rectangles - the same test the continuous planner uses, and
+the same one the player is making with their own eyes.
+
+The cells keep the work they are good at: they are the **broad phase**. Only
+bodies holding one of the stencil's cells are tested exactly, so this costs a
+handful of rectangle tests rather than a sweep of the field.
+
+| cell | before | after | what is left |
+|---|---|---|---|
+| 25 m | 152,5 m | **105,0 m** | 12,5 m |
+| 12,5 m | 102,5 m | **92,5 m** | 6,25 m |
+
+**What is left is exactly half a cell at each end, and it is honest.** A regiment
+stands on a cell *centre*, so the nearest place it may stand can be half a cell
+off the middle of a gap. That is the board's own rule. The test asserts the bound
+rather than admiring it: `frontage + one cell`, no more.
+
+Made in both places, because a rule the planner keeps and the walker does not is
+the disagreement the recorded board deadlock is made of - `Board.CouldStandAt`
+and `BoardTurn.Fits`.
+
+### Two tests re-recorded rather than loosened
+
+`FineBoardTests.NoTwoRegimentsClaimTheSameGround` and `TwoModesTests.Overlaps`
+both counted **shared cells**, which was the board's promise while a shared cell
+was a clash. It is not one now, and both now count **overlapping bodies**, which
+is the stronger promise and the one the player can check by looking. Measured on
+the muster: at 25 m, 40 regiments touch 600 cells of which **48 are touched by
+two** - and **0 pairs stand in one another**. At 12,5 m, none are shared and none
+overlap.
+
+### Still open
+
+This is the clearance mismatch [M160] recorded as the cause of the board deadlock
+in `logs/battle-20260902-214733.log`, and it is now fixed at the source. Whether
+that recording's deadlock is gone has **not** been shown: the fixture written for
+it could never be made to reproduce it, and no play-test has been taken since.

@@ -50,19 +50,32 @@ namespace BattleChess.Tests.Battle
         /// <summary>
         /// Overlapping ground, counted over every cell of every body.
         /// </summary>
+        /// <summary>
+        /// Regiments standing in one another. [M161] - bodies, not cells.
+        /// </summary>
+        /// <remarks>
+        /// This counted shared CELLS until M161, which was the board's promise
+        /// while a shared cell was a clash. It is not one now: a body claims
+        /// every cell it touches, so two regiments twenty metres apart share the
+        /// cell between them, and judging by cells made the board refuse 36 m of
+        /// clear ground at each end of a gap. The promise moved to the bodies,
+        /// which is where the player was reading it from all along.
+        /// </remarks>
         private static List<string> Overlaps(BattleState battle, Board board)
         {
-            var owner = new Dictionary<Coord, UnitId>();
+            var all = battle.UnitsOnField().ToList();
             var clashes = new List<string>();
 
-            foreach (UnitInstance unit in battle.UnitsOnField())
-                foreach (Coord cell in Occupancy.Under(board.Cells, unit))
-                {
-                    if (owner.TryGetValue(cell, out UnitId who))
-                        clashes.Add($"{cell}: {who} and {unit.Id}");
-                    else
-                        owner[cell] = unit.Id;
-                }
+            for (int i = 0; i < all.Count; i++)
+            for (int j = i + 1; j < all.Count; j++)
+            {
+                if (!OrientedRect.Overlaps(all[i].Shape, all[j].Shape)) continue;
+
+                clashes.Add(
+                    $"{all[i].Id} and {all[j].Id} are in each other by " +
+                    $"{OrientedRect.OverlapFraction(all[i].Shape, all[j].Shape):0.00} " +
+                    $"at {board.Of(all[i].Position)}");
+            }
 
             return clashes;
         }

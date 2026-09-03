@@ -234,6 +234,73 @@ namespace BattleChess.Tests.Battle
         }
 
         /// <summary>The combination the sweep chose, in one place.</summary>
+        /// <summary>
+        /// What the expansion budget costs in routes, measured on today's code
+        /// rather than on M70's.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>[M160], asked by the designer.</b> Their account of the lattice is
+        /// that it was "perfect in pathfinding" and was cut back because a single
+        /// route took seconds. `docs/pathfinding-levers.md` agrees and says the
+        /// price: 10 000 was byte-identical in quality to 20 000, and below 5 000
+        /// the budget becomes the crudest lever in the document - a cap of 1 000
+        /// bought 14,5 ms for <b>31 unwalkable against 17</b>.
+        /// </para>
+        /// <para>
+        /// The shipping value is 4 096, which is under that knee, and every
+        /// number above was taken before M72 to M88 changed what the lattice is
+        /// asked. So the question of what is actually being given up today can
+        /// only be answered by asking it again.
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void WhatTheExpansionBudgetCostsInRoutes()
+        {
+            var loaded = new Dictionary<string, BattleState>();
+            foreach (string field in Fields) loaded[field] = BenchScenariosTests.Load(field);
+
+            int was = StagedRoutePlanner.PoseExpansionBudget;
+
+            Apply(Best());
+            foreach (string field in Fields) Measure(loaded[field]);
+
+            _out.WriteLine(
+                "budget   field           ms/order    worst   route s   routed  unwalk  press  " +
+                "lattice asked  widened");
+            _out.WriteLine(new string('-', 100));
+
+            try
+            {
+                foreach (int budget in new[] { 2048, 4096, 10000, 20000, 40000 })
+                {
+                    StagedRoutePlanner.PoseExpansionBudget = budget;
+
+                    foreach (string field in Fields)
+                    {
+                        Report best = null!;
+
+                        for (int pass = 0; pass < Passes; pass++)
+                        {
+                            Report r = Measure(loaded[field]);
+                            if (best == null || r.MsPerOrder < best.MsPerOrder) best = r;
+                        }
+
+                        _out.WriteLine(
+                            $"{budget,6}   {field,-14} {best.MsPerOrder,8:0.00} {best.Worst,8:0.0} " +
+                            $"{best.Seconds,9:0.0} {best.Routed,8} {best.Unwalkable,7} {best.Pressed,6}  " +
+                            $"{best.PoseAsked,13} {best.PoseWidened,8}");
+                    }
+
+                    _out.WriteLine(string.Empty);
+                }
+            }
+            finally
+            {
+                StagedRoutePlanner.PoseExpansionBudget = was;
+            }
+        }
+
         private static Setting Best() =>
             new Setting { Name = "bent+dial", Bent = true, Dial = true };
 

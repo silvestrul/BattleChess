@@ -140,8 +140,22 @@ namespace BattleChess.Tests.Battle
 
             int crowded = GridMode.Muster(battle);
 
+            // [M161] Re-recorded, because the rule it was written for has gone.
+            //
+            // It used to ask that no cell be claimed by two regiments, which was
+            // the board's promise while a shared cell WAS a clash. It is not any
+            // more: a cell is a piece of ground and a body claims every cell it
+            // so much as touches, so two regiments twenty metres apart share the
+            // cell between them. Judged that way the board demanded a 152,5 m
+            // gap for an 80 m body at 25 m cells - 36,3 m of visibly clear
+            // ground refused at each end, which is what the designer reported as
+            // "it has space here but doesnt fit".
+            //
+            // So a shared cell is now expected and is printed rather than
+            // failed, and what is asserted is the promise that actually matters
+            // and that the player can check by looking: no two BODIES overlap.
             var owner = new Dictionary<Coord, UnitId>();
-            var clashes = new List<string>();
+            var shared = new List<string>();
             int claimed = 0;
 
             foreach (UnitInstance unit in battle.UnitsOnField())
@@ -151,23 +165,37 @@ namespace BattleChess.Tests.Battle
                     claimed++;
 
                     if (owner.TryGetValue(cell, out UnitId who))
-                        clashes.Add($"{cell} claimed by both {who} and {unit.Id}");
+                        shared.Add($"{cell} touched by both {who} and {unit.Id}");
                     else
                         owner[cell] = unit.Id;
                 }
             }
 
-            _out.WriteLine(
-                $"{cellMetres} m cells: {battle.UnitsOnField().Count()} regiments claim {claimed} cells " +
-                $"({owner.Count} distinct), {crowded} could not be placed");
+            var all = battle.UnitsOnField().ToList();
+            var through = new List<string>();
 
-            foreach (string clash in clashes.Take(10)) _out.WriteLine("  " + clash);
+            for (int i = 0; i < all.Count; i++)
+            for (int j = i + 1; j < all.Count; j++)
+            {
+                if (!OrientedRect.Overlaps(all[i].Shape, all[j].Shape)) continue;
+
+                through.Add(
+                    $"{all[i].Def.Key} {all[i].Id} and {all[j].Def.Key} {all[j].Id} are in each other " +
+                    $"by {OrientedRect.OverlapFraction(all[i].Shape, all[j].Shape):0.00}");
+            }
+
+            _out.WriteLine(
+                $"{cellMetres} m cells: {all.Count} regiments touch {claimed} cells ({owner.Count} " +
+                $"distinct, {shared.Count} touched by two), {crowded} could not be placed, " +
+                $"{through.Count} pairs stand in one another");
+
+            foreach (string clash in through.Take(10)) _out.WriteLine("  " + clash);
 
             Assert.True(
                 claimed > 200,
-                $"only {claimed} cells were claimed in all, so the bodies are not being measured.");
+                $"only {claimed} cells were touched in all, so the bodies are not being measured.");
 
-            Assert.Empty(clashes);
+            Assert.Empty(through);
             Assert.Equal(0, crowded);
         }
 

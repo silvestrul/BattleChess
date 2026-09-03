@@ -67,6 +67,13 @@ namespace BattleChess.Tests.Battle
                 {
                     ("over the board", new BoardRoutePlanner()),
                     ("the continuous one", RoutePlanners.Default),
+
+                    // [M160] The designer asked whether a GPU would rescue the
+                    // hybrid lattice, which M41 measured as slow and worse. The
+                    // answer is worth having as a number rather than an
+                    // argument, so it is measured on the same twenty orders as
+                    // everything else.
+                    ("the hybrid lattice", RoutePlanners.TheHybridAStar),
                 })
                 {
                     // One warm pass, so neither is charged for the first-touch
