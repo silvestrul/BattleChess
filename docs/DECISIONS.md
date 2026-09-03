@@ -4514,3 +4514,73 @@ This is the clearance mismatch [M160] recorded as the cause of the board deadloc
 in `logs/battle-20260902-214733.log`, and it is now fixed at the source. Whether
 that recording's deadlock is gone has **not** been shown: the fixture written for
 it could never be made to reproduce it, and no play-test has been taken since.
+
+---
+
+## M162 - Standing on the cell nearest a waypoint is reaching it
+
+The designer, over two screenshots: *"the two units on the top are still frozen
+and dont move"*. The recording had it, with the numbers.
+
+### What the recording said
+
+`logs/battle-20260903-135252.log`:
+
+```
+131 > board  U1  held at (20,73): there is nowhere nearer it can put itself
+194 > board  U5  held at (23,70): there is nowhere nearer it can put itself
+329   Scene      Spearmen #U5 at (587,5, 1762,5) facing 135° - unmoved
+329   Scene      Horse Archers #U1 at (837,5, 1737,5) facing 0° - unmoved
+```
+
+Note the reason: **there is nowhere nearer it can put itself**, and no blocker
+named. Nothing was standing in the way. The board had simply stopped being able
+to move it.
+
+### The arithmetic
+
+U5 stands on the centre of cell (23,70), which is (587,5, 1762,5). Its next
+waypoint is **(596, 1773)**, which is **13,5 m away**.
+
+`BoardTurn` advances a waypoint when it is within `CellWidth * 0,5` - **12,5 m** -
+and `BestStep` takes a step only to a cell that gets the regiment *nearer*. The
+eight neighbouring centres are at **16,8, 19,6 and 22,0 m** from that waypoint.
+
+So: too far to count as arrived, and nowhere nearer to go. The leg can never end
+and no step can ever be taken. U5 stood there for the remaining 135 ticks of the
+recording, and U1 for the rest of the battle.
+
+**The two numbers never met.** On a square lattice a point can be up to
+`CellWidth * sqrt(2) / 2` from the nearest cell centre - **17,68 m at 25 m
+cells** - and the arrival test allowed 12,5. **Every waypoint landing in the band
+between them was unreachable by construction**, at every cell size: the band is
+6,25 to 8,84 m at 12,5 m cells and 12,5 to 17,68 at 25 m. Roughly a fifth of the
+area of a cell.
+
+### The rule, not the number
+
+Widening the constant to half a diagonal would close it on squares and leave
+hexes wrong. So the rule is stated instead: **a regiment standing on the cell
+nearest a waypoint has reached it.** There is nowhere nearer for the board to put
+it - which is exactly what the recording said, and exactly what should have ended
+the leg rather than stalling it.
+
+Asked of the lattice rather than computed from a cell's width, so it is right on
+hexes and squares and stays right if either changes. It is also the precise
+condition the stepper is about to fail on: if nothing is nearer, no step can
+close.
+
+### The reproduction
+
+`BoardArrivalTests.AWaypointNearACellCornerIsStillReached`, at both cell sizes,
+with the non-vacuity that matters written in: the waypoint must be **outside**
+the arrival test (or the old rule would have reached it too) and **no neighbour
+may be nearer** (or a step would have closed it). Red before the change at 13,3 m
+and 6,6 m - the recording's 13,5 to the decimal - and green after, in one turn.
+
+This is the third attempt at the board deadlock and the first that reproduces it.
+[M160] built a patience clock for the stepper and took it back out because no
+fixture could be made to fail; the fixtures were all *entombing* the regiment
+with bodies, which is a different thing and not what was happening. The recording
+named the fault in its own words - *nowhere nearer it can put itself* - and the
+fault was geometry, not crowding.

@@ -214,8 +214,36 @@ namespace BattleChess.Rules.Grid
 
                     Coord here = board.Of(marcher.Unit.Position);
 
-                    // Close enough to this waypoint: take the next one.
-                    if (Vec2.Distance(marcher.Unit.Position, aim) <= board.CellWidth * 0.5f)
+                    // Close enough to this waypoint, or as close as the board
+                    // can put it. [M162]
+                    //
+                    // Half a cell alone freezes a regiment for ever, and the
+                    // designer's play-test recorded it twice in one battle:
+                    //
+                    //   194 > board U5 held at (23,70): there is nowhere nearer
+                    //                  it can put itself
+                    //
+                    // U5 stood on the centre of (23,70) - (587,5, 1762,5) - with
+                    // its next waypoint at (596, 1773), 13,5 m off. The arrival
+                    // test allows 12,5. Every one of the eight neighbouring
+                    // centres is FURTHER from that waypoint - 16,8, 19,6, 22,0 -
+                    // so no step closes and the waypoint is never taken. The
+                    // regiment stood there for the remaining 135 ticks of the
+                    // recording.
+                    //
+                    // The two numbers never met. On a square lattice a point can
+                    // be up to CellWidth * sqrt(2) / 2 from the nearest centre -
+                    // 17,68 m at 25 m cells - and every waypoint landing in the
+                    // band between 12,5 and 17,68 was unreachable by
+                    // construction. Widening the constant to half a diagonal
+                    // would close it on squares and leave hexes wrong, so the
+                    // rule is stated instead of the number: A REGIMENT STANDING
+                    // ON THE CELL NEAREST A WAYPOINT HAS REACHED IT. There is
+                    // nowhere nearer for the board to put it, which is exactly
+                    // what the recording said and exactly what should have ended
+                    // the leg rather than stalling it.
+                    if (Vec2.Distance(marcher.Unit.Position, aim) <= board.CellWidth * 0.5f ||
+                        NowhereNearer(board, here, aim))
                     {
                         route.Advance();
 
@@ -275,7 +303,8 @@ namespace BattleChess.Rules.Grid
                     stepped?.Add(marcher.Unit.Id);
                     steps++;
 
-                    if (Vec2.Distance(marcher.Unit.Position, aim) <= board.CellWidth * 0.5f)
+                    if (Vec2.Distance(marcher.Unit.Position, aim) <= board.CellWidth * 0.5f ||
+                        NowhereNearer(board, next, aim))
                         route.Advance();
 
                     if (route.IsComplete)
@@ -291,6 +320,33 @@ namespace BattleChess.Rules.Grid
             foreach (Marcher marcher in marchers) if (marcher.Stepped) moved++;
 
             return new Summary(moved, steps, clashes, arrived);
+        }
+
+        /// <summary>
+        /// Whether this cell is already the nearest the board has to
+        /// <paramref name="aim"/>. [M162]
+        /// </summary>
+        /// <remarks>
+        /// Asked of the lattice rather than computed from a cell's width, so it
+        /// is right on hexes and on squares and stays right if either changes.
+        /// It is also the exact condition the stepper is about to fail on - if
+        /// nothing is nearer, no step can close - so the leg ends instead of the
+        /// march stalling.
+        /// </remarks>
+        private static bool NowhereNearer(Board board, Coord here, Vec2 aim)
+        {
+            Span<Coord> around = stackalloc Coord[8];
+
+            board.Cells.Neighbours(here, around);
+
+            float from = Vec2.Distance(board.CentreOf(here), aim);
+
+            for (int i = 0; i < board.Cells.DirectionCount; i++)
+            {
+                if (Vec2.Distance(board.CentreOf(around[i]), aim) < from) return false;
+            }
+
+            return true;
         }
 
         /// <summary>
