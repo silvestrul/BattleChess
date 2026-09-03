@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BattleChess.Contracts;
 
@@ -100,6 +100,8 @@ namespace BattleChess.Rules
             var given = new Vec2[wing.Count];
             var booked = new List<OrientedRect>();
 
+            Vec2 along = LineOfTheWing(wanted);
+
             for (int i = 0; i < wing.Count; i++)
             {
                 UnitInstance unit = wing[i];
@@ -107,7 +109,7 @@ namespace BattleChess.Rules
                 Facing arriving = front ?? unit.Facing;
 
                 given[i] = NearestClearPlace(
-                    battle, unit, wanted[i], arriving, standing, booked);
+                    battle, unit, wanted[i], arriving, along, standing, booked);
 
                 booked.Add(new OrientedRect(given[i], arriving, Grown(unit)));
             }
@@ -134,12 +136,49 @@ namespace BattleChess.Rules
         /// one side - so most of the time the first few looks answer it.
         /// </remarks>
         private static Vec2 NearestClearPlace(
-            BattleState battle, UnitInstance unit, Vec2 wanted, Facing front,
+            BattleState battle, UnitInstance unit, Vec2 wanted, Facing front, Vec2 along,
             IReadOnlyList<OrientedRect> standing, IReadOnlyList<OrientedRect> booked)
         {
             Footprint grown = Grown(unit);
 
             float reach = unit.Footprint.Width * NudgedAtMostFrontages;
+
+            // The place it was actually sent, before any of the giving way
+            // below. Tried here rather than left to look 0 of the spiral,
+            // because the whole point of what follows is that it only happens
+            // when this fails - a wing whose places are all free must come back
+            // exactly as it was drawn.
+            if (Clear(battle, unit, new OrientedRect(wanted, front, grown), standing, booked))
+                return wanted;
+
+            // [M164]. Along the wing's own line before anywhere else. The
+            // designer asked for a wing that has to bend to still look a bit
+            // organized, and the spiral below cannot give that: it is even in
+            // every direction, so a column shoved out of place comes back as a
+            // blob rather than as a longer column. A line that gives way along
+            // itself is still recognisably the line that was drawn.
+            //
+            // Tried alternately either way and outward, so this stays a
+            // nearest-first search - it is a preference between places the same
+            // distance off, not a licence to go further.
+            if (!along.IsNearZero)
+            {
+                float stride = unit.Footprint.Width * 0.25f;
+
+                for (float off = stride; off <= reach; off += stride)
+                {
+                    for (int side = 0; side < 2; side++)
+                    {
+                        float step = side == 0 ? off : -off;
+
+                        var beside = new Vec2(wanted.X + along.X * step, wanted.Y + along.Y * step);
+
+                        if (Clear(battle, unit, new OrientedRect(beside, front, grown),
+                                  standing, booked))
+                            return beside;
+                    }
+                }
+            }
 
             for (int look = 0; look <= LooksBeforeGivingUp; look++)
             {
@@ -162,6 +201,42 @@ namespace BattleChess.Rules
             // say so, which is a better answer than a regiment quietly standing
             // somewhere it was never sent.
             return wanted;
+        }
+
+        /// <summary>
+        /// The line the wing is drawn up on: the direction between its two
+        /// furthest-apart places. [M164]
+        /// </summary>
+        /// <remarks>
+        /// The furthest pair rather than a fitted axis, because it is exact for
+        /// the arrangement this actually has to serve - a line or a column - and
+        /// because it degrades honestly: a wing standing in a blob has no
+        /// furthest pair worth the name, and the direction it returns is
+        /// arbitrary, which is the right answer for a shape with no line in it.
+        /// Nought vectors mean there is nothing to give way along, and the
+        /// spiral takes it from there.
+        /// </remarks>
+        private static Vec2 LineOfTheWing(IReadOnlyList<Vec2> wanted)
+        {
+            if (wanted.Count < 2) return Vec2.Zero;
+
+            float widest = 0f;
+            Vec2 line = Vec2.Zero;
+
+            for (int i = 0; i < wanted.Count; i++)
+            {
+                for (int j = i + 1; j < wanted.Count; j++)
+                {
+                    float apart = Vec2.Distance(wanted[i], wanted[j]);
+
+                    if (apart <= widest) continue;
+
+                    widest = apart;
+                    line = wanted[j] - wanted[i];
+                }
+            }
+
+            return line.Normalised();
         }
 
         private static bool Clear(

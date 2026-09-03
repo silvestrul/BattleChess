@@ -4584,3 +4584,125 @@ fixture could be made to fail; the fixtures were all *entombing* the regiment
 with bodies, which is a different thing and not what was happening. The recording
 named the fault in its own words - *nowhere nearer it can put itself* - and the
 fault was geometry, not crowding.
+
+---
+
+## M163 - The clock can be left running
+
+The designer: *"the 'next turn' button should for debug reasons work until its
+pressed again so that i compute a longer turn cause a single turn doesnt show
+much since its so small"*.
+
+Sixty ticks of a forty-one metre order is a regiment shuffling. A fault that
+takes four turns to show cannot be watched four clicks at a time.
+
+**Its own button, beside End turn, not folded into it.** `EndTheTurn` resolves
+exactly one turn and the reason is written above it: both sides have to be
+resolving the same window or a simultaneous turn cannot be reasoned about.
+Running on is a second thing that happens to end turns, not a different meaning
+for the first. It stays enabled while the turn resolves, because stopping is the
+half of it that matters, and it stops **where it stands** rather than at the next
+boundary - a fault being watched is on the screen now, and a stop that ran
+another fifty ticks first would lose it.
+
+---
+
+## M164 - Bound armies move as one; the rest just get as close as they can
+
+The designer, giving up on something: *"i want to give up on something ... what i
+would like is that bound armies move as one but normal armies just try to get as
+close as they can"*. Two images with it: two bound armies each aiming their own
+centre at the click, and an unbound selection gathering into a blob round it.
+
+### What the old rule cost
+
+Every group order translated the selection's shape rigidly. On the designer's
+last order - **forty-one metres**, seventeen regiments - six of them came back
+with this:
+
+```
+329 > Move U6  could not walk, bend or shoulder its way there, so the search
+               answered: by (913,1488) -> (913,1438), 50 m, 12 cells explored.
+329   Path U6  ran out of its search budget (5 ms) before the grid at 0,25
+               - taking the ladder's route.
+```
+
+U6 was sent to (937,5, 1462,5). It planned **fifty metres** to (913, 1438) -
+**thirty-five metres from where it was sent**, in a different direction - and
+marched it. U7 through U11 the same. The rigid translation had handed seven
+spearmen in a column seven places nobody could stand on, and the planner did what
+it does when asked for the impossible.
+
+### The two rules
+
+- **A wing tied by hand** (`Bond > 0`) keeps the shape it stands in and puts its
+  **centre** as near the click as it can get. Several wings ordered at once pack
+  their centres round the click on their bounding radii, nearest first - circles
+  rather than outlines, because a wing is a scatter of rectangles with air
+  between them and an exact test would let two wings interleave.
+- **Everybody else** reserves a place round the click and goes to it. **Nearest
+  picks first**: the regiment already closest reserves the best place, then the
+  next, packing outward on a golden-angle spiral whose radius grows as the square
+  root of the look - constant density per unit area, so the ring reached at look
+  N is the ring that holds N places, which is what makes "nearest first" mean
+  what it says.
+
+**Wings are placed first and the loose flow round them.** The rigid thing gets
+its ground and the flexible thing gives way, never the other way about: a
+gathering can always find more room further out, and a wing that has to give way
+has only two frontages to give.
+
+### Selection is no longer a wing
+
+It used to be. A multi-selection took a transient bond and that bond meant three
+things, all of which only make sense for a rigid body:
+
+| | before | after |
+|---|---|---|
+| shared pace | any bond | `Bond > 0` only |
+| invisible to each other while planning | any bond | `Bond > 0` only |
+| shape kept under a march | any bond | `Bond > 0` only |
+| station-keeping against an enemy | any bond | **any bond, unchanged** |
+
+Stated once as `UnitInstance.MovesAsOneBody => Bond > 0`.
+
+**Station-keeping deliberately keeps the wider test.** [M154] is about where to
+stand relative to a *target*, which is exactly what being ordered at one enemy
+together means; five regiments each aiming at their own stand-off fold into a
+knot. Pace and mutual transparency are properties of marching as one body, which
+is what binding means. Asked of the designer and answered: *"only bound wings
+share a pace"*.
+
+The console line that promised *"they move as one body at 1,59 m/s, the pace of
+the Spearmen"* is gone, because it would have been a recording of a rule the game
+no longer has.
+
+### A wing that has to bend bends along itself
+
+Asked which way a bound wing should give when its shape will not fit. The
+designer: *"individual regiments bend out of line but should still be a bit
+organized"*.
+
+`WingFormation` nudged on a golden-angle spiral, which is even in every direction
+- so a column shoved out of place came back as a **blob**. It now tries the
+wing's **own line** first, alternately either way and outward, and only falls
+back to the spiral. A line that gives way along itself is still recognisably the
+line that was drawn. The line is the direction between the two furthest-apart
+wanted places: exact for the arrangement it has to serve, and it degrades
+honestly, because a wing standing in a blob has no furthest pair worth the name.
+
+The first cut of it tried the line *before* the place the regiment was actually
+sent, so a wing whose places were all free was still shifted a stride along
+itself. `TwoModesTests.AWingInTheFreeGameIsGivenPlacesThatDoNotOverlap` failed on
+its own non-vacuity guard - *all 5 regiments were moved, so the shape was not
+kept - this is a re-form, not a rigid translation* - which is the guard doing
+exactly the job it was written for. Giving way is now only reached when the
+wanted place is taken.
+
+### Not done
+
+No unit tests, per the standing rule that they are deferred while implementing.
+Two things worth measuring later: whether a gathering of forty packs in
+reasonable time on the board, where every answer must also land on a cell centre;
+and whether `WingStation` keeping the wider bond is right once a selection can
+contain both a wing and loose regiments attacking the same target.

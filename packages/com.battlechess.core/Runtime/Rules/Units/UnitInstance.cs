@@ -361,6 +361,29 @@ namespace BattleChess.Rules
         /// </remarks>
         public int Bond { get; set; }
 
+        /// <summary>
+        /// Whether this regiment manoeuvres as part of one body rather than on
+        /// its own account. [M164]
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Only a wing the player tied by hand. A selection carries a bond too -
+        /// a negative one - but that is bookkeeping for an order given to
+        /// several regiments at once, and it is NOT a statement that they move
+        /// as one body. The designer drew the line there: bound armies move as
+        /// one, normal armies just try to get as close as they can.
+        /// </para>
+        /// <para>
+        /// Three things hang off it, and they are the three that only make sense
+        /// for a rigid body - one shared pace, mutual transparency while
+        /// planning, and a shape kept under a march order. Standing on station
+        /// against an enemy does NOT: that is about where to stand relative to a
+        /// target, which is exactly what being ordered at one enemy together
+        /// means, so it asks for any bond at all [M154].
+        /// </para>
+        /// </remarks>
+        public bool MovesAsOneBody => Bond > 0;
+
         /// <summary>Where the unit stood when it last received an order.</summary>
         /// <remarks>Anchors pursuit, so an aggressive unit cannot be lured off the field.</remarks>
         public Vec2 OrderAnchor { get; private set; }

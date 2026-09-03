@@ -154,6 +154,22 @@ namespace BattleChess.Unity
         /// <summary>Ticks still to run of the turn that was set going, or nought while planning.</summary>
         private int _resolving;
 
+        /// <summary>Whether each turn should be ended again as soon as it runs out. [M163]</summary>
+        /// <remarks>
+        /// Debug only, and the designer's own words for why it exists: a single
+        /// turn does not show much, because it is so small. Sixty ticks of a
+        /// forty-one metre order is a regiment shuffling, and a fault that takes
+        /// four turns to appear cannot be watched four clicks at a time.
+        ///
+        /// Deliberately NOT folded into the End turn button. That button
+        /// resolves exactly one turn, and the reason is written above
+        /// <see cref="EndTheTurn"/>: both sides have to be resolving the same
+        /// window or a simultaneous turn cannot be reasoned about. Running on is
+        /// a second thing that happens to end turns, not a different meaning for
+        /// the first.
+        /// </remarks>
+        private bool _runningOn;
+
         /// <summary>One line per route the player can see, drawn until it is walked out.</summary>
         /// <remarks>
         /// A pool rather than one renderer. The single <c>_pathLine</c> showed
@@ -1113,16 +1129,39 @@ namespace BattleChess.Unity
         }
 
         /// <summary>
-        /// Marches the whole selection, keeping the shape it is already standing
-        /// in.
+        /// Marches the whole selection: bound wings as one body, everybody else
+        /// to wherever near the click they can get. [M164]
         /// </summary>
         /// <remarks>
-        /// Every regiment moves by the same displacement rather than to the same
-        /// point. Sending five regiments to one spot would have them arrive on
-        /// top of one another — and now that friends cannot occupy the same
-        /// ground, they would arrive jammed against each other instead. Moving
-        /// the formation as it stands is also simply what the player meant: a
-        /// line dragged fifty metres forward is still that line.
+        /// <para>
+        /// <b>Two rules, because the designer drew two.</b> A wing tied by hand
+        /// keeps the shape it stands in and puts its centre as near the click as
+        /// it can - a line dragged fifty metres forward is still that line. A
+        /// selection that was merely boxed does not: those regiments each
+        /// reserve a place round the click and go to it, nearest picking first.
+        /// </para>
+        /// <para>
+        /// <b>What the old rule cost, from the recording.</b> Everything was
+        /// translated rigidly, so a forty-one metre order handed seven spearmen
+        /// seven places nobody could stand on, and six of the seventeen came
+        /// back with routes like this one:
+        /// </para>
+        /// <code>
+        /// Move U6  could not walk, bend or shoulder its way there, so the
+        ///          search answered: by (913,1488) -> (913,1438), 50 m
+        /// </code>
+        /// <para>
+        /// U6 was sent to (937,5, 1462,5). It planned fifty metres to a place
+        /// thirty-five metres from that, in a different direction, and marched
+        /// it. Six regiments doing that at once is the mess the designer saw
+        /// drawn on the field.
+        /// </para>
+        /// <para>
+        /// <b>Wings first, then the loose.</b> The rigid thing is placed and the
+        /// flexible thing flows round it, never the other way about: a gathering
+        /// can always find more room further out, and a wing that has to give
+        /// way has only two frontages to give.
+        /// </para>
         /// </remarks>
         private void MarchSelection(Vec2 destination, Facing? bearing)
         {
@@ -1138,32 +1177,115 @@ namespace BattleChess.Unity
             foreach (UnitInstance unit in _selection) origin += unit.Position;
             origin /= _selection.Count;
 
-            // One line for the wing rather than one per regiment, and the
-            // regiments themselves go quiet — but the wing has to say something,
-            // or a group order is the one kind of order that leaves no trace in
-            // a recording at all. Which is unfortunate, because a wing walking
-            // into itself is the failure most worth catching and the hardest to
-            // reconstruct after the fact.
+            // The whole selection on one clock. A regiment's own plan is a few
+            // milliseconds and nobody would feel it; seventeen of them land
+            // inside a single frame, and that is what a stutter on a group order
+            // is.
+            var everybody = new List<UnitInstance>(_selection);
+            var wanted = new Vec2[everybody.Count];
+
+            // [M164]. Sorted into the wings that keep their shape and the loose
+            // regiments that do not. A everybody is a bond the player tied by hand;
+            // the negative bond a selection carries is bookkeeping and is not
+            // one, which is what UnitInstance.MovesAsOneBody says.
+            var wings = new List<List<int>>();
+            var whichWing = new Dictionary<int, int>();
+            var loose = new List<int>();
+
+            for (int i = 0; i < everybody.Count; i++)
+            {
+                UnitInstance unit = everybody[i];
+
+                if (!unit.MovesAsOneBody) { loose.Add(i); continue; }
+
+                if (!whichWing.TryGetValue(unit.Bond, out int w))
+                {
+                    w = wings.Count;
+                    whichWing[unit.Bond] = w;
+                    wings.Add(new List<int>());
+                }
+
+                wings[w].Add(i);
+            }
+
+            // Each bound wing gets its centre as near the click as it can, and
+            // then carries its own shape there unchanged.
+            var wingCentres = new Vec2[wings.Count];
+
+            if (wings.Count > 0)
+            {
+                var reach = new float[wings.Count];
+
+                for (int w = 0; w < wings.Count; w++)
+                {
+                    Vec2 middle = Vec2.Zero;
+                    foreach (int i in wings[w]) middle += everybody[i].Position;
+                    middle /= wings[w].Count;
+
+                    wingCentres[w] = middle;
+
+                    foreach (int i in wings[w])
+                    {
+                        reach[w] = Mathf.Max(reach[w],
+                            Vec2.Distance(middle, everybody[i].Position) + everybody[i].Footprint.BoundingRadius);
+                    }
+                }
+
+                Vec2[] aims = Gathering.PlaceBodiesAt(destination, wingCentres, reach);
+
+                for (int w = 0; w < wings.Count; w++)
+                    foreach (int i in wings[w])
+                        wanted[i] = aims[w] + (everybody[i].Position - wingCentres[w]);
+            }
+
+            // Everybody loose packs round the click afterwards, round whatever
+            // ground the wings have already spoken for.
+            if (loose.Count > 0)
+            {
+                var free = new List<UnitInstance>(loose.Count);
+                foreach (int i in loose) free.Add(everybody[i]);
+
+                List<OrientedRect> taken = null;
+
+                if (wings.Count > 0)
+                {
+                    taken = new List<OrientedRect>();
+
+                    foreach (List<int> bound in wings)
+                        foreach (int i in bound)
+                            taken.Add(new OrientedRect(
+                                wanted[i], bearing ?? everybody[i].Facing, everybody[i].Footprint));
+                }
+
+                Vec2[] packed = Gathering.GatherAt(_battle, free, destination, bearing, taken);
+
+                for (int k = 0; k < loose.Count; k++) wanted[loose[k]] = packed[k];
+            }
+
+            // One line for the order rather than one per regiment, and the
+            // regiments themselves go quiet — but it has to say something, or a
+            // group order is the one kind of order that leaves no trace in a
+            // recording at all. Which is unfortunate, because a selection
+            // walking into itself is the failure most worth catching and the
+            // hardest to reconstruct after the fact. It now also says WHICH of
+            // the two rules each part of the order was answered by, because with
+            // two of them a recording that did not would be unreadable.
             _console.Info("Group",
                 $"{_selection.Count} regiments ordered together from ({origin.X:0},{origin.Y:0}) to " +
                 $"({destination.X:0},{destination.Y:0}) — {Vec2.Distance(origin, destination):0} m, " +
-                $"keeping their shape" +
+                (wings.Count == 0
+                    ? "gathering on the click, nearest first"
+                    : loose.Count == 0
+                        ? $"{wings.Count} bound wing{(wings.Count == 1 ? string.Empty : "s")} keeping their shape"
+                        : $"{wings.Count} bound wing{(wings.Count == 1 ? string.Empty : "s")} keeping their shape, " +
+                          $"{loose.Count} gathering on the click") +
                 (bearing.HasValue ? $", to arrive facing {bearing.Value.Degrees:0}°." : "."));
-
-            // The whole wing on one clock. A regiment's own plan is a few
-            // milliseconds and nobody would feel it; a wing of them lands inside
-            // a single frame, and that is what a stutter on a group order is.
-            var wing = new List<UnitInstance>(_selection);
-            var wanted = new Vec2[wing.Count];
-
-            for (int i = 0; i < wing.Count; i++)
-                wanted[i] = destination + (wing[i].Position - origin);
 
             // [M152]. On the board the translation above is exact - every
             // regiment stands on a cell centre, so shifting them all by one
             // vector shifts them all by the same whole number of cells - right
             // up until a wanted cell is water or held by somebody outside the
-            // wing. Then that regiment is shoved aside, and because the wing is
+            // everybody. Then that regiment is shoved aside, and because the everybody is
             // planned in parallel against one snapshot the next regiment knows
             // nothing about it and can be shoved onto the same ground.
             //
@@ -1176,20 +1298,30 @@ namespace BattleChess.Unity
             // places can overlap by a metre and both planners will route to them
             // quite happily. WingFormation is the continuous twin: rigid, and
             // approximate exactly where being exact is impossible.
+            // [M164] On the board this pass is not optional even for a
+            // gathering: it is what puts every answer on a cell centre, and a
+            // place that is not a cell centre is not a place the board can send
+            // anybody to. Off the board a pure gathering skips it - Gathering
+            // has already booked every place against every other with a search
+            // that has no ceiling, and running WingFormation over the top of
+            // that could only make it worse, because its nudge stops at two
+            // frontages.
             Vec2[] formed = _options.GridMode
                 ? GridGame.Board.For(_battle).FormUpAt(
-                    _battle, wing, wanted, GridGame.GridMode.ShufflesWithinRings)
-                : WingFormation.FormUpAt(_battle, wing, wanted, bearing);
+                    _battle, everybody, wanted, GridGame.GridMode.ShufflesWithinRings, bearing)
+                : wings.Count > 0
+                    ? WingFormation.FormUpAt(_battle, everybody, wanted, bearing)
+                    : wanted;
 
             for (int i = 0; i < wanted.Length; i++) wanted[i] = formed[i];
 
             // Handed to a worker and applied when it lands. The clock is held
-            // meanwhile, so the field the wing is planned against is the field
+            // meanwhile, so the field the order is planned against is the field
             // the player clicked on and not one a tick has moved underneath it.
             WorkOutRoutes(
-                wing, wanted, bearing,
+                everybody, wanted, bearing,
                 quiet: true, asAWing: true,
-                status: $"{wing.Count} regiments marching, keeping their formation.");
+                status: $"{everybody.Count} regiments marching.");
         }
 
         /// <summary>
@@ -1661,8 +1793,17 @@ namespace BattleChess.Unity
             // turn is ended it would run every tick it had banked.
             if (_options.PlanThenFire && _resolving <= 0)
             {
-                _tickAccumulator = 0f;
-                return;
+                // [M163]. Unless the designer has asked for the clock to run on,
+                // in which case the turn that just ran out is ended again here
+                // and the accumulator is left alone - a turn boundary should not
+                // cost a fraction of a tick every sixty.
+                if (!_runningOn)
+                {
+                    _tickAccumulator = 0f;
+                    return;
+                }
+
+                EndTheTurn();
             }
 
             // A plan is out with a worker reading positions, shapes and the
@@ -2338,22 +2479,27 @@ namespace BattleChess.Unity
         private const int TransientBond = -1;
 
         /// <summary>
-        /// Makes the current selection manoeuvre as one body, and lets the last
+        /// Marks the current selection as ordered together, and lets the last
         /// one go.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Picking several regiments up is already a statement that you mean to
-        /// handle them together, so they behave like a wing for as long as you
-        /// hold them: same pace, keeping their shape. Pressing B is what makes
-        /// that survive letting go of them.
+        /// <b>[M164] This is no longer a wing.</b> It used to be: a selection
+        /// shared a pace and kept its shape, exactly as if it had been tied by
+        /// hand, and pressing B only made that survive letting go. The designer
+        /// took that back - bound armies move as one, normal armies just try to
+        /// get as close as they can - so the shape and the shared pace now
+        /// belong to <see cref="UnitInstance.MovesAsOneBody"/>, which a
+        /// transient bond deliberately fails.
         /// </para>
         /// <para>
-        /// It costs something and is worth saying plainly: a wing marches at
-        /// its slowest regiment, so boxing cavalry together with foot slows the
-        /// cavalry until the selection is dropped. That is what moving as one
-        /// body means, and it is why the binding is transient — let go and the
-        /// horse is quick again.
+        /// <b>What it is still for.</b> Standing on station against an enemy
+        /// [M154]. Five regiments each aiming at their own stand-off from one
+        /// target all end up in front of it on slightly different bearings, and
+        /// the line folds into a knot as it advances. That is a question about
+        /// where to stand relative to a target, which is precisely what being
+        /// ordered at one enemy together means - so it asks for any bond at all
+        /// rather than for a wing.
         /// </para>
         /// </remarks>
         private void HoldTogether(List<UnitInstance> units)
@@ -2369,8 +2515,7 @@ namespace BattleChess.Unity
             }
 
             int nowGrouped = 0;
-            float pace = float.MaxValue;
-            string slowest = string.Empty;
+            int bound = 0;
 
             if (units.Count >= 2)
             {
@@ -2378,33 +2523,29 @@ namespace BattleChess.Unity
                 {
                     // Never over a wing the player tied by hand — that one is
                     // theirs, and it already moves as one.
-                    if (unit.Bond != 0) continue;
+                    if (unit.Bond != 0) { if (unit.Bond > 0) bound++; continue; }
 
                     unit.Bond = TransientBond;
                     nowGrouped++;
-
-                    if (unit.BaseSpeed >= pace) continue;
-
-                    pace = unit.BaseSpeed;
-                    slowest = unit.Def.DisplayName;
                 }
             }
 
-            // Said because it is invisible and it costs something. Boxing horse
-            // together with foot silently slows the horse to the foot's pace for
-            // as long as the selection is held, and a player watching cavalry
-            // crawl has no way to know that a box drawn several orders ago is
-            // the reason.
-            if (nowGrouped >= 2)
+            // [M164] Says what a selection now costs, which is nothing. The line
+            // this replaced promised that they moved as one body at the pace of
+            // the slowest, and that is no longer what happens - a recording full
+            // of it would be a recording of a rule the game does not have.
+            if (nowGrouped >= 2 || bound >= 2)
             {
                 _console.Decision("Group",
-                    $"{nowGrouped} regiments picked out together — they move as one body at " +
-                    $"{pace:0.00} m/s, the pace of the {slowest}. Let go and they are on their own again.");
+                    $"{nowGrouped + bound} regiments picked out together — each keeps its own pace" +
+                    (bound >= 2
+                        ? $", and {bound} of them are bound into a wing that marches as one body."
+                        : ". A march order gathers them on the click, nearest first."));
             }
             else if (wasGrouped >= 2)
             {
                 _console.Decision("Group",
-                    $"{wasGrouped} regiments let go — each back to its own pace and its own orders.");
+                    $"{wasGrouped} regiments let go — each back to its own orders.");
             }
         }
 
@@ -3674,7 +3815,7 @@ namespace BattleChess.Unity
         /// </remarks>
         private void DrawEndTurn()
         {
-            if (!_options.PlanThenFire || _battle == null) return;
+            if (!_options.PlanThenFire || _battle == null || _clock == null) return;
 
             const float width = 280f;
             const float height = 46f;
@@ -3694,6 +3835,37 @@ namespace BattleChess.Unity
             if (GUI.Button(area, face)) EndTheTurn();
 
             GUI.enabled = true;
+
+            // [M163]. Its own button, left of the turn, and enabled while the
+            // turn resolves - it is the only control that has to be reachable
+            // mid-turn, because stopping is the half of it that matters.
+            var runOn = new Rect(area.x - 8f - 130f, area.y, 130f, height);
+
+            if (GUI.Button(runOn, _runningOn ? $"Stop (turn {_clock.Turn})" : "Run on"))
+            {
+                _runningOn = !_runningOn;
+
+                if (_runningOn)
+                {
+                    _console.Decision("Turn",
+                        "Running on - turns will end themselves until this is pressed again.",
+                        UnitId.None);
+
+                    if (_resolving <= 0) EndTheTurn();
+                }
+                else
+                {
+                    // Stopped where it stands rather than at the next boundary.
+                    // A fault being watched is on the screen NOW, and a stop
+                    // that ran another fifty ticks first would lose it.
+                    _resolving = 0;
+                    _tickAccumulator = 0f;
+
+                    _console.Decision("Turn",
+                        $"Stopped at turn {_clock.Turn}, tick {_clock.TickInTurn}.",
+                        UnitId.None);
+                }
+            }
 
             // A drawn order can be taken back until the turn is ended, and a
             // player needs to be told that without reading a manual.

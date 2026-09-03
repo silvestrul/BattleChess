@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using BattleChess.Contracts;
@@ -510,8 +510,17 @@ namespace BattleChess.Rules.Grid
         public float ReachInOneTurn(UnitInstance unit) => GridMode.CellsPerTurn(unit) * CellWidth;
 
         /// <summary>Whether two regiments are being handled as one body.</summary>
+        /// <remarks>
+        /// [M164] Bond above nought, so a hand-tied wing and not a selection.
+        /// Wing-mates are left out of the cells a mover must avoid because they
+        /// are all shifting by the same vector, and the ground one stands on is
+        /// ground the other is leaving. That is only true of a rigid
+        /// translation. A selection now packs round a click instead, so its
+        /// members go to different places, arrive at different times, and have
+        /// to route round each other like anybody else.
+        /// </remarks>
         public static bool InTheSameWing(UnitInstance a, UnitInstance b) =>
-            a.Bond != 0 && a.Bond == b.Bond;
+            a.MovesAsOneBody && a.Bond == b.Bond;
 
         /// <summary>
         /// Gives every regiment of a wing a cell of its own to march to, decided
@@ -541,7 +550,8 @@ namespace BattleChess.Rules.Grid
         /// </para>
         /// </remarks>
         public Vec2[] FormUpAt(
-            BattleState battle, IReadOnlyList<UnitInstance> wing, IReadOnlyList<Vec2> wanted, int searchRings)
+            BattleState battle, IReadOnlyList<UnitInstance> wing, IReadOnlyList<Vec2> wanted, int searchRings,
+            Facing? front = null)
         {
             if (battle == null) throw new ArgumentNullException(nameof(battle));
             if (wing == null) throw new ArgumentNullException(nameof(wing));
@@ -573,14 +583,23 @@ namespace BattleChess.Rules.Grid
             {
                 Coord asked = Of(wanted[i]);
 
-                if (!NearestFree(battle, wing[i], asked, taken, searchRings, out Coord given))
+                // [M164] On the front they will arrive on, where the order
+                // carries one. M155 says why in its own remarks and then does
+                // not do it here: where a body fits depends on which way it is
+                // turned, and a regiment marching somewhere arrives facing the
+                // way it was sent rather than the way it is standing now. An
+                // 80 x 40 m block checked broadside and stood on end is a
+                // different four cells.
+                Facing arriving = front ?? wing[i].Facing;
+
+                if (!NearestFree(battle, wing[i], asked, taken, searchRings, arriving, out Coord given))
                     given = asked;
 
                 // [M155] Book the whole body, so the next regiment of the wing
                 // is answered against ground this one really occupies. Booking
                 // one cell is how a line ended up standing through itself.
                 foreach (Coord cell in Occupancy.UnderIfItStood(
-                             Cells, wing[i], CentreOf(given), wing[i].Facing))
+                             Cells, wing[i], CentreOf(given), arriving))
                     taken[cell] = wing[i].Id;
 
                 places[i] = CentreOf(given);

@@ -469,7 +469,12 @@ namespace BattleChess.Rules
         public float PaceOfBond(UnitInstance unit)
         {
             if (unit == null) throw new ArgumentNullException(nameof(unit));
-            if (unit.Bond == 0) return SpeedOf(unit);
+            // [M164] A hand-tied wing only. A plain selection used to pool its
+            // pace too, which meant a box drawn several orders ago silently
+            // crawled cavalry at the foot's speed with nothing on screen saying
+            // why. Waiting for the ford is what moving as one body costs, and it
+            // should only be paid by a body that moves as one.
+            if (!unit.MovesAsOneBody) return SpeedOf(unit);
 
             float slowest = float.MaxValue;
 
