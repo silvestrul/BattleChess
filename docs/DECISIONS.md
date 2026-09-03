@@ -4706,3 +4706,116 @@ Two things worth measuring later: whether a gathering of forty packs in
 reasonable time on the board, where every answer must also land on a cell centre;
 and whether `WingStation` keeping the wider bond is right once a selection can
 contain both a wing and loose regiments attacking the same target.
+
+---
+
+## M165 - Nearest first, but from the side you are standing on
+
+The designer, on the first play-test of [M164]: *"i think it still doe, units do
+too many movements and ddestination selcetio ncould do better"*, over a
+screenshot of three Spearmen with routes that curl and hook.
+
+### What the recording said
+
+`logs/battle-20260903-144857.log`, tick 2092. Three Spearmen in a column at
+x 1437,5, a hundred metres apart, all facing west, ordered together to
+(1240, 1642) - a 197 m order:
+
+```
+U25 at y 1737,5  ->  (1287,5, 1662,5)   168 m
+U26 at y 1637,5  ->  (1237,5, 1637,5)   200 m
+U27 at y 1537,5  ->  (1187,5, 1662,5)   280 m
+```
+
+U27 stands at the **south** end of the column and was sent to the
+**north-west** slot. So:
+
+```
+2092 > Move U27  is pushing through its own Spearmen - no way round it and no
+                 gap to thread.. by (1438,1538) -> (1188,1663).
+                 2 of its own on that line.
+2092 > Path U27  took a fine grid route (4 waypoints over 30 cells settled,
+                 390 cells held by bodies) - the lattice was not asked.
+2092 > Path U27  had a grid route that bent too far, so the pose search was
+                 asked for a second opinion and its route was taken instead.
+```
+
+Eighty metres of extra march, a press-through, and a route out of the pose
+search with bends in it - all of it downstream of one decision, and none of it a
+pathfinding fault. **The places were right. The order they were handed out in
+was not.**
+
+### The cause
+
+[M164] offered candidate places on a golden-angle spiral, whose great virtue is
+even coverage and whose vice is that the angles come out in an order nobody is
+walking in. Nearest-first decided *who chose*; nothing decided *which of the
+equally near places they chose*.
+
+### The rule
+
+**A ring is exhausted before the next one is opened, and within a ring the
+places nearest the bearing you are standing on are offered first.** Nearest-first
+is untouched - which is the rule the designer picked - and where the regiment
+comes from only ever breaks a tie between places the same distance out. It never
+buys a further one.
+
+One `Outward` now serves both the regiments of a gathering and the centres of
+several bound wings, because a whole column crossing a whole column is the
+expensive version of the same mistake.
+
+### The reproduction
+
+`GatheringTests.AColumnGatheringKeepsItsOrderRatherThanCrossingItself`, red
+first:
+
+| | y 550 (north) | y 500 | y 450 (south) | longest march |
+|---|---|---|---|---|
+| spiral | 512,1 | 502,4 | **513,8** | 3,54 frontages |
+| rings | 515,4 | 502,4 | 483,8 | 3,17 frontages |
+| *recorded* | | | *crossed* | *3,50 frontages* |
+
+The southern regiment in the northernmost slot, which is U27 exactly, and a
+longest march within 1% of the recorded ratio.
+
+**Measured in frontages, not metres.** The play-tested regiments are 80 x 40 m
+because that battle raises them at a strength the test field does not, which
+gives 40 x 20 - `UnitTypes.FootprintFor` sizes a regiment from its strength.
+A reproduction pinned to absolute metres would quietly have been a looser
+arrangement than the one that broke, and would have passed without the fix.
+
+### Still open: a straight line called clear and then pressed through
+
+The same recording, same tick, same regiment, same two points:
+
+```
+2092   Move U26  is walking straight there - by (1438,1638) -> (1238,1638),
+                 200 m clear, 126 s.
+2092 > Move U26  is pushing through its own Spearmen - no way round it and no
+                 gap to thread.. by (1438,1638) -> (1238,1638).
+                 1 of its own on that line.
+```
+
+Rung 1 says the line is clear; rung 3 says one of its own is on it. Working the
+geometry by hand finds nothing that touches: U26 is 80 m across facing west, so
+it sweeps y 1597,5 to 1677,5, and its nearest neighbours U25 and U27 begin at
+1697,5 and end at 1577,5 - twenty metres of daylight either side, and
+`Sweep.Touches` carries no margin. Nothing else on the field is within the swept
+rectangle at all.
+
+Not diagnosed, and deliberately not guessed at. Worth its own pass, because a
+regiment that presses through nobody is a press-through that should not be
+happening, and the bent routes come out of the same rung.
+
+**Eighteen of the recording's fifty-six orders pressed through**, so it is not
+rare. `WhatItWillWalkThrough` now names the first body it met, how far that body
+stands from the line, and how far off it is, because a count alone could not say
+which of the two rungs was wrong or whether the body it meant was even near. One
+recording should settle it.
+
+**The bends themselves are downstream of this, not a separate fault.** The second
+opinion is taken only when the pose route is found, walks cleanly, does not press
+through, and is not dearer than `WayRoundCostCeiling` times the ladder's answer -
+so the gate is doing its job. What put a curl on the screen was being asked at
+all, and it was asked because the ladder pressed through. Fix the press and the
+curl does not arise.

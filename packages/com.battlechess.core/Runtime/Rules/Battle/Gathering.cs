@@ -46,12 +46,28 @@ namespace BattleChess.Rules
 
         /// <summary>Places tried before a regiment is sent where it was pointed to fail there.</summary>
         /// <remarks>
+        /// <para>
         /// Generous, because unlike a wing's nudge this search has no natural
         /// ceiling - the fortieth regiment of a gathering genuinely does belong a
-        /// long way out. At the sampling below that reaches about eleven
-        /// frontages from the click, which holds well over a hundred regiments.
+        /// long way out.
+        /// </para>
+        /// <para>
+        /// <b>The arithmetic, because [M165] changed the growth law and it is
+        /// no longer obvious.</b> Ring r sits at r quarter-frontages and holds
+        /// about 2*pi*r places, so N looks reach ring sqrt(N/pi) - a thousand
+        /// looks is ring 18, or four and a half frontages. Forty regiments need
+        /// a disc of about 1,8 frontages' radius before anything is even in the
+        /// way, so this leaves room for the ground to be awkward as well as
+        /// crowded. The spiral this replaced grew as the square root of the look
+        /// and so reached much further on the same budget while sampling much
+        /// more thinly - the same number is a different distance now.
+        /// </para>
+        /// <para>
+        /// Only the worst case pays it. A regiment that finds room stops at the
+        /// look that found it, which is usually within the first ring or two.
+        /// </para>
         /// </remarks>
-        public const int LooksBeforeGivingUp = 512;
+        public const int LooksBeforeGivingUp = 1024;
 
         /// <summary>
         /// A place apiece, packed outward from <paramref name="at"/>, nearest
@@ -192,26 +208,12 @@ namespace BattleChess.Rules
                 // of the map and would read as a wing teleporting.
                 given[i] = at;
 
-                // The nearest body gets the click itself, always. Everything
-                // after it is searched outward from there.
-                float step = radii[i] * 0.5f;
-
-                // Outward towards where this body already stands, before
-                // anywhere else. Two columns either side of a click should end
-                // up either side of it; a spiral starting at an arbitrary angle
-                // would as happily send the right-hand one across the front of
-                // the left, which is a whole column crossing a whole column.
-                float home = MathF.Atan2(centres[i].Y - at.Y, centres[i].X - at.X);
-
-                for (int look = 0; look <= LooksBeforeGivingUp; look++)
+                // The same order a regiment of a gathering is offered places in,
+                // and for the same reason: two columns either side of a click
+                // should end up either side of it, and a whole column crossing a
+                // whole column is the expensive version of the mistake.
+                foreach (Vec2 place in Outward(at, centres[i], radii[i] * 0.5f, LooksBeforeGivingUp))
                 {
-                    float turn = home + (look - 1) * 2.39996323f;
-                    float reach = step * MathF.Sqrt(look);
-
-                    Vec2 place = look == 0
-                        ? at
-                        : new Vec2(at.X + MathF.Cos(turn) * reach, at.Y + MathF.Sin(turn) * reach);
-
                     bool clear = true;
 
                     for (int j = 0; j < placed.Count && clear; j++)
@@ -253,6 +255,73 @@ namespace BattleChess.Rules
         }
 
         /// <summary>
+        /// Places round <paramref name="at"/>, offered nearest ring first and,
+        /// within a ring, nearest to the side the body is coming from. [M165]
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Ring-major is the whole point.</b> A ring is exhausted before the
+        /// next one is opened, so this is still strictly nearest-first - which is
+        /// the rule the designer chose. Where it comes from only ever breaks a
+        /// tie between places the same distance out, and never buys a further
+        /// one.
+        /// </para>
+        /// <para>
+        /// <b>Why the tie-break has to exist.</b> The spiral this replaced
+        /// offered angles in golden-angle order, which is even but arbitrary,
+        /// and it put the southern regiment of a column in the northern slot:
+        /// </para>
+        /// <code>
+        /// U25 at y 1737,5  ->  y 1662,5   168 m
+        /// U26 at y 1637,5  ->  y 1637,5   200 m
+        /// U27 at y 1537,5  ->  y 1662,5   280 m, 2 of its own on that line
+        /// </code>
+        /// <para>
+        /// U27 started at the south end and was sent to the north-west slot, so
+        /// it had to cross both its neighbours to get there - which cost it
+        /// eighty metres of extra march, a press-through, and a route out of the
+        /// pose search with bends in it. Nothing about the packing was wrong;
+        /// it just handed out the places in an order nobody was walking in.
+        /// </para>
+        /// <para>
+        /// Angles are offered alternately either side of the home bearing, so a
+        /// ring is walked outward from where the body is rather than round from
+        /// an arbitrary zero.
+        /// </para>
+        /// </remarks>
+        private static IEnumerable<Vec2> Outward(Vec2 at, Vec2 from, float step, int mostLooks)
+        {
+            yield return at;
+
+            Vec2 back = from - at;
+
+            float home = back.IsNearZero ? 0f : MathF.Atan2(back.Y, back.X);
+
+            int looks = 1;
+
+            for (int ring = 1; looks < mostLooks; ring++)
+            {
+                float radius = ring * step;
+
+                // As many places round this ring as will hold one apiece at the
+                // sampling step, so density stays even as the rings widen.
+                int places = Math.Max(1, (int)MathF.Round(2f * MathF.PI * radius / step));
+
+                float apart = 2f * MathF.PI / places;
+
+                for (int k = 0; k < places && looks < mostLooks; k++, looks++)
+                {
+                    // 0, -1, +1, -2, +2 ... away from the home bearing.
+                    float turn = home + (k % 2 == 0 ? 1 : -1) * ((k + 1) / 2) * apart;
+
+                    yield return new Vec2(
+                        at.X + MathF.Cos(turn) * radius,
+                        at.Y + MathF.Sin(turn) * radius);
+                }
+            }
+        }
+
+        /// <summary>
         /// The regiment's block with a little air round it, so two answers that
         /// merely touch are not called a clash.
         /// </summary>
@@ -266,19 +335,10 @@ namespace BattleChess.Rules
         /// body can stand in, searched outward in rings.
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// A golden-angle spiral whose radius grows as the square root of the
-        /// look. That is the arrangement with constant density per unit area, so
-        /// looks are not wasted crowding the middle, and the ring reached at look
-        /// N is the ring that holds N places - which is what makes "nearest
-        /// first" mean what it says.
-        /// </para>
-        /// <para>
         /// The step is a quarter of the regiment's own frontage, sampling a place
         /// about every 300 m2 for an 80x40 m block. Fine enough not to step over
         /// a gap that would have held it; coarse enough that a gathering of forty
         /// is a few thousand rectangle tests rather than a few hundred thousand.
-        /// </para>
         /// </remarks>
         private static Vec2 NearestFreePlace(
             BattleState battle, UnitInstance unit, Vec2 at, Facing front,
@@ -288,15 +348,8 @@ namespace BattleChess.Rules
 
             float step = unit.Footprint.Width * 0.25f;
 
-            for (int look = 0; look <= LooksBeforeGivingUp; look++)
+            foreach (Vec2 place in Outward(at, unit.Position, step, LooksBeforeGivingUp))
             {
-                float turn = look * 2.39996323f;
-                float reach = step * MathF.Sqrt(look);
-
-                Vec2 place = look == 0
-                    ? at
-                    : new Vec2(at.X + MathF.Cos(turn) * reach, at.Y + MathF.Sin(turn) * reach);
-
                 var here = new OrientedRect(place, front, grown);
 
                 if (Clear(battle, unit, here, standing, booked)) return place;

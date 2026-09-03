@@ -1584,6 +1584,7 @@ namespace BattleChess.Rules
 
             int met = 0;
             string lapped = string.Empty;
+            string named = string.Empty;
 
             foreach (UnitInstance other in battle.UnitsOnField())
             {
@@ -1595,10 +1596,29 @@ namespace BattleChess.Rules
                     lapped = $" It sets off already standing in {other.Def.DisplayName}, " +
                              $"{overlap:0.00} of a body deep.";
 
-                if (Sweep.Touches(body, travel, other.Shape)) met++;
+                if (!Sweep.Touches(body, travel, other.Shape)) continue;
+
+                met++;
+
+                // [M165] Named, and how far off the line it stands. A recording
+                // had this rung say "1 of its own on that line" about a leg the
+                // rung ABOVE it had just called two hundred metres clear, and
+                // with only a count there was no way to tell which of the two
+                // was wrong - or whether the body it meant was even near. A
+                // press-through is the one decision that must never be
+                // unarguable after the fact.
+                if (named.Length != 0) continue;
+
+                float aside = Vec2.Distance(
+                    other.Position, body.Centre + travel * Math.Clamp(
+                        Vec2.Dot(other.Position - body.Centre, travel) / travel.LengthSquared, 0f, 1f));
+
+                named = $" First is {other.Def.DisplayName} #{other.Id}, " +
+                        $"{aside:0} m from the line, " +
+                        $"{Vec2.Distance(unit.Position, other.Position):0} m off.";
             }
 
-            return $" {met} of its own on that line.{lapped}";
+            return $" {met} of its own on that line.{named}{lapped}";
         }
 
 
